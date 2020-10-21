@@ -1,0 +1,33 @@
+databases:
+  - prefix: "/Users/cnicolaou"
+    type: "local"
+    directory: ./local-database/home
+  - prefix: "/Users/cnicolaou/Dropbox (Personal)"
+    type: "local"
+    directory: ./local-database/dropbox
+  - prefix: "/Users/cnicolaou/Dropbox (Personal)/github.com/cloudengio/idu"
+    type: "local"
+    directory: ./local-database/idu
+  - prefix: "/Users/cnicolaou/Dropbox (Personal)/github.com/cloudengio/idu/a"
+    type: "local"
+    directory: ./local-database/a
+  - prefix: "/Users/cnicolaou/Dropbox (Personal)/github.com/cloudengio/idu/a/b"
+    type: "local"
+    directory: ./local-database/a/b
+  - prefix: "/usr/local"
+    type: "local"
+    directory: ./local-database/usr-local
+  - prefix: "/tmp"
+    type: "local"
+    directory: ./local-database/tmp
+layouts:
+  - type: "block"
+    prefix: "/"
+    block_size: 4096
+  - type: "block"
+    prefix: "/labs/asbhatt"
+    block_size: 4096
+exclusions:
+  - prefix: "/Users/cnicolaou"
+    regexps:
+      - ".DS_Store$"
