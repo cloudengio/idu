@@ -94,13 +94,14 @@ func (pt *progressTracker) display(ctx context.Context) {
 		if since := time.Since(lastReport); since > pt.interval {
 			last := atomic.SwapInt64(&pt.lastFiles, atomic.LoadInt64(&pt.numFiles))
 			rate := float64(pt.numFiles-last) / since.Seconds()
-			ifmt.Printf("% 8v prefixes, % 8v files, % 8v reused, % 6v errors, % 8.2f stats/second  % 8v  %s",
+			ifmt.Printf("% 8v prefixes, % 8v files, % 8v reused, % 6v errors, % 9.2f stats/second  % 8v, (%s)  %s",
 				atomic.LoadInt64(&pt.numPrefixes),
 				atomic.LoadInt64(&pt.numFiles),
 				atomic.LoadInt64(&pt.numReused),
 				atomic.LoadInt64(&pt.numErrors),
 				rate,
 				time.Since(pt.start).Truncate(time.Second),
+				time.Now().Format("15:04:05"),
 				cr)
 			lastReport = time.Now()
 		}

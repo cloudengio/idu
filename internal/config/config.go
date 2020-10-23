@@ -24,6 +24,7 @@ import (
 // the specified prefix.
 type Layout struct {
 	Prefix     string
+	Separator  string
 	Calculator diskusage.Calculator
 }
 
@@ -70,13 +71,17 @@ func (cfg *Config) DatabaseFor(prefix string) (Database, bool) {
 
 var identityCalculator = diskusage.NewIdentity()
 
-func (cfg *Config) CalculatorFor(prefix string) diskusage.Calculator {
+func (cfg *Config) LayoutFor(prefix string) Layout {
 	for _, l := range cfg.Layouts {
 		if strings.HasPrefix(prefix, l.Prefix) {
-			return l.Calculator
+			return l
 		}
 	}
-	return identityCalculator
+	return Layout{
+		Prefix:     prefix,
+		Separator:  "/",
+		Calculator: identityCalculator,
+	}
 }
 
 func (cfg *Config) ExclusionsFor(prefix string) (Exclusions, bool) {
@@ -111,7 +116,7 @@ func ReadConfig(filename string) (*Config, error) {
 	}
 	if len(cfg.Layouts) == 0 {
 		cfg.Layouts = []Layout{
-			{"", diskusage.NewSimple(4096)},
+			{Prefix: "", Separator: "/", Calculator: diskusage.NewSimple(4096)},
 		}
 		fmt.Printf("warning: config %v does not contain a layout. assuming a simple layout with 4K block size\n", filename)
 	}
@@ -143,7 +148,15 @@ func ParseConfig(buf []byte) (*Config, error) {
 	}
 	cfg.Layouts = make([]Layout, len(ymlcfg.Layouts))
 	for i, l := range ymlcfg.Layouts {
-		cfg.Layouts[i] = Layout{os.ExpandEnv(l.Spec.Prefix), l.instance}
+		sep := "/"
+		if len(l.Spec.Separator) > 0 {
+			sep = l.Spec.Separator
+		}
+		cfg.Layouts[i] = Layout{
+			Prefix:     os.ExpandEnv(l.Spec.Prefix),
+			Separator:  sep,
+			Calculator: l.instance,
+		}
 	}
 
 	cfg.Databases = make([]Database, len(ymlcfg.Databases))

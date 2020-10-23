@@ -99,6 +99,8 @@ $ idu analyze /projects/yourshared-project
 $ idu errors /projects/yourshared-project
 $ idu summary /projects/yourshared-project
 $ idu lsr /projects/yourshared-project/a/b/c
+$ idu find --prefix=testdata /projects/yourshared-project/a/b/c
+$ idu find --file='/.*\.tar$' /projects/yourshared-project/a/b/c
 ```
 
 As `idu` runs it will print various statistics that follow its progress. `idu`
@@ -118,9 +120,20 @@ Statistics can also be generated dynamically from portions of the database
 via the `lsr` command. It traverses the database and recomputes the statistics
 for that portion only and can be used to drill into some subset of the files.
 
+The `find` subcommand is intended for quickly finding directories/prefixes and files
+that match a specific pattern or belong to a user or group. It prints an unsorted
+list of names. The first example returns all prefixes that contain the `testdata`
+anywhere in them (e.g. `/footestdata/a/b` will be returned as will `/a/testdata`);
+use regular expression anchors (eg. `$`) and path separators to restrict the
+search as required (e.g. `--prefix='/testdata$'` to find all trailing directories).
+The `--file` regular expression is applied only the filename portion of.
+
+Unlike the UNIX `find` command, `idu find` produces no output if a pattern is not specified. It is also differs in that `idu find` will match prefixes agains the
+entire path, so patterns of the form `--prefix=/foo/bar` will match
+`/a/foo/bar/baz`.
+
 Note that the `lsr` command accepts options to restrict its output and statistics
-calculations to files that match a regexp pattern (`--match`) or to a specific
-user (`--user`).
+calculations to files for a specific user (`--user`).
 
 ## Common Pitfalls
 

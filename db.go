@@ -41,10 +41,10 @@ func refreshStats(ctx context.Context, values interface{}, args []string) error 
 	printer := message.NewPrinter(language.English)
 	for sc.Scan(ctx) {
 		prefix, info := sc.PrefixInfo()
-		calculator := globalConfig.CalculatorFor(prefix)
+		layout := globalConfig.LayoutFor(prefix)
 		info.DiskUsage = 0
 		for _, file := range info.Files {
-			info.DiskUsage += calculator.Calculate(file.Size)
+			info.DiskUsage += layout.Calculator.Calculate(file.Size)
 		}
 		if err := db.Set(ctx, prefix, info); err != nil {
 			return fmt.Errorf("failed to set: %v", prefix)
