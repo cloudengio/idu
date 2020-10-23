@@ -59,33 +59,3 @@ func refreshStats(ctx context.Context, values interface{}, args []string) error 
 	}
 	return globalDatabaseManager.Close(ctx)
 }
-
-/*
-func refreshUsers(ctx context.Context, values interface{}, args []string) error {
-	db, err := globalDatabaseManager.DatabaseFor(ctx, args[0])
-	if err != nil {
-		return err
-	}
-	uniqueUsers := map[string]bool{}
-	sc := db.NewScanner("", 0, filewalk.ScanLimit(500))
-	i := 0
-	for sc.Scan(ctx) {
-		_, info := sc.PrefixInfo()
-		uniqueUsers[info.UserID] = true
-		if i%1000 == 0 && i != 0 {
-			printer.Printf("processed: % 15v\r", i)
-		}
-		i++
-	}
-	if sc.Err() != nil {
-		return sc.Err()
-	}
-	// Load all user stats in order to refresh them.
-	for usr := range uniqueUsers {
-		debug(ctx, 1, "loading userid: % 10v\n", usr)
-		db.Total(ctx, filewalk.TotalFileCount, filewalk.UserID(usr))
-	}
-	debug(ctx, 1, "closing database")
-	return globalDatabaseManager.Close(ctx)
-}
-*/

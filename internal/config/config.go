@@ -24,7 +24,10 @@ import (
 // the specified prefix.
 type Layout struct {
 	Prefix     string
+<<<<<<< HEAD
 	Separator  string
+=======
+>>>>>>> main
 	Calculator diskusage.Calculator
 }
 
@@ -71,6 +74,7 @@ func (cfg *Config) DatabaseFor(prefix string) (Database, bool) {
 
 var identityCalculator = diskusage.NewIdentity()
 
+<<<<<<< HEAD
 func (cfg *Config) LayoutFor(prefix string) Layout {
 	for _, l := range cfg.Layouts {
 		if strings.HasPrefix(prefix, l.Prefix) {
@@ -82,6 +86,15 @@ func (cfg *Config) LayoutFor(prefix string) Layout {
 		Separator:  "/",
 		Calculator: identityCalculator,
 	}
+=======
+func (cfg *Config) CalculatorFor(prefix string) diskusage.Calculator {
+	for _, l := range cfg.Layouts {
+		if strings.HasPrefix(prefix, l.Prefix) {
+			return l.Calculator
+		}
+	}
+	return identityCalculator
+>>>>>>> main
 }
 
 func (cfg *Config) ExclusionsFor(prefix string) (Exclusions, bool) {
@@ -94,7 +107,11 @@ func (cfg *Config) ExclusionsFor(prefix string) (Exclusions, bool) {
 }
 
 type exclusions struct {
+<<<<<<< HEAD
 	Prefix  string   `yaml:"prefix" cmd:"prefix that these exclusions apply to"`
+=======
+	Prefix  string   `yaml:"prefix", cmd:"prefix that these exclusions apply to"`
+>>>>>>> main
 	Regexps []string `yaml:"regexps" cmd:"prefixes and files matching these regular expressions will be ignored when building a datagase"`
 }
 
