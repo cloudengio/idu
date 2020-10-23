@@ -89,7 +89,7 @@ func (cfg *Config) ExclusionsFor(prefix string) (Exclusions, bool) {
 }
 
 type exclusions struct {
-	Prefix  string   `yaml:"prefix", cmd:"prefix that these exclusions apply to"`
+	Prefix  string   `yaml:"prefix" cmd:"prefix that these exclusions apply to"`
 	Regexps []string `yaml:"regexps" cmd:"prefixes and files matching these regular expressions will be ignored when building a datagase"`
 }
 

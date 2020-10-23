@@ -10,7 +10,6 @@ import (
 	"os"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"cloudeng.io/algo/container/heap"
@@ -30,8 +29,6 @@ type lsFlags struct {
 	User       string `subcmd:"user,,show information for this user only"`
 	Match      string `subcmd:"match,,a regular expression to match against"`
 }
-
-var outputLock sync.Mutex
 
 func lsTree(ctx context.Context, pt *progressTracker, db filewalk.Database, root, user string, matchRE *regexp.Regexp, flags *lsFlags) (files, children, disk *heap.KeyedInt64, nerrors int64, err error) {
 	files, children, disk = heap.NewKeyedInt64(heap.Descending), heap.NewKeyedInt64(heap.Descending), heap.NewKeyedInt64(heap.Descending)
@@ -99,7 +96,6 @@ func lsr(ctx context.Context, values interface{}, args []string) error {
 		files, children, disk *heap.KeyedInt64
 		errors                int64
 		db                    filewalk.Database
-		err                   error
 	}
 
 	ctx, cancel := context.WithCancel(ctx)

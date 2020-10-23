@@ -47,7 +47,7 @@ func refreshStats(ctx context.Context, values interface{}, args []string) error 
 			info.DiskUsage += calculator.Calculate(file.Size)
 		}
 		if err := db.Set(ctx, prefix, info); err != nil {
-			return fmt.Errorf("failed to set: %v\n", prefix)
+			return fmt.Errorf("failed to set: %v", prefix)
 		}
 		if i%1000 == 0 && i != 0 {
 			printer.Printf("processed: % 15v\r", i)
@@ -60,7 +60,7 @@ func refreshStats(ctx context.Context, values interface{}, args []string) error 
 	return globalDatabaseManager.Close(ctx)
 }
 
-// delete this.
+/*
 func refreshUsers(ctx context.Context, values interface{}, args []string) error {
 	db, err := globalDatabaseManager.DatabaseFor(ctx, args[0])
 	if err != nil {
@@ -88,3 +88,4 @@ func refreshUsers(ctx context.Context, values interface{}, args []string) error 
 	debug(ctx, 1, "closing database")
 	return globalDatabaseManager.Close(ctx)
 }
+*/

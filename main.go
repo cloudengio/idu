@@ -74,14 +74,11 @@ func init() {
 	refreshStatsCmd := subcmd.NewCommand("refresh-stats", refreshStatsFlagSet, refreshStats, subcmd.ExactlyNumArguments(1))
 	refreshStatsCmd.Document("refresh statistics by recalculating them over the entire database")
 
-	//	refreshUsersFlagSet := subcmd.NewFlagSet()
-	////	refreshUsersCmd := subcmd.NewCommand("refresh-users", refreshUsersFlagSet, refreshUsers, subcmd.ExactlyNumArguments(1))
-
 	errorsFlagSet := subcmd.NewFlagSet()
 	errorsCmd := subcmd.NewCommand("errors", errorsFlagSet, listErrors, subcmd.ExactlyNumArguments(1))
 	errorsCmd.Document("list the contents of the errors database")
 
-	cmdSet = subcmd.NewCommandSet(analyzeCmd, configCmd, eraseCmd, errorsCmd, lsrCmd, queryCmd, summaryCmd, userSummaryCmd, groupSummaryCmd, refreshStatsCmd) //, refreshUsersCmd)
+	cmdSet = subcmd.NewCommandSet(analyzeCmd, configCmd, eraseCmd, errorsCmd, lsrCmd, queryCmd, summaryCmd, userSummaryCmd, groupSummaryCmd, refreshStatsCmd)
 	cmdSet.Document(`idu: analyze file systems to create a database of per-file and aggregate size stastistics to support incremental updates and subsequent interrogation. Local and cloud based filesystems are contemplated. See https://github.com/cloudengio/blob/master/idu/README.md for full details.`)
 
 	globals := subcmd.GlobalFlagSet()

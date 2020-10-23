@@ -96,7 +96,7 @@ func (sc *scanState) prefixFn(ctx context.Context, prefix string, info *filewalk
 	ok, err := globalDatabaseManager.Get(ctx, prefix, &existing)
 	if err == nil && ok {
 		if existing.ModTime == info.ModTime &&
-			filewalk.FileMode(existing.Mode) == info.Mode {
+			existing.Mode == info.Mode {
 			unchanged = true
 		}
 	}

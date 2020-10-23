@@ -81,7 +81,6 @@ func (pt *progressTracker) display(ctx context.Context) {
 		cr = "\n"
 	}
 	lastReport := time.Now()
-
 	for {
 		select {
 		case update := <-pt.ch:
@@ -94,7 +93,7 @@ func (pt *progressTracker) display(ctx context.Context) {
 		}
 		if since := time.Since(lastReport); since > pt.interval {
 			last := atomic.SwapInt64(&pt.lastFiles, atomic.LoadInt64(&pt.numFiles))
-			rate := float64(pt.numFiles-last) / float64(since.Seconds())
+			rate := float64(pt.numFiles-last) / since.Seconds()
 			ifmt.Printf("% 8v prefixes, % 8v files, % 8v reused, % 6v errors, % 8.2f stats/second  % 8v  %s",
 				atomic.LoadInt64(&pt.numPrefixes),
 				atomic.LoadInt64(&pt.numFiles),

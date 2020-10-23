@@ -156,7 +156,7 @@ func reportForUserOrGroup(dir, name string) (io.Writer, func() error, error) {
 	if err != nil {
 		return os.Stdout, func() error { return nil }, err
 	}
-	return f, func() error { return f.Close() }, nil
+	return f, f.Close, nil
 }
 
 func userSummary(ctx context.Context, values interface{}, args []string) error {

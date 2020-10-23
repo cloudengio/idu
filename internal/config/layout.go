@@ -13,7 +13,7 @@ import (
 type layoutSpec struct {
 	Type   string      `yaml:"type" cmd:"type of this layout"`
 	Prefix string      `yaml:"prefix" cmd:"prefix that this layout applies to"`
-	config interface{} `yaml:"custom fields" cmd:"layout specific configuration fields"`
+	config interface{} `yaml:"custom fields" cmd:"layout specific configuration fields"` //nolint:structcheck
 }
 
 type layout struct {
@@ -30,11 +30,6 @@ var supportedLayouts = map[string]layoutConfig{
 	"block":    {&simple{}, newSimpleLayout},
 	"identity": {&identity{}, newIdentity},
 	"raid0":    {&raid0{}, newRaid0},
-}
-
-type layoutInstance struct {
-	prefix   string
-	instance diskusage.Calculator
 }
 
 func (l *layout) UnmarshalYAML(unmarshal func(interface{}) error) error {
