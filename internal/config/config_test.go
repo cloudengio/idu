@@ -20,10 +20,10 @@ databases:
     type: local
     directory: ./db-local
 layouts:
-  - type: simple
+  - type: block
     prefix: "/"
     block_size: 4096
-  - type: "simple"
+  - type: "block"
     prefix: "/labs/asbhatt"
     block_size: 4096
   - type: "raid0"

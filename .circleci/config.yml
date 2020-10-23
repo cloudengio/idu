@@ -7,12 +7,7 @@ jobs:
       - run:
           name: test
           command: |
-            for dir in $(find * -maxdepth 0 -type d); do
-              pushd "${dir}"
-              go get -t -d ./...
-              go test -failfast --covermode=atomic -race ./...
-              popd
-            done
+            go test -failfast --covermode=atomic -race ./...
 
   lint:
     docker:
@@ -28,12 +23,8 @@ jobs:
       - run:
           name: lint
           command: |
-            for dir in $(find * -maxdepth 0 -type d ); do
-              pushd "${dir}"
-              golangci-lint run ./...
-              validjson ./...
-              popd
-            done
+            golangci-lint run ./...
+            validjson ./...
 
 version: 2.1
 workflows:

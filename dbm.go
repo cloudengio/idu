@@ -70,7 +70,6 @@ func (dbm *databaseManager) Close(ctx context.Context) error {
 }
 
 type userManager struct {
-	sync.Mutex
 	idmanager *userid.IDManager
 }
 
@@ -79,9 +78,7 @@ var globalUserManager = userManager{
 }
 
 func (um *userManager) nameForUID(uid string) string {
-	um.Lock()
-	defer um.Unlock()
-	info, err := um.idmanager.Lookup(uid)
+	info, err := um.idmanager.LookupUser(uid)
 	if err == nil {
 		return info.Username
 	}
@@ -89,13 +86,27 @@ func (um *userManager) nameForUID(uid string) string {
 }
 
 func (um *userManager) uidForName(name string) string {
-	um.Lock()
-	defer um.Unlock()
-	info, err := um.idmanager.Lookup(name)
+	info, err := um.idmanager.LookupUser(name)
 	if err == nil {
 		return info.UID
 	}
 	return name
+}
+
+func (um *userManager) gidForName(name string) string {
+	info, err := um.idmanager.LookupGroup(name)
+	if err == nil {
+		return info.GID
+	}
+	return name
+}
+
+func (um *userManager) nameForGID(gid string) string {
+	info, err := um.idmanager.LookupGroup(gid)
+	if err == nil {
+		return info.Groupname
+	}
+	return gid
 }
 
 func (um *userManager) nameForPrefix(ctx context.Context, db filewalk.Database, prefix string) string {

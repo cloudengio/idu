@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -142,13 +143,13 @@ func ParseConfig(buf []byte) (*Config, error) {
 	}
 	cfg.Layouts = make([]Layout, len(ymlcfg.Layouts))
 	for i, l := range ymlcfg.Layouts {
-		cfg.Layouts[i] = Layout{l.Spec.Prefix, l.instance}
+		cfg.Layouts[i] = Layout{os.ExpandEnv(l.Spec.Prefix), l.instance}
 	}
 
 	cfg.Databases = make([]Database, len(ymlcfg.Databases))
 	for i, db := range ymlcfg.Databases {
 		cfg.Databases[i] = Database{
-			Prefix:      db.Spec.Prefix,
+			Prefix:      os.ExpandEnv(db.Spec.Prefix),
 			Type:        db.Spec.Type,
 			Open:        db.open,
 			Description: db.description,
