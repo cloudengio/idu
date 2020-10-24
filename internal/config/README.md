@@ -45,17 +45,17 @@ ReadConfig will read a yaml config from the specified file.
 ### Methods
 
 ```go
-func (cfg *Config) CalculatorFor(prefix string) diskusage.Calculator
-```
-
-
-```go
 func (cfg *Config) DatabaseFor(prefix string) (Database, bool)
 ```
 
 
 ```go
 func (cfg *Config) ExclusionsFor(prefix string) (Exclusions, bool)
+```
+
+
+```go
+func (cfg *Config) LayoutFor(prefix string) Layout
 ```
 
 
@@ -106,6 +106,7 @@ prefix.
 ```go
 type Layout struct {
 	Prefix     string
+	Separator  string
 	Calculator diskusage.Calculator
 }
 ```

@@ -14,7 +14,7 @@
 //  erase-database - erase the file statistics database
 //          errors - list the contents of the errors database
 //             lsr - list the contents of the database
-//           query - query the file statistics database
+//            find - find prefixes/files in statistics database
 //         summary - summarize file count and disk usage
 //            user - summarize file count and disk usage on a per user basis
 //           group - summarize file count and disk usage on a per group basis
