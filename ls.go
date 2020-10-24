@@ -8,9 +8,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"cloudeng.io/algo/container/heap"
@@ -28,12 +26,9 @@ type lsFlags struct {
 	ShowFiles  bool   `subcmd:"files,false,show information on individual files"`
 	ShowErrors bool   `subcmd:"errors,false,show information on individual errors"`
 	User       string `subcmd:"user,,show information for this user only"`
-	Match      string `subcmd:"match,,a regular expression to match against"`
 }
 
-var outputLock sync.Mutex
-
-func lsTree(ctx context.Context, pt *progressTracker, db filewalk.Database, root, user string, matchRE *regexp.Regexp, flags *lsFlags) (files, children, disk *heap.KeyedInt64, nerrors int64, err error) {
+func lsTree(ctx context.Context, pt *progressTracker, db filewalk.Database, root, user string, flags *lsFlags) (files, children, disk *heap.KeyedInt64, nerrors int64, err error) {
 	files, children, disk = heap.NewKeyedInt64(heap.Descending), heap.NewKeyedInt64(heap.Descending), heap.NewKeyedInt64(heap.Descending)
 	if flags.ShowDirs {
 		fmt.Printf("     disk usage :  # files : # dirs : directory/prefix\n")
@@ -44,9 +39,6 @@ func lsTree(ctx context.Context, pt *progressTracker, db filewalk.Database, root
 		if len(user) > 0 && pi.UserID != user {
 			continue
 		}
-		if matchRE != nil && !matchRE.MatchString(prefix) {
-			continue
-		}
 		if err := pi.Err; len(err) > 0 {
 			nerrors++
 			if flags.ShowErrors {
@@ -55,7 +47,6 @@ func lsTree(ctx context.Context, pt *progressTracker, db filewalk.Database, root
 			pt.send(ctx, progressUpdate{prefix: 1, errors: 1})
 			continue
 		}
-
 		files.Update(prefix, int64(len(pi.Files)))
 		children.Update(prefix, int64(len(pi.Children)))
 		disk.Update(prefix, pi.DiskUsage)
@@ -99,7 +90,6 @@ func lsr(ctx context.Context, values interface{}, args []string) error {
 		files, children, disk *heap.KeyedInt64
 		errors                int64
 		db                    filewalk.Database
-		err                   error
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -109,14 +99,6 @@ func lsr(ctx context.Context, values interface{}, args []string) error {
 	key := ""
 	if usr := flagValues.User; len(usr) > 0 {
 		key = globalUserManager.uidForName(usr)
-	}
-	var matchRE *regexp.Regexp
-	if re := flagValues.Match; len(re) > 0 {
-		r, err := regexp.Compile(re)
-		if err != nil {
-			return fmt.Errorf("failed to compile match regexp: %v: %v", re, err)
-		}
-		matchRE = r
 	}
 
 	pt := newProgressTracker(ctx, time.Second)
@@ -136,7 +118,6 @@ func lsr(ctx context.Context, values interface{}, args []string) error {
 				db,
 				root,
 				key,
-				matchRE,
 				flagValues,
 			)
 			resultsCh <- results{

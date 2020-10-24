@@ -43,7 +43,7 @@ func (sc *scanState) fileFn(ctx context.Context, prefix string, info *filewalk.I
 		Mode:    info.Mode,
 		Size:    info.Size,
 	}
-	calculator := globalConfig.CalculatorFor(prefix)
+	layout := globalConfig.LayoutFor(prefix)
 	debug(ctx, 1, "prefix: %v\n", prefix)
 	nerrors := 0
 	for results := range ch {
@@ -60,7 +60,7 @@ func (sc *scanState) fileFn(ctx context.Context, prefix string, info *filewalk.I
 		debug(ctx, 2, "prefix: %v # files: %v # children: %v\n", prefix, len(results.Files), len(results.Children))
 		for _, file := range results.Files {
 			debug(ctx, 3, "prefix/file: %v/%v\n", prefix, file.Name)
-			pi.DiskUsage += calculator.Calculate(file.Size)
+			pi.DiskUsage += layout.Calculator.Calculate(file.Size)
 			pi.Files = append(pi.Files, file)
 		}
 		pi.Children = append(pi.Children, results.Children...)
@@ -96,7 +96,7 @@ func (sc *scanState) prefixFn(ctx context.Context, prefix string, info *filewalk
 	ok, err := globalDatabaseManager.Get(ctx, prefix, &existing)
 	if err == nil && ok {
 		if existing.ModTime == info.ModTime &&
-			filewalk.FileMode(existing.Mode) == info.Mode {
+			existing.Mode == info.Mode {
 			unchanged = true
 		}
 	}

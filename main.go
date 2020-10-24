@@ -41,7 +41,7 @@ func init() {
 	summaryFlagSet := subcmd.MustRegisterFlagStruct(&summaryFlags{}, nil, nil)
 	userFlagSet := subcmd.MustRegisterFlagStruct(&userFlags{}, nil, nil)
 	groupFlagSet := subcmd.MustRegisterFlagStruct(&groupFlags{}, nil, nil)
-	queryFlagSet := subcmd.MustRegisterFlagStruct(&queryFlags{}, nil, nil)
+	findFlagSet := subcmd.MustRegisterFlagStruct(&findFlags{}, nil, nil)
 	lsFlagSet := subcmd.MustRegisterFlagStruct(&lsFlags{}, nil, nil)
 	eraseFlagSet := subcmd.MustRegisterFlagStruct(&eraseFlags{}, nil, nil)
 
@@ -57,8 +57,8 @@ func init() {
 	groupSummaryCmd := subcmd.NewCommand("group", groupFlagSet, groupSummary, subcmd.AtLeastNArguments(1))
 	groupSummaryCmd.Document("summarize file count and disk usage on a per group basis", "<prefix> <groups>...")
 
-	queryCmd := subcmd.NewCommand("query", queryFlagSet, query)
-	queryCmd.Document("query the file statistics database")
+	findCmd := subcmd.NewCommand("find", findFlagSet, find)
+	findCmd.Document("find prefixes/files in statistics database")
 
 	lsrCmd := subcmd.NewCommand("lsr", lsFlagSet, lsr, subcmd.AtLeastNArguments(1))
 	lsrCmd.Document("list the contents of the database")
@@ -74,14 +74,11 @@ func init() {
 	refreshStatsCmd := subcmd.NewCommand("refresh-stats", refreshStatsFlagSet, refreshStats, subcmd.ExactlyNumArguments(1))
 	refreshStatsCmd.Document("refresh statistics by recalculating them over the entire database")
 
-	//	refreshUsersFlagSet := subcmd.NewFlagSet()
-	////	refreshUsersCmd := subcmd.NewCommand("refresh-users", refreshUsersFlagSet, refreshUsers, subcmd.ExactlyNumArguments(1))
-
 	errorsFlagSet := subcmd.NewFlagSet()
 	errorsCmd := subcmd.NewCommand("errors", errorsFlagSet, listErrors, subcmd.ExactlyNumArguments(1))
 	errorsCmd.Document("list the contents of the errors database")
 
-	cmdSet = subcmd.NewCommandSet(analyzeCmd, configCmd, eraseCmd, errorsCmd, lsrCmd, queryCmd, summaryCmd, userSummaryCmd, groupSummaryCmd, refreshStatsCmd) //, refreshUsersCmd)
+	cmdSet = subcmd.NewCommandSet(analyzeCmd, configCmd, eraseCmd, errorsCmd, lsrCmd, findCmd, summaryCmd, userSummaryCmd, groupSummaryCmd, refreshStatsCmd)
 	cmdSet.Document(`idu: analyze file systems to create a database of per-file and aggregate size stastistics to support incremental updates and subsequent interrogation. Local and cloud based filesystems are contemplated. See https://github.com/cloudengio/blob/master/idu/README.md for full details.`)
 
 	globals := subcmd.GlobalFlagSet()

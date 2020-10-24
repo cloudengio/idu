@@ -22,14 +22,14 @@ type summaryFlags struct {
 }
 
 type userFlags struct {
-	TopN       int    `subcmd:"top,10,show the top prefixes by file count and disk usage"`
+	TopN       int    `subcmd:"top,20,show the top prefixes by file count and disk usage"`
 	ListUsers  bool   `subcmd:"list-users,false,list available users"`
 	AllUsers   bool   `subcmd:"all-users,false,summarize usage for all users"`
 	WriteFiles string `subcmd:"reports-dir,,write per-user statistics to the specified directory"`
 }
 
 type groupFlags struct {
-	TopN       int    `subcmd:"top,10,show the top prefixes by file count and disk usage"`
+	TopN       int    `subcmd:"top,20,show the top prefixes by file count and disk usage"`
 	ListGroups bool   `subcmd:"list-groups,false,list available groups"`
 	AllGroups  bool   `subcmd:"all-groups,false,summarize usage for all groups"`
 	WriteFiles string `subcmd:"reports-dir,,write per-group statistics to the specified directory"`
@@ -156,7 +156,7 @@ func reportForUserOrGroup(dir, name string) (io.Writer, func() error, error) {
 	if err != nil {
 		return os.Stdout, func() error { return nil }, err
 	}
-	return f, func() error { return f.Close() }, nil
+	return f, f.Close, nil
 }
 
 func userSummary(ctx context.Context, values interface{}, args []string) error {
