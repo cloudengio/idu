@@ -94,17 +94,17 @@ func (um *userManager) uidForName(name string) string {
 }
 
 func (um *userManager) gidForName(name string) string {
-	info, err := um.idmanager.LookupGroup(name)
+	grp, err := um.idmanager.LookupGroup(name)
 	if err == nil {
-		return info.GID
+		return grp.Gid
 	}
 	return name
 }
 
 func (um *userManager) nameForGID(gid string) string {
-	info, err := um.idmanager.LookupGroup(gid)
+	grp, err := um.idmanager.LookupGroup(gid)
 	if err == nil {
-		return info.Groupname
+		return grp.Name
 	}
 	return gid
 }
