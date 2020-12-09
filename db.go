@@ -47,7 +47,7 @@ func refreshStats(ctx context.Context, values interface{}, args []string) error 
 			info.DiskUsage += layout.Calculator.Calculate(file.Size)
 		}
 		if err := db.Set(ctx, prefix, info); err != nil {
-			return fmt.Errorf("failed to set: %v", prefix)
+			return fmt.Errorf("failed to set: %v: %v", prefix, err)
 		}
 		if i%1000 == 0 && i != 0 {
 			printer.Printf("processed: % 15v\r", i)

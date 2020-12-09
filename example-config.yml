@@ -1,5 +1,5 @@
 databases:
-  - prefix: "/Users/cnicolaou"
+  - prefix: "/home/cosn"
     type: "local"
     directory: ./local-database/home
   - prefix: "/Users/cnicolaou/Dropbox (Personal)"
@@ -18,6 +18,7 @@ layouts:
   - type: "block"
     prefix: "/"
     block_size: 4096
+    separator: "/"
   - type: "block"
     prefix: "/labs/asbhatt"
     block_size: 4096
