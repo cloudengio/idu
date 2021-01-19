@@ -45,6 +45,8 @@ func init() {
 	lsFlagSet := subcmd.MustRegisterFlagStruct(&lsFlags{}, nil, nil)
 	eraseFlagSet := subcmd.MustRegisterFlagStruct(&eraseFlags{}, nil, nil)
 
+	dbStatsFlagSet := subcmd.MustRegisterFlagStruct(&dbStatsFlags{}, nil, nil)
+
 	analyzeCmd := subcmd.NewCommand("analyze", analyzeFlagSet, analyze)
 	analyzeCmd.Document("analyze the file system to build a database of file counts, disk usage etc", "<directory/prefix>+")
 
@@ -66,6 +68,9 @@ func init() {
 	eraseCmd := subcmd.NewCommand("erase-database", eraseFlagSet, erase, subcmd.ExactlyNumArguments(1))
 	eraseCmd.Document("erase the file statistics database")
 
+	dbStatsCmd := subcmd.NewCommand("database-stats", dbStatsFlagSet, dbStats, subcmd.ExactlyNumArguments(1))
+	dbStatsCmd.Document("display database stastistics")
+
 	configFlagSet := subcmd.MustRegisterFlagStruct(&configFlags{}, nil, nil)
 	configCmd := subcmd.NewCommand("config", configFlagSet, configManager, subcmd.WithoutArguments())
 	configCmd.Document("describe the current configuration")
@@ -78,7 +83,7 @@ func init() {
 	errorsCmd := subcmd.NewCommand("errors", errorsFlagSet, listErrors, subcmd.ExactlyNumArguments(1))
 	errorsCmd.Document("list the contents of the errors database")
 
-	cmdSet = subcmd.NewCommandSet(analyzeCmd, configCmd, eraseCmd, errorsCmd, lsrCmd, findCmd, summaryCmd, userSummaryCmd, groupSummaryCmd, refreshStatsCmd)
+	cmdSet = subcmd.NewCommandSet(analyzeCmd, configCmd, eraseCmd, errorsCmd, lsrCmd, findCmd, summaryCmd, userSummaryCmd, groupSummaryCmd, refreshStatsCmd, dbStatsCmd)
 	cmdSet.Document(`idu: analyze file systems to create a database of per-file and aggregate size stastistics to support incremental updates and subsequent interrogation. Local and cloud based filesystems are contemplated. See https://github.com/cloudengio/blob/master/idu/README.md for full details.`)
 
 	globals := subcmd.GlobalFlagSet()

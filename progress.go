@@ -15,17 +15,19 @@ import (
 )
 
 type progressUpdate struct {
-	prefix int
-	files  int
-	errors int
-	reused int
+	prefix    int
+	files     int
+	deletions int
+	errors    int
+	reused    int
 }
 
 type progressTracker struct {
-	ch                                                     chan progressUpdate
-	numPrefixes, numFiles, lastFiles, numReused, numErrors int64
-	interval                                               time.Duration
-	start                                                  time.Time
+	ch                                 chan progressUpdate
+	numPrefixes, numFiles, numReused   int64
+	numDeletions, numErrors, lastFiles int64
+	interval                           time.Duration
+	start                              time.Time
 }
 
 func newProgressTracker(ctx context.Context, interval time.Duration) *progressTracker {
@@ -58,11 +60,12 @@ func (pt *progressTracker) send(ctx context.Context, u progressUpdate) {
 func (pt *progressTracker) summary() {
 	ifmt := message.NewPrinter(language.English)
 	ifmt.Printf("\n")
-	ifmt.Printf("prefixes : % 15v\n", atomic.LoadInt64(&pt.numPrefixes))
-	ifmt.Printf("   files : % 15v\n", atomic.LoadInt64(&pt.numFiles))
-	ifmt.Printf("  reused : % 15v\n", atomic.LoadInt64(&pt.numReused))
-	ifmt.Printf("  errors : % 15v\n", atomic.LoadInt64(&pt.numErrors))
-	ifmt.Printf("run time : % 15v\n", time.Since(pt.start))
+	ifmt.Printf("        prefixes : % 15v\n", atomic.LoadInt64(&pt.numPrefixes))
+	ifmt.Printf("           files : % 15v\n", atomic.LoadInt64(&pt.numFiles))
+	ifmt.Printf("prefix deletions : % 15v\n", atomic.LoadInt64(&pt.numDeletions))
+	ifmt.Printf("          reused : % 15v\n", atomic.LoadInt64(&pt.numReused))
+	ifmt.Printf("          errors : % 15v\n", atomic.LoadInt64(&pt.numErrors))
+	ifmt.Printf("        run time : % 15v\n", time.Since(pt.start))
 }
 
 func isInteractive() bool {
@@ -86,6 +89,7 @@ func (pt *progressTracker) display(ctx context.Context) {
 		case update := <-pt.ch:
 			atomic.AddInt64(&pt.numPrefixes, int64(update.prefix))
 			atomic.AddInt64(&pt.numFiles, int64(update.files))
+			atomic.AddInt64(&pt.numDeletions, int64(update.deletions))
 			atomic.AddInt64(&pt.numReused, int64(update.reused))
 			atomic.AddInt64(&pt.numErrors, int64(update.errors))
 		case <-ctx.Done():

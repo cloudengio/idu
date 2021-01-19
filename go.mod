@@ -13,3 +13,6 @@ require (
 	golang.org/x/text v0.3.3
 	gopkg.in/yaml.v2 v2.3.0
 )
+
+replace cloudeng.io/file => /Users/cnicolaou/Dropbox/github.com/cloudengio/go.pkgs/file
+replace cloudeng.io/algo => /Users/cnicolaou/Dropbox/github.com/cloudengio/go.pkgs/algo

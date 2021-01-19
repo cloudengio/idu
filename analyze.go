@@ -8,8 +8,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
+	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/cmd/idu/internal/exclusions"
 	"cloudeng.io/cmdutil"
 	"cloudeng.io/errors"
@@ -65,13 +67,53 @@ func (sc *scanState) fileFn(ctx context.Context, prefix string, info *filewalk.I
 		}
 		pi.Children = append(pi.Children, results.Children...)
 	}
+	deletions, err := handleDeletedChildren(ctx, layout, prefix, pi.Children)
+	if err != nil {
+		debug(ctx, 1, "deletion error: %v: %v\n", prefix, err)
+		pi.Err = fmt.Sprintf("deletion: %v", err)
+	}
 	if err := globalDatabaseManager.Set(ctx, prefix, &pi); err != nil {
 		return nil, err
 	}
 	if sc.pt != nil {
-		sc.pt.send(ctx, progressUpdate{prefix: 1, errors: nerrors, files: len(pi.Files)})
+		sc.pt.send(ctx, progressUpdate{prefix: 1, deletions: deletions, errors: nerrors, files: len(pi.Files)})
 	}
 	return pi.Children, nil
+}
+
+func findMissing(prefix string, previous, current []filewalk.Info) []string {
+	cm := make(map[string]struct{}, len(previous))
+	for _, cur := range current {
+		cm[cur.Name] = struct{}{}
+	}
+	var deleted []string
+	for _, prev := range previous {
+		if _, ok := cm[prev.Name]; !ok {
+			deleted = append(deleted, prefix+prev.Name)
+		}
+	}
+	return deleted
+}
+
+func handleDeletedChildren(ctx context.Context, layout config.Layout, prefix string, children []filewalk.Info) (int, error) {
+	var existing filewalk.PrefixInfo
+	ok, err := globalDatabaseManager.Get(ctx, prefix, &existing)
+	if !ok || err != nil {
+		return 0, err
+	}
+	if !strings.HasSuffix(prefix, layout.Separator) {
+		prefix += layout.Separator
+	}
+	deletedChildren := findMissing(prefix, existing.Children, children)
+	var deleted int
+	if len(deletedChildren) > 0 {
+		debug(ctx, 1, "deleting (recursively): %v\n", strings.Join(deletedChildren, ", "))
+		deleted, err = globalDatabaseManager.Delete(ctx, layout.Separator, prefix, deletedChildren)
+		if err != nil {
+			fmt.Printf("deletion error: %v %v\n", err)
+		}
+	}
+	return deleted, err
 }
 
 func (sc *scanState) prefixFn(ctx context.Context, prefix string, info *filewalk.Info, err error) (bool, []filewalk.Info, error) {
@@ -131,7 +173,6 @@ func analyze(ctx context.Context, values interface{}, args []string) error {
 		pt:          pt,
 		incremental: flagValues.Incremental,
 	}
-
 	walker := filewalk.New(sc.fs, filewalk.Concurrency(flagValues.Concurrency))
 	errs := errors.M{}
 	errs.Append(walker.Walk(ctx, sc.prefixFn, sc.fileFn, args...))

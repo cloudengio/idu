@@ -24,14 +24,14 @@ type summaryFlags struct {
 type userFlags struct {
 	TopN       int    `subcmd:"top,20,show the top prefixes by file count and disk usage"`
 	ListUsers  bool   `subcmd:"list-users,false,list available users"`
-	AllUsers   bool   `subcmd:"all-users,false,summarize usage for all users"`
+	AllUsers   bool   `subcmd:"all-users,true,summarize usage for all users"`
 	WriteFiles string `subcmd:"reports-dir,,write per-user statistics to the specified directory"`
 }
 
 type groupFlags struct {
 	TopN       int    `subcmd:"top,20,show the top prefixes by file count and disk usage"`
 	ListGroups bool   `subcmd:"list-groups,false,list available groups"`
-	AllGroups  bool   `subcmd:"all-groups,false,summarize usage for all groups"`
+	AllGroups  bool   `subcmd:"all-groups,true,summarize usage for all groups"`
 	WriteFiles string `subcmd:"reports-dir,,write per-group statistics to the specified directory"`
 }
 

@@ -13,6 +13,8 @@ import (
 	"golang.org/x/text/message"
 )
 
+type dbStatsFlags struct{}
+
 type eraseFlags struct {
 	ReallyDelete bool `subcmd:"really,false,must be set to erase the database"`
 }
@@ -47,7 +49,7 @@ func refreshStats(ctx context.Context, values interface{}, args []string) error 
 			info.DiskUsage += layout.Calculator.Calculate(file.Size)
 		}
 		if err := db.Set(ctx, prefix, info); err != nil {
-			return fmt.Errorf("failed to set: %v", prefix)
+			return fmt.Errorf("failed to set: %v: %v", prefix, err)
 		}
 		if i%1000 == 0 && i != 0 {
 			printer.Printf("processed: % 15v\r", i)
@@ -58,4 +60,25 @@ func refreshStats(ctx context.Context, values interface{}, args []string) error 
 		return sc.Err()
 	}
 	return globalDatabaseManager.Close(ctx)
+}
+
+func dbStats(ctx context.Context, values interface{}, args []string) error {
+	db, err := globalDatabaseManager.DatabaseFor(ctx, args[0], filewalk.ReadOnly())
+	if err != nil {
+		return err
+	}
+	stats, err := db.Stats()
+	if err != nil {
+		return err
+	}
+	for i, s := range stats {
+		fmt.Printf("       Name: %v\n", s.Name)
+		fmt.Printf("Description: %v\n", s.Description)
+		fmt.Printf("  # Entries: % 10v\n", s.NumEntries)
+		fmt.Printf("       Size: % 10v\n", s.Size)
+		if i < len(stats)-1 {
+			fmt.Printf("\n")
+		}
+	}
+	return nil
 }

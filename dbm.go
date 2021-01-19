@@ -58,6 +58,14 @@ func (dbm *databaseManager) Get(ctx context.Context, prefix string, info *filewa
 	return db.Get(ctx, prefix, info)
 }
 
+func (dbm *databaseManager) Delete(ctx context.Context, separator, prefix string, prefixes []string, opts ...filewalk.DatabaseOption) (int, error) {
+	db, err := dbm.DatabaseFor(ctx, prefix, opts...)
+	if err != nil {
+		return 0, err
+	}
+	return db.Delete(ctx, separator, prefixes, true)
+}
+
 func (dbm *databaseManager) Close(ctx context.Context) error {
 	dbm.Lock()
 	defer dbm.Unlock()
