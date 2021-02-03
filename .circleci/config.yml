@@ -1,3 +1,4 @@
+jobs:
   test:
     docker:
       - image: cimg/go:1.15
