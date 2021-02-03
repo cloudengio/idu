@@ -8,6 +8,9 @@ databases:
   - prefix: "/Users/cnicolaou/Dropbox (Personal)/github.com/cloudengio/idu"
     type: "local"
     directory: ./local-database/idu
+  - prefix: "/Users/cnicolaou/Dropbox/github.com/cloudengio/idu"
+    type: "local"
+    directory: ./local-database/idu
   - prefix: "/usr/local"
     type: "local"
     directory: ./local-database/usr-local

@@ -33,7 +33,7 @@ func lsTree(ctx context.Context, pt *progressTracker, db filewalk.Database, root
 	if flags.ShowDirs {
 		fmt.Printf("     disk usage :  # files : # dirs : directory/prefix\n")
 	}
-	sc := db.NewScanner(root, flags.Limit, filewalk.ScanLimit(1000))
+	sc := db.NewScanner(root, flags.Limit, filewalk.ScanLimit(10000))
 	for sc.Scan(ctx) {
 		prefix, pi := sc.PrefixInfo()
 		if len(user) > 0 && pi.UserID != user {
@@ -44,7 +44,9 @@ func lsTree(ctx context.Context, pt *progressTracker, db filewalk.Database, root
 			if flags.ShowErrors {
 				fmt.Printf("%s: %s\n", prefix, pi.Err)
 			}
-			pt.send(ctx, progressUpdate{prefix: 1, errors: 1})
+			if !flags.ShowDirs && !flags.ShowFiles {
+				pt.send(ctx, progressUpdate{prefixStart: 1, prefixDone: 1, errors: 1})
+			}
 			continue
 		}
 		files.Update(prefix, int64(len(pi.Files)))
@@ -52,14 +54,19 @@ func lsTree(ctx context.Context, pt *progressTracker, db filewalk.Database, root
 		disk.Update(prefix, pi.DiskUsage)
 		if flags.ShowDirs || flags.ShowFiles {
 			fmt.Printf("% 15v : % 8v : % 6v : %s\n", fsize(pi.DiskUsage), len(pi.Files), len(pi.Children), prefix)
+			if flags.ShowDirs {
+				for _, fi := range pi.Children {
+					fmt.Printf("    % 15v : % 40v: % 10v : %v\n", fsize(fi.Size), fi.ModTime, globalUserManager.nameForUID(fi.UserID), fi.Name)
+				}
+			}
 			if flags.ShowFiles {
 				for _, fi := range pi.Files {
 					fmt.Printf("    % 15v : % 40v: % 10v : %v\n", fsize(fi.Size), fi.ModTime, globalUserManager.nameForUID(fi.UserID), fi.Name)
 				}
 			}
-		} else {
-			pt.send(ctx, progressUpdate{prefix: 1, files: len(pi.Files)})
+			continue
 		}
+		pt.send(ctx, progressUpdate{prefixStart: 1, prefixDone: 1, files: len(pi.Files)})
 	}
 	err = sc.Err()
 	return
@@ -101,7 +108,10 @@ func lsr(ctx context.Context, values interface{}, args []string) error {
 		key = globalUserManager.uidForName(usr)
 	}
 
-	pt := newProgressTracker(ctx, time.Second)
+	var pt *progressTracker
+	if !flagValues.ShowFiles && !flagValues.ShowDirs {
+		pt = newProgressTracker(ctx, time.Second)
+	}
 	listers := &errgroup.T{}
 	listers = errgroup.WithConcurrency(listers, len(args))
 	resultsCh := make(chan results)
@@ -143,7 +153,6 @@ func lsr(ctx context.Context, values interface{}, args []string) error {
 			continue
 		}
 		files, children, disk, nErrors := result.files, result.children, result.disk, result.errors
-		db := result.db
 		heading := fmt.Sprintf("\n\nResults for %v", result.root)
 		fmt.Println(heading)
 		fmt.Println(strings.Repeat("=", len(heading)))
@@ -153,9 +162,9 @@ func lsr(ctx context.Context, values interface{}, args []string) error {
 			topNMetrics(children.TopN(flagValues.TopN)),
 			topNMetrics(disk.TopN(flagValues.TopN))
 
-		printSummaryStats(ctx, os.Stdout, db, nFiles, nChildren, nBytes, nErrors, flagValues.TopN, topFiles, topChildren, topBytes)
+		printSummaryStats(ctx, os.Stdout, nFiles, nChildren, nBytes, nErrors, flagValues.TopN, topFiles, topChildren, topBytes)
 	}
-	errs.Append(globalDatabaseManager.Close(ctx))
+	errs.Append(globalDatabaseManager.CloseAll(ctx))
 	return errs.Err()
 }
 
@@ -171,6 +180,6 @@ func listErrors(ctx context.Context, values interface{}, args []string) error {
 	}
 	errs := errors.M{}
 	errs.Append(sc.Err())
-	errs.Append(globalDatabaseManager.Close(ctx))
+	errs.Append(globalDatabaseManager.CloseAll(ctx))
 	return errs.Err()
 }

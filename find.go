@@ -7,14 +7,18 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"time"
 
+	"cloudeng.io/algo/container/heap"
 	"cloudeng.io/cmdutil/flags"
 	"cloudeng.io/errors"
 	"cloudeng.io/file/filewalk"
 	"cloudeng.io/sync/errgroup"
+	"golang.org/x/text/language"
+	"golang.org/x/text/message"
 )
 
 type findFlags struct {
@@ -22,6 +26,9 @@ type findFlags struct {
 	Group       string          `subcmd:"group,,restrict output to the specified group"`
 	PrefixMatch flags.Repeating `subcmd:"prefix,,a regular expression to match against prefix/directory names against"`
 	FileMatch   flags.Repeating `subcmd:"file,,a regular expression to match against filenames against"`
+	ShowSizes   bool            `subcmd:"sizes,true,'show usage, number of files, children etc'"`
+	Sort        bool            `subcmd:"sort,false,'sort found files by diskusage, file and child count'"`
+	TopN        int             `subcmd:"top,100,'show the top prefixes by file/prefix counts and disk usage'"`
 }
 
 type finder struct {
@@ -33,9 +40,10 @@ type finder struct {
 }
 
 type results struct {
-	prefix     string
-	sep        string
-	prefixInfo filewalk.PrefixInfo
+	prefix            string
+	sep               string
+	prefixInfo        filewalk.PrefixInfo
+	nFiles, nChildren int
 }
 
 func match(regexps []*regexp.Regexp, value string) bool {
@@ -48,7 +56,7 @@ func match(regexps []*regexp.Regexp, value string) bool {
 }
 
 func (fr *finder) find(ctx context.Context, resultsCh chan results, root string) error {
-	sc := fr.db.NewScanner(root, 0, filewalk.ScanLimit(1000))
+	sc := fr.db.NewScanner(root, 0, filewalk.ScanLimit(100000))
 	user, group := fr.user, fr.group
 	prefixRE, fileRE := fr.prefixRE, fr.fileRE
 	for sc.Scan(ctx) {
@@ -60,6 +68,8 @@ func (fr *finder) find(ctx context.Context, resultsCh chan results, root string)
 			prefix:     prefix,
 			sep:        fr.sep,
 			prefixInfo: found,
+			nFiles:     len(pi.Files),
+			nChildren:  len(pi.Children),
 		}
 		if len(user) > 0 && pi.UserID == user {
 			resultsCh <- result
@@ -154,16 +164,45 @@ func find(ctx context.Context, values interface{}, args []string) error {
 		close(resultsCh)
 	}()
 
+	files, children, disk := heap.NewKeyedInt64(heap.Descending), heap.NewKeyedInt64(heap.Descending), heap.NewKeyedInt64(heap.Descending)
+	ifmt := message.NewPrinter(language.English)
 	for result := range resultsCh {
-		if len(result.prefixInfo.Files) == 0 {
-			fmt.Printf("%v\n", result.prefix)
+		pi := result.prefixInfo
+		if flagValues.Sort {
+			files.Update(result.prefix, int64(result.nFiles))
+			children.Update(result.prefix, int64(result.nChildren))
+			disk.Update(result.prefix, pi.DiskUsage)
+			continue
+		}
+		ifmt.Printf("%v", result.prefix)
+		if flagValues.ShowSizes {
+			ifmt.Printf(" %v", fsize(pi.DiskUsage))
+			if result.nChildren > 0 || result.nFiles > 0 {
+				ifmt.Printf(" (children/files):  (%v/%v)",
+					result.nChildren, result.nFiles)
+			}
+		}
+		ifmt.Printf("\n")
+		if len(pi.Files) == 0 {
 			continue
 		}
 		prefix := strings.TrimSuffix(result.prefix, result.sep)
-		for _, fi := range result.prefixInfo.Files {
-			fmt.Printf("%v%s%v\n", prefix, result.sep, fi.Name)
+		for _, fi := range pi.Files {
+			if flagValues.ShowSizes {
+				ifmt.Printf("%v%s%v: %v\n", prefix, result.sep, fi.Name, fsize(pi.Size))
+			} else {
+				ifmt.Printf("%v%s%v\n", prefix, result.sep, fi.Name)
+			}
 		}
 	}
-	errs.Append(globalDatabaseManager.Close(ctx))
+	errs.Append(globalDatabaseManager.CloseAll(ctx))
+	if flagValues.Sort {
+		nFiles, nChildren, nBytes := files.Sum(), children.Sum(), disk.Sum()
+		topFiles, topChildren, topBytes := topNMetrics(files.TopN(flagValues.TopN)),
+			topNMetrics(children.TopN(flagValues.TopN)),
+			topNMetrics(disk.TopN(flagValues.TopN))
+
+		printSummaryStats(ctx, os.Stdout, nFiles, nChildren, nBytes, 0, flagValues.TopN, topFiles, topChildren, topBytes)
+	}
 	return errs.Err()
 }

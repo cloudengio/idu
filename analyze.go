@@ -6,10 +6,13 @@ package main
 
 import (
 	"context"
+	"expvar"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
+	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/cmd/idu/internal/exclusions"
 	"cloudeng.io/cmdutil"
 	"cloudeng.io/errors"
@@ -35,7 +38,18 @@ type scanState struct {
 	incremental bool
 }
 
+var activeMap = expvar.NewMap("analyzing")
+
+type stringer string
+
+func (s stringer) String() string {
+	return string(s)
+}
+
 func (sc *scanState) fileFn(ctx context.Context, prefix string, info *filewalk.Info, ch <-chan filewalk.Contents) ([]filewalk.Info, error) {
+	activeMap.Set(prefix, stringer(time.Now().Format(time.Stamp)))
+	defer activeMap.Delete(prefix)
+	sc.pt.send(ctx, progressUpdate{prefixStart: 1})
 	pi := filewalk.PrefixInfo{
 		ModTime: info.ModTime,
 		UserID:  info.UserID,
@@ -47,6 +61,11 @@ func (sc *scanState) fileFn(ctx context.Context, prefix string, info *filewalk.I
 	debug(ctx, 1, "prefix: %v\n", prefix)
 	nerrors := 0
 	for results := range ch {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
 		if err := results.Err; err != nil {
 			if sc.fs.IsPermissionError(err) {
 				debug(ctx, 1, "permission denied: %v\n", prefix)
@@ -65,13 +84,54 @@ func (sc *scanState) fileFn(ctx context.Context, prefix string, info *filewalk.I
 		}
 		pi.Children = append(pi.Children, results.Children...)
 	}
+	_, deletions, err := handleDeletedChildren(ctx, layout, prefix, pi.Children)
+	if err != nil {
+		debug(ctx, 1, "deletion error: %v: %v\n", prefix, err)
+		pi.Err = fmt.Sprintf("deletion: %v", err)
+	}
 	if err := globalDatabaseManager.Set(ctx, prefix, &pi); err != nil {
 		return nil, err
 	}
-	if sc.pt != nil {
-		sc.pt.send(ctx, progressUpdate{prefix: 1, errors: nerrors, files: len(pi.Files)})
-	}
+	sc.pt.send(ctx, progressUpdate{prefixDone: 1, deletions: deletions, errors: nerrors, files: len(pi.Files)})
 	return pi.Children, nil
+}
+
+func findMissing(prefix string, previous, current []filewalk.Info) (remaining []filewalk.Info, deleted []string) {
+	cm := make(map[string]struct{}, len(previous))
+	for _, cur := range current {
+		cm[cur.Name] = struct{}{}
+	}
+	for _, prev := range previous {
+		if _, ok := cm[prev.Name]; !ok {
+			deleted = append(deleted, prefix+prev.Name)
+		} else {
+			remaining = append(remaining, prev)
+		}
+	}
+	return
+}
+
+func handleDeletedChildren(ctx context.Context, layout config.Layout, prefix string, children []filewalk.Info) ([]filewalk.Info, int, error) {
+	var existing filewalk.PrefixInfo
+	ok, err := globalDatabaseManager.Get(ctx, prefix, &existing)
+	if !ok || err != nil {
+		return nil, 0, err
+	}
+	if !strings.HasSuffix(prefix, layout.Separator) {
+		prefix += layout.Separator
+	}
+	remaining, deletedChildren := findMissing(prefix, existing.Children, children)
+	var deleted int
+	if len(deletedChildren) > 0 {
+		debug(ctx, 1, "deleting (recursively): %v: %v\n", prefix, len(deletedChildren))
+		debug(ctx, 1, "deleting (recursively): %v\n", strings.Join(deletedChildren, ", "))
+		deleted, err = globalDatabaseManager.Delete(ctx, layout.Separator, prefix, deletedChildren)
+		debug(ctx, 1, "deleted (recursively): %v: remaining %v\n", deleted, len(remaining))
+		if err != nil {
+			fmt.Printf("deletion error: %v %v\n", prefix, err)
+		}
+	}
+	return remaining, deleted, err
 }
 
 func (sc *scanState) prefixFn(ctx context.Context, prefix string, info *filewalk.Info, err error) (bool, []filewalk.Info, error) {
@@ -101,9 +161,7 @@ func (sc *scanState) prefixFn(ctx context.Context, prefix string, info *filewalk
 		}
 	}
 	if unchanged {
-		if sc.pt != nil {
-			sc.pt.send(ctx, progressUpdate{reused: len(existing.Children)})
-		}
+		sc.pt.send(ctx, progressUpdate{reused: len(existing.Children)})
 		debug(ctx, 2, "unchanged: %v: #children: %v\n", prefix, len(existing.Children))
 		// safe to skip unchanged leaf directories.
 		return len(existing.Children) == 0, existing.Children, nil
@@ -131,11 +189,10 @@ func analyze(ctx context.Context, values interface{}, args []string) error {
 		pt:          pt,
 		incremental: flagValues.Incremental,
 	}
-
 	walker := filewalk.New(sc.fs, filewalk.Concurrency(flagValues.Concurrency))
 	errs := errors.M{}
 	errs.Append(walker.Walk(ctx, sc.prefixFn, sc.fileFn, args...))
-	errs.Append(globalDatabaseManager.Close(ctx))
+	errs.Append(globalDatabaseManager.CloseAll(ctx))
 	cancel()
 	return errs.Err()
 }

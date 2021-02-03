@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sync"
 
+	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/errors"
 	"cloudeng.io/file/filewalk"
 	"cloudeng.io/os/userid"
@@ -26,20 +27,25 @@ var globalDatabaseManager = databaseManager{
 func (dbm *databaseManager) DatabaseFor(ctx context.Context, prefix string, opts ...filewalk.DatabaseOption) (filewalk.Database, error) {
 	dbm.Lock()
 	defer dbm.Unlock()
+	db, _, err := dbm.databaseForLocked(ctx, prefix, opts...)
+	return db, err
+}
+
+func (dbm *databaseManager) databaseForLocked(ctx context.Context, prefix string, opts ...filewalk.DatabaseOption) (filewalk.Database, config.Database, error) {
 	cfg, ok := globalConfig.DatabaseFor(prefix)
 	if !ok {
-		return nil, fmt.Errorf("no database is configured for %v", prefix)
+		return nil, cfg, fmt.Errorf("no database is configured for %v", prefix)
 	}
 	if db, ok := dbm.dbs[cfg.Prefix]; ok {
-		return db, nil
+		return db, cfg, nil
 	}
 	db, err := cfg.Open(ctx, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database for %v: %v", prefix, err)
+		return nil, cfg, fmt.Errorf("failed to open database for %v: %v", prefix, err)
 	}
 	dbm.dbs[cfg.Prefix] = db
 	debug(ctx, 1, "prefix: %v: using database %v\n", prefix, cfg.Description)
-	return db, nil
+	return db, cfg, nil
 }
 
 func (dbm *databaseManager) Set(ctx context.Context, prefix string, info *filewalk.PrefixInfo, opts ...filewalk.DatabaseOption) error {
@@ -58,7 +64,37 @@ func (dbm *databaseManager) Get(ctx context.Context, prefix string, info *filewa
 	return db.Get(ctx, prefix, info)
 }
 
-func (dbm *databaseManager) Close(ctx context.Context) error {
+func (dbm *databaseManager) Delete(ctx context.Context, separator, prefix string, prefixes []string, opts ...filewalk.DatabaseOption) (int, error) {
+	db, err := dbm.DatabaseFor(ctx, prefix, opts...)
+	if err != nil {
+		return 0, err
+	}
+	return db.Delete(ctx, separator, prefixes, true)
+}
+
+func (dbm *databaseManager) Compact(ctx context.Context, prefix string) error {
+	dbm.Lock()
+	defer dbm.Unlock()
+	db, cfg, err := dbm.databaseForLocked(ctx, prefix)
+	if err != nil {
+		return err
+	}
+	delete(dbm.dbs, cfg.Prefix)
+	return db.CompactAndClose(ctx)
+}
+
+func (dbm *databaseManager) Close(ctx context.Context, prefix string) error {
+	dbm.Lock()
+	defer dbm.Unlock()
+	db, cfg, err := dbm.databaseForLocked(ctx, prefix)
+	if err != nil {
+		return err
+	}
+	delete(dbm.dbs, cfg.Prefix)
+	return db.Close(ctx)
+}
+
+func (dbm *databaseManager) CloseAll(ctx context.Context) error {
 	dbm.Lock()
 	defer dbm.Unlock()
 	errs := errors.M{}

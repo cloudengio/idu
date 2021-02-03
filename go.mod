@@ -3,13 +3,14 @@ module cloudeng.io/cmd/idu
 go 1.15
 
 require (
-	cloudeng.io/algo v0.0.0-20201022233708-ca706ea5202b
-	cloudeng.io/cmdutil v0.0.0-20201022233708-ca706ea5202b
+	cloudeng.io/algo v0.0.0-20210203185526-9d0847f976d9
+	cloudeng.io/cmdutil v0.0.0-20210203185526-9d0847f976d9
 	cloudeng.io/errors v0.0.6
-	cloudeng.io/file v0.0.0-20201022233708-ca706ea5202b
-	cloudeng.io/os v0.0.0-20201025012016-12df947704bc
+	cloudeng.io/file v0.0.0-20210203185526-9d0847f976d9
+	cloudeng.io/os v0.0.0-20210203185526-9d0847f976d9
 	cloudeng.io/path v0.0.3
 	cloudeng.io/sync v0.0.5
-	golang.org/x/text v0.3.3
-	gopkg.in/yaml.v2 v2.3.0
+	github.com/recoilme/pudge v1.0.3 // indirect
+	golang.org/x/text v0.3.5
+	gopkg.in/yaml.v2 v2.4.0
 )

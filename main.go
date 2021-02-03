@@ -7,6 +7,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"path/filepath"
 	"runtime"
 	"time"
@@ -34,6 +37,7 @@ type GlobalFlags struct {
 	ConfigFile  string                `subcmd:"config,$HOME/.idu.yml,configuration file"`
 	Units       string                `subcmd:"units,decimal,display usage in decimal (KB) or binary (KiB) formats"`
 	Verbose     int                   `subcmd:"v,0,higher values show more debugging output"`
+	HTTP        string                `subcmd:"http,,set to a port to enable http serving of /debug/vars and profiling"`
 }
 
 func init() {
@@ -63,22 +67,35 @@ func init() {
 	lsrCmd := subcmd.NewCommand("lsr", lsFlagSet, lsr, subcmd.AtLeastNArguments(1))
 	lsrCmd.Document("list the contents of the database")
 
-	eraseCmd := subcmd.NewCommand("erase-database", eraseFlagSet, erase, subcmd.ExactlyNumArguments(1))
-	eraseCmd.Document("erase the file statistics database")
+	dbEraseCmd := subcmd.NewCommand("erase", eraseFlagSet, dbErase, subcmd.ExactlyNumArguments(1))
+	dbEraseCmd.Document("erase the file and statistics database")
+
+	dbStatsFlagSet := subcmd.MustRegisterFlagStruct(&configFlags{}, nil, nil)
+	dbStatsCmd := subcmd.NewCommand("stats", dbStatsFlagSet, dbStats, subcmd.AtLeastNArguments(1))
+	dbStatsCmd.Document("display database stastistics")
+
+	dbCompactFlagSet := subcmd.MustRegisterFlagStruct(&configFlags{}, nil, nil)
+	dbCompactCmd := subcmd.NewCommand("compact", dbCompactFlagSet, dbCompact, subcmd.AtLeastNArguments(1))
+	dbCompactCmd.Document("perform database compaction")
+
+	dbRefreshStatsFlagSet := subcmd.NewFlagSet()
+	dbRefreshStatsCmd := subcmd.NewCommand("refresh-stats", dbRefreshStatsFlagSet, dbRefreshStats, subcmd.ExactlyNumArguments(1))
+	dbRefreshStatsCmd.Document("refresh statistics by recalculating them over the entire database")
+
+	dbCmds := subcmd.NewCommandSet(dbCompactCmd, dbStatsCmd, dbEraseCmd, dbRefreshStatsCmd)
+
+	dbCommands := subcmd.NewCommandLevel("database", dbCmds)
+	dbCommands.Document("database management commands")
 
 	configFlagSet := subcmd.MustRegisterFlagStruct(&configFlags{}, nil, nil)
 	configCmd := subcmd.NewCommand("config", configFlagSet, configManager, subcmd.WithoutArguments())
 	configCmd.Document("describe the current configuration")
 
-	refreshStatsFlagSet := subcmd.NewFlagSet()
-	refreshStatsCmd := subcmd.NewCommand("refresh-stats", refreshStatsFlagSet, refreshStats, subcmd.ExactlyNumArguments(1))
-	refreshStatsCmd.Document("refresh statistics by recalculating them over the entire database")
-
 	errorsFlagSet := subcmd.NewFlagSet()
 	errorsCmd := subcmd.NewCommand("errors", errorsFlagSet, listErrors, subcmd.ExactlyNumArguments(1))
 	errorsCmd.Document("list the contents of the errors database")
 
-	cmdSet = subcmd.NewCommandSet(analyzeCmd, configCmd, eraseCmd, errorsCmd, lsrCmd, findCmd, summaryCmd, userSummaryCmd, groupSummaryCmd, refreshStatsCmd)
+	cmdSet = subcmd.NewCommandSet(analyzeCmd, configCmd, errorsCmd, lsrCmd, findCmd, summaryCmd, userSummaryCmd, groupSummaryCmd, dbCommands)
 	cmdSet.Document(`idu: analyze file systems to create a database of per-file and aggregate size stastistics to support incremental updates and subsequent interrogation. Local and cloud based filesystems are contemplated. See https://github.com/cloudengio/blob/master/idu/README.md for full details.`)
 
 	globals := subcmd.GlobalFlagSet()
@@ -122,6 +139,14 @@ func mainWrapper(ctx context.Context, cmdRunner func() error) error {
 		return err
 	}
 	globalConfig = cfg
+
+	var ln net.Listener
+	if port := globalFlags.HTTP; len(port) > 0 {
+		if ln, err = net.Listen("tcp", port); err != nil {
+			return err
+		}
+		go http.Serve(ln, nil)
+	}
 	return cmdRunner()
 }
 
