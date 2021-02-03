@@ -44,19 +44,13 @@ func newProgressTracker(ctx context.Context, interval time.Duration) *progressTr
 }
 
 func (pt *progressTracker) send(ctx context.Context, u progressUpdate) {
+	if pt == nil {
+		return
+	}
 	select {
 	case <-ctx.Done():
 		return
 	case pt.ch <- u:
-		//default:
-		/*// drain tail updates if the channel is full.
-		for {
-			select {
-			case <-pt.ch:
-			default:
-				return
-			}
-		}*/
 	}
 }
 

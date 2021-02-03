@@ -29,10 +29,6 @@ type lsFlags struct {
 }
 
 func lsTree(ctx context.Context, pt *progressTracker, db filewalk.Database, root, user string, flags *lsFlags) (files, children, disk *heap.KeyedInt64, nerrors int64, err error) {
-	if pt != nil {
-		pt.send(ctx, progressUpdate{prefixStart: 1})
-	}
-
 	files, children, disk = heap.NewKeyedInt64(heap.Descending), heap.NewKeyedInt64(heap.Descending), heap.NewKeyedInt64(heap.Descending)
 	if flags.ShowDirs {
 		fmt.Printf("     disk usage :  # files : # dirs : directory/prefix\n")
@@ -48,8 +44,8 @@ func lsTree(ctx context.Context, pt *progressTracker, db filewalk.Database, root
 			if flags.ShowErrors {
 				fmt.Printf("%s: %s\n", prefix, pi.Err)
 			}
-			if !flags.ShowDirs && !flags.ShowFiles && pt != nil {
-				pt.send(ctx, progressUpdate{prefixDone: 1, errors: 1})
+			if !flags.ShowDirs && !flags.ShowFiles {
+				pt.send(ctx, progressUpdate{prefixStart: 1, prefixDone: 1, errors: 1})
 			}
 			continue
 		}
@@ -68,11 +64,9 @@ func lsTree(ctx context.Context, pt *progressTracker, db filewalk.Database, root
 					fmt.Printf("    % 15v : % 40v: % 10v : %v\n", fsize(fi.Size), fi.ModTime, globalUserManager.nameForUID(fi.UserID), fi.Name)
 				}
 			}
-		} else {
-			if pt != nil {
-				pt.send(ctx, progressUpdate{prefixDone: 1, files: len(pi.Files)})
-			}
+			continue
 		}
+		pt.send(ctx, progressUpdate{prefixStart: 1, prefixDone: 1, files: len(pi.Files)})
 	}
 	err = sc.Err()
 	return

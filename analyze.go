@@ -92,9 +92,7 @@ func (sc *scanState) fileFn(ctx context.Context, prefix string, info *filewalk.I
 	if err := globalDatabaseManager.Set(ctx, prefix, &pi); err != nil {
 		return nil, err
 	}
-	if sc.pt != nil {
-		sc.pt.send(ctx, progressUpdate{prefixDone: 1, deletions: deletions, errors: nerrors, files: len(pi.Files)})
-	}
+	sc.pt.send(ctx, progressUpdate{prefixDone: 1, deletions: deletions, errors: nerrors, files: len(pi.Files)})
 	return pi.Children, nil
 }
 
@@ -163,9 +161,7 @@ func (sc *scanState) prefixFn(ctx context.Context, prefix string, info *filewalk
 		}
 	}
 	if unchanged {
-		if sc.pt != nil {
-			sc.pt.send(ctx, progressUpdate{reused: len(existing.Children)})
-		}
+		sc.pt.send(ctx, progressUpdate{reused: len(existing.Children)})
 		debug(ctx, 2, "unchanged: %v: #children: %v\n", prefix, len(existing.Children))
 		// safe to skip unchanged leaf directories.
 		return len(existing.Children) == 0, existing.Children, nil
