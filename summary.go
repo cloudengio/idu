@@ -24,22 +24,23 @@ type summaryFlags struct {
 type userFlags struct {
 	TopN       int    `subcmd:"top,20,show the top prefixes by file count and disk usage"`
 	ListUsers  bool   `subcmd:"list-users,false,list available users"`
-	AllUsers   bool   `subcmd:"all-users,true,summarize usage for all users"`
+	AllUsers   bool   `subcmd:"all-users,false,summarize usage for all users"`
 	WriteFiles string `subcmd:"reports-dir,,write per-user statistics to the specified directory"`
 }
 
 type groupFlags struct {
 	TopN       int    `subcmd:"top,20,show the top prefixes by file count and disk usage"`
 	ListGroups bool   `subcmd:"list-groups,false,list available groups"`
-	AllGroups  bool   `subcmd:"all-groups,true,summarize usage for all groups"`
+	AllGroups  bool   `subcmd:"all-groups,false,summarize usage for all groups"`
 	WriteFiles string `subcmd:"reports-dir,,write per-group statistics to the specified directory"`
 }
 
-func printSummaryStats(ctx context.Context, out io.Writer, db filewalk.Database, nFiles, nChildren, nBytes, nErrors int64, topN int, topFiles, topChildren, topBytes []filewalk.Metric) {
+func printSummaryStats(ctx context.Context, out io.Writer, nFiles, nChildren, nBytes, nErrors int64, topN int, topFiles, topChildren, topBytes []filewalk.Metric) {
 	ifmt := message.NewPrinter(language.English)
 
 	printMetric := func(metric []filewalk.Metric, bytes bool) {
 		for _, m := range metric {
+			db, _ := globalDatabaseManager.DatabaseFor(ctx, m.Prefix, filewalk.ReadOnly())
 			name := globalUserManager.nameForPrefix(ctx, db, m.Prefix)
 			if bytes {
 				ifmt.Fprintf(out, "%20v: %v (%v)\n", fsize(m.Value), m.Prefix, name)
@@ -92,15 +93,15 @@ func summary(ctx context.Context, values interface{}, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer globalDatabaseManager.Close(ctx)
+	defer globalDatabaseManager.CloseAll(ctx)
 	nFiles, nChildren, nBytes, nErrors,
 		topFiles, topChildren, topBytes, err :=
 		getAllStats(ctx, db, flagValues.TopN, filewalk.Global())
 	if err != nil {
 		return err
 	}
-	printSummaryStats(ctx, os.Stdout, db, nFiles, nChildren, nBytes, nErrors, flagValues.TopN, topFiles, topChildren, topBytes)
-	return globalDatabaseManager.Close(ctx)
+	printSummaryStats(ctx, os.Stdout, nFiles, nChildren, nBytes, nErrors, flagValues.TopN, topFiles, topChildren, topBytes)
+	return globalDatabaseManager.CloseAll(ctx)
 }
 
 func printUsers(ctx context.Context, db filewalk.Database) error {
@@ -165,10 +166,10 @@ func userSummary(ctx context.Context, values interface{}, args []string) error {
 	if err != nil {
 		return err
 	}
-	args = args[1:]
 	if flagValues.ListUsers {
 		return printUsers(ctx, db)
 	}
+	args = args[1:]
 	if len(args) == 0 {
 		args = []string{os.Getenv("USER")}
 	}
@@ -188,10 +189,10 @@ func userSummary(ctx context.Context, values interface{}, args []string) error {
 		nFiles, nChildren, nBytes, nErrors, topFiles, topChildren, topBytes, err := getAllStats(ctx, db, flagValues.TopN, filewalk.UserID(key))
 		errs.Append(err)
 		fmt.Fprintf(out, "\nSummary for %v (%v)\n", name, usr)
-		printSummaryStats(ctx, out, db, nFiles, nChildren, nBytes, nErrors, flagValues.TopN, topFiles, topChildren, topBytes)
+		printSummaryStats(ctx, out, nFiles, nChildren, nBytes, nErrors, flagValues.TopN, topFiles, topChildren, topBytes)
 		errs.Append(close())
 	}
-	errs.Append(globalDatabaseManager.Close(ctx))
+	errs.Append(globalDatabaseManager.CloseAll(ctx))
 	return errs.Err()
 }
 
@@ -226,10 +227,9 @@ func groupSummary(ctx context.Context, values interface{}, args []string) error 
 			topFiles, topChildren, topBytes, err := getAllStats(ctx, db, flagValues.TopN, filewalk.GroupID(key))
 		errs.Append(err)
 		fmt.Fprintf(out, "\nSummary for %v (%v)\n", name, grp)
-		printSummaryStats(ctx, out, db, nFiles, nChildren, nBytes, nErrors, flagValues.TopN, topFiles, topChildren, topBytes)
+		printSummaryStats(ctx, out, nFiles, nChildren, nBytes, nErrors, flagValues.TopN, topFiles, topChildren, topBytes)
 		errs.Append(close())
 	}
-	errs.Append(globalDatabaseManager.Close(ctx))
-
+	errs.Append(globalDatabaseManager.CloseAll(ctx))
 	return errs.Err()
 }

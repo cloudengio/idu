@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"expvar"
 	"os"
 	"sync/atomic"
 	"time"
@@ -15,19 +16,21 @@ import (
 )
 
 type progressUpdate struct {
-	prefix    int
-	files     int
-	deletions int
-	errors    int
-	reused    int
+	prefixStart int
+	prefixDone  int
+	files       int
+	deletions   int
+	errors      int
+	reused      int
 }
 
 type progressTracker struct {
-	ch                                 chan progressUpdate
-	numPrefixes, numFiles, numReused   int64
-	numDeletions, numErrors, lastFiles int64
-	interval                           time.Duration
-	start                              time.Time
+	ch                                      chan progressUpdate
+	numPrefixesStarted, numPrefixesFinished int64
+	numFiles, numReused                     int64
+	numDeletions, numErrors, lastFiles      int64
+	interval                                time.Duration
+	start                                   time.Time
 }
 
 func newProgressTracker(ctx context.Context, interval time.Duration) *progressTracker {
@@ -45,22 +48,22 @@ func (pt *progressTracker) send(ctx context.Context, u progressUpdate) {
 	case <-ctx.Done():
 		return
 	case pt.ch <- u:
-	default:
-		// drain stail updates if the channel is full.
+		//default:
+		/*// drain tail updates if the channel is full.
 		for {
 			select {
 			case <-pt.ch:
 			default:
 				return
 			}
-		}
+		}*/
 	}
 }
 
 func (pt *progressTracker) summary() {
 	ifmt := message.NewPrinter(language.English)
 	ifmt.Printf("\n")
-	ifmt.Printf("        prefixes : % 15v\n", atomic.LoadInt64(&pt.numPrefixes))
+	ifmt.Printf("        prefixes : % 15v\n", atomic.LoadInt64(&pt.numPrefixesFinished))
 	ifmt.Printf("           files : % 15v\n", atomic.LoadInt64(&pt.numFiles))
 	ifmt.Printf("prefix deletions : % 15v\n", atomic.LoadInt64(&pt.numDeletions))
 	ifmt.Printf("          reused : % 15v\n", atomic.LoadInt64(&pt.numReused))
@@ -76,6 +79,8 @@ func isInteractive() bool {
 	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
+var progressMap = expvar.NewMap("progress")
+
 func (pt *progressTracker) display(ctx context.Context) {
 	ifmt := message.NewPrinter(language.English)
 	cr := "\r"
@@ -87,19 +92,30 @@ func (pt *progressTracker) display(ctx context.Context) {
 	for {
 		select {
 		case update := <-pt.ch:
-			atomic.AddInt64(&pt.numPrefixes, int64(update.prefix))
+			atomic.AddInt64(&pt.numPrefixesStarted, int64(update.prefixStart))
+			atomic.AddInt64(&pt.numPrefixesFinished, int64(update.prefixDone))
 			atomic.AddInt64(&pt.numFiles, int64(update.files))
 			atomic.AddInt64(&pt.numDeletions, int64(update.deletions))
 			atomic.AddInt64(&pt.numReused, int64(update.reused))
 			atomic.AddInt64(&pt.numErrors, int64(update.errors))
+
+			progressMap.Add("started", int64(update.prefixStart))
+			progressMap.Add("finished", int64(update.prefixDone))
+			progressMap.Add("files", int64(update.files))
+			progressMap.Add("deletions", int64(update.deletions))
+			progressMap.Add("reused", int64(update.reused))
+			progressMap.Add("errors", int64(update.errors))
+
 		case <-ctx.Done():
 			return
 		}
 		if since := time.Since(lastReport); since > pt.interval {
 			last := atomic.SwapInt64(&pt.lastFiles, atomic.LoadInt64(&pt.numFiles))
 			rate := float64(pt.numFiles-last) / since.Seconds()
-			ifmt.Printf("% 8v prefixes, % 8v files, % 8v reused, % 6v errors, % 9.2f stats/second  % 8v, (%s)  %s",
-				atomic.LoadInt64(&pt.numPrefixes),
+			started, finished := atomic.LoadInt64(&pt.numPrefixesStarted), atomic.LoadInt64(&pt.numPrefixesFinished)
+			ifmt.Printf("% 8v(%3v) prefixes, % 8v files, % 8v reused, % 6v errors, % 9.2f stats/second  % 8v, (%s)  %s",
+				finished,
+				started-finished,
 				atomic.LoadInt64(&pt.numFiles),
 				atomic.LoadInt64(&pt.numReused),
 				atomic.LoadInt64(&pt.numErrors),
