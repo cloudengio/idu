@@ -106,13 +106,6 @@ func (sc *scanState) fileFn(ctx context.Context, prefix string, info *filewalk.I
 	return pi.Children, nil
 }
 
-func printFiles(info []filewalk.Info) {
-	fmt.Printf("# info %v\n", len(info))
-	for _, fi := range info {
-		fmt.Printf("\t%v\n", fi.Name)
-	}
-}
-
 func findMissing(prefix string, previous, current []filewalk.Info) (remaining []filewalk.Info, deleted []string) {
 	cm := make(map[string]struct{}, len(previous))
 	for _, cur := range current {
