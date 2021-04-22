@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"cloudeng.io/errors"
@@ -38,7 +39,7 @@ func dbRefreshStats(ctx context.Context, values interface{}, args []string) erro
 	if err != nil {
 		return err
 	}
-	sc := db.NewScanner("", 0, filewalk.ScanLimit(500))
+	sc := db.NewScanner(args[0], 0, filewalk.ScanLimit(500))
 	i := 0
 	printer := message.NewPrinter(language.English)
 	for sc.Scan(ctx) {
@@ -57,7 +58,7 @@ func dbRefreshStats(ctx context.Context, values interface{}, args []string) erro
 		i++
 	}
 	if sc.Err() != nil {
-		return sc.Err()
+		return fmt.Errorf("scanner error: %v", sc.Err())
 	}
 	return globalDatabaseManager.CloseAll(ctx)
 }
@@ -129,5 +130,35 @@ func dbCompact(ctx context.Context, values interface{}, args []string) error {
 			fsize(beforeSize), fsize(afterSize))
 
 	}
+	return errs.Err()
+}
+
+func dbRmPrefixes(ctx context.Context, values interface{}, args []string) error {
+	var errs errors.M
+	for _, prefix := range args {
+		db, err := globalDatabaseManager.DatabaseFor(ctx, prefix)
+		if err != nil {
+			errs.Append(err)
+			continue
+		}
+		layout := globalConfig.LayoutFor(prefix)
+		prefixes := make([]string, 0, 1000)
+		sc := db.NewScanner(prefix, -1, filewalk.ScanLimit(10000))
+		for sc.Scan(ctx) {
+			sp, _ := sc.PrefixInfo()
+			prefixes = append(prefixes, sp)
+		}
+		errs.Append(sc.Err())
+		sort.Slice(prefixes, func(i, j int) bool {
+			return prefixes[i] > prefixes[j]
+		})
+		for _, s := range prefixes {
+			debug(ctx, 2, "deleting %s\n", s)
+		}
+		_, err = db.Delete(ctx, layout.Separator, prefixes, false)
+		errs.Append(err)
+
+	}
+	errs.Append(globalDatabaseManager.CloseAll(ctx))
 	return errs.Err()
 }
