@@ -39,12 +39,13 @@ type scanState struct {
 	errorMap    map[string]struct{}
 }
 
-var activeMap = expvar.NewMap("analyzing")
+var activeMap = expvar.NewMap("cloudeng.io/idu.analyze-contents")
+var prefixMap = expvar.NewMap("cloudeng.io/idu.analyze-prefix")
 
 type stringer string
 
 func (s stringer) String() string {
-	return string(s)
+	return `"` + string(s) + `"`
 }
 
 func timestampedError(err string) string {
@@ -52,8 +53,12 @@ func timestampedError(err string) string {
 	return fmt.Sprintf("%v: %v", ts, err)
 }
 
+func formatVarUpdate(status string, nFiles, nChildren int) stringer {
+	return stringer(fmt.Sprintf("%v: %v: %v/%v", time.Now().Format(time.Stamp), status, nFiles, nChildren))
+}
+
 func (sc *scanState) fileFn(ctx context.Context, prefix string, info *filewalk.Info, ch <-chan filewalk.Contents) ([]filewalk.Info, error) {
-	activeMap.Set(prefix, stringer(time.Now().Format(time.Stamp)))
+	activeMap.Set(prefix, formatVarUpdate("start", 0, 0))
 	defer activeMap.Delete(prefix)
 	sc.pt.send(ctx, progressUpdate{prefixStart: 1})
 	pi := filewalk.PrefixInfo{
@@ -72,6 +77,7 @@ func (sc *scanState) fileFn(ctx context.Context, prefix string, info *filewalk.I
 			return nil, ctx.Err()
 		default:
 		}
+		activeMap.Set(prefix, formatVarUpdate("results", len(results.Files), len(results.Children)))
 		if err := results.Err; err != nil {
 			if sc.fs.IsPermissionError(err) {
 				debug(ctx, 1, "permission denied: %v\n", prefix)
@@ -89,7 +95,9 @@ func (sc *scanState) fileFn(ctx context.Context, prefix string, info *filewalk.I
 			pi.Files = append(pi.Files, file)
 		}
 		pi.Children = append(pi.Children, results.Children...)
+		activeMap.Set(prefix, formatVarUpdate("listing", len(pi.Files), len(pi.Children)))
 	}
+	activeMap.Set(prefix, formatVarUpdate("processing", len(pi.Files), len(pi.Children)))
 	_, deleted, err := handleDeletedChildren(ctx, layout, prefix, pi.Children)
 	if err != nil {
 		debug(ctx, 1, "deletion error: %v: %v\n", prefix, err)
@@ -145,6 +153,8 @@ func handleDeletedChildren(ctx context.Context, layout config.Layout, prefix str
 }
 
 func (sc *scanState) prefixFn(ctx context.Context, prefix string, info *filewalk.Info, err error) (bool, []filewalk.Info, error) {
+	prefixMap.Set(prefix, stringer(time.Now().Format(time.StampMilli)))
+	defer prefixMap.Delete(prefix)
 	if err != nil {
 		if sc.fs.IsPermissionError(err) {
 			debug(ctx, 1, "permission denied: %v\n", prefix)

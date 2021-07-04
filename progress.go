@@ -73,7 +73,7 @@ func isInteractive() bool {
 	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
-var progressMap = expvar.NewMap("progress")
+var progressMap = expvar.NewMap("cloudeng.io/idu.progress")
 
 func (pt *progressTracker) display(ctx context.Context) {
 	ifmt := message.NewPrinter(language.English)
