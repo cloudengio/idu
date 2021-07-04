@@ -6,10 +6,13 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 
 	"cloudeng.io/errors"
 	"cloudeng.io/file/filewalk"
@@ -18,7 +21,9 @@ import (
 )
 
 type summaryFlags struct {
-	TopN int `subcmd:"top,20,show the top prefixes by file count and disk usage"`
+	TopN    int    `subcmd:"top,20,show the top prefixes by file count and disk usage"`
+	TSVTopN int    `subcmd:"tsv-top,200,'include the top prefixes by file count and disk usage in the tsv output, if any'"`
+	TSVOut  string `subcmd:"tsv,,write a tsv file with the summary information"`
 }
 
 type userFlags struct {
@@ -64,6 +69,77 @@ func printSummaryStats(ctx context.Context, out io.Writer, nFiles, nChildren, nB
 	printMetric(topChildren, false)
 }
 
+type mergedStats struct {
+	prefix    string
+	user      string
+	nErrors   int64
+	nBytes    int64
+	nFiles    int64
+	nChildren int64
+}
+
+func mergeStats(ctx context.Context, db filewalk.Database, root string, nFiles, nChildren, nBytes, nErrors int64, topN int, topFiles, topChildren, topBytes []filewalk.Metric) []mergedStats {
+	existing := map[string]mergedStats{}
+	existing[root] = mergedStats{
+		prefix:    root,
+		nErrors:   nErrors,
+		nBytes:    nBytes,
+		nFiles:    nFiles,
+		nChildren: nChildren,
+	}
+
+	setv := func(m filewalk.Metric, which int) {
+		e := existing[m.Prefix]
+		e.prefix = m.Prefix
+		switch which {
+		case 0:
+			e.nFiles = m.Value
+		case 1:
+			e.nChildren = m.Value
+		case 2:
+			e.nBytes = m.Value
+		}
+		existing[m.Prefix] = e
+	}
+	for _, m := range topFiles {
+		setv(m, 0)
+	}
+	for _, m := range topChildren {
+		setv(m, 1)
+	}
+	for _, m := range topBytes {
+		setv(m, 2)
+
+	}
+	merged := make([]mergedStats, 0, len(existing))
+	for _, v := range existing {
+		v.user = globalUserManager.nameForPrefix(ctx, db, v.prefix)
+		merged = append(merged, v)
+	}
+	sort.Slice(merged, func(i, j int) bool {
+		return merged[i].prefix < merged[j].prefix
+	})
+	return merged
+}
+
+func writeTSVSummary(ctx context.Context, out *os.File, merged []mergedStats) error {
+	wr := csv.NewWriter(out)
+	wr.Comma = '\t'
+	wr.Write([]string{"prefix", "user", "bytes", "files", "directories", "errors"})
+	for _, m := range merged {
+		wr.Write([]string{
+			m.prefix,
+			m.user,
+			strconv.FormatInt(m.nBytes, 10),
+			strconv.FormatInt(m.nFiles, 10),
+			strconv.FormatInt(m.nChildren, 10),
+			strconv.FormatInt(m.nErrors, 10),
+		})
+	}
+	wr.Flush()
+	return wr.Error()
+}
+
 func getAllStats(ctx context.Context, db filewalk.Database, n int, opts ...filewalk.MetricOption) (
 	nFiles, nChildren, nBytes, nErrors int64,
 	topFiles, topChildren, topBytes []filewalk.Metric,
@@ -101,7 +177,24 @@ func summary(ctx context.Context, values interface{}, args []string) error {
 		return err
 	}
 	printSummaryStats(ctx, os.Stdout, nFiles, nChildren, nBytes, nErrors, flagValues.TopN, topFiles, topChildren, topBytes)
-	return globalDatabaseManager.CloseAll(ctx)
+
+	nFiles, nChildren, nBytes, nErrors,
+		topFiles, topChildren, topBytes, err =
+		getAllStats(ctx, db, flagValues.TSVTopN, filewalk.Global())
+	if err != nil {
+		return err
+	}
+	if tsvFile := flagValues.TSVOut; len(flagValues.TSVOut) > 0 {
+		tfile, err := os.OpenFile(tsvFile, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0644)
+		if err != nil {
+			return err
+		}
+		merged := mergeStats(ctx, db, args[0], nFiles, nChildren, nBytes, nErrors, flagValues.TopN, topFiles, topChildren, topBytes)
+		if err := writeTSVSummary(ctx, tfile, merged); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func printUsers(ctx context.Context, db filewalk.Database) error {

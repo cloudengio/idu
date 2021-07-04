@@ -36,6 +36,7 @@ type scanState struct {
 	exclusions  *exclusions.T
 	pt          *progressTracker
 	incremental bool
+	errorMap    map[string]struct{}
 }
 
 var activeMap = expvar.NewMap("analyzing")
@@ -44,6 +45,11 @@ type stringer string
 
 func (s stringer) String() string {
 	return string(s)
+}
+
+func timestampedError(err string) string {
+	ts := time.Now().Format(time.StampMilli)
+	return fmt.Sprintf("%v: %v", ts, err)
 }
 
 func (sc *scanState) fileFn(ctx context.Context, prefix string, info *filewalk.Info, ch <-chan filewalk.Contents) ([]filewalk.Info, error) {
@@ -72,7 +78,7 @@ func (sc *scanState) fileFn(ctx context.Context, prefix string, info *filewalk.I
 			} else {
 				debug(ctx, 1, "error: %v: %v\n", prefix, err)
 			}
-			pi.Err = err.Error()
+			pi.Err = timestampedError(err.Error())
 			nerrors++
 			break
 		}
@@ -84,15 +90,19 @@ func (sc *scanState) fileFn(ctx context.Context, prefix string, info *filewalk.I
 		}
 		pi.Children = append(pi.Children, results.Children...)
 	}
-	_, deletions, err := handleDeletedChildren(ctx, layout, prefix, pi.Children)
+	_, deleted, err := handleDeletedChildren(ctx, layout, prefix, pi.Children)
 	if err != nil {
 		debug(ctx, 1, "deletion error: %v: %v\n", prefix, err)
-		pi.Err = fmt.Sprintf("deletion: %v", err)
+		pi.Err = timestampedError(fmt.Sprintf("deletion: %v", err))
+		// Take care to keep an undeleted children in the database so that
+		// they can be deleted in a subsequent invocation.
+		pi.Children = pi.Children[deleted+1:]
 	}
+	// only update the database
 	if err := globalDatabaseManager.Set(ctx, prefix, &pi); err != nil {
 		return nil, err
 	}
-	sc.pt.send(ctx, progressUpdate{prefixDone: 1, deletions: deletions, errors: nerrors, files: len(pi.Files)})
+	sc.pt.send(ctx, progressUpdate{prefixDone: 1, deletions: deleted, errors: nerrors, files: len(pi.Files)})
 	return pi.Children, nil
 }
 
@@ -160,7 +170,11 @@ func (sc *scanState) prefixFn(ctx context.Context, prefix string, info *filewalk
 			unchanged = true
 		}
 	}
-	if unchanged {
+	_, hasError := sc.errorMap[prefix]
+	if hasError {
+		debug(ctx, 2, "previous error existed for %v", prefix)
+	}
+	if unchanged && !hasError {
 		sc.pt.send(ctx, progressUpdate{reused: len(existing.Children)})
 		debug(ctx, 2, "unchanged: %v: #children: %v\n", prefix, len(existing.Children))
 		// safe to skip unchanged leaf directories.
@@ -174,25 +188,60 @@ func analyze(ctx context.Context, values interface{}, args []string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	exclusions := exclusions.New(globalConfig.Exclusions)
-	for _, arg := range args {
-		if !cloudpath.IsLocal(arg) {
-			return fmt.Errorf("currently only local filesystems are supported: %v", arg)
-		}
+	prefix := args[0]
+	if !cloudpath.IsLocal(prefix) {
+		return fmt.Errorf("currently only local filesystems are supported: %v", prefix)
 	}
 	cmdutil.HandleSignals(cancel, os.Interrupt, os.Kill)
 	fs := filewalk.LocalFilesystem(flagValues.ScanSize)
 	pt := newProgressTracker(ctx, time.Second)
 	defer pt.summary()
+
+	errs := errors.M{}
+	errorMap, err := deleteErrors(ctx, prefix)
+	if err != nil {
+		return err
+	}
 	sc := scanState{
 		exclusions:  exclusions,
 		fs:          fs,
 		pt:          pt,
 		incremental: flagValues.Incremental,
+		errorMap:    errorMap,
 	}
 	walker := filewalk.New(sc.fs, filewalk.Concurrency(flagValues.Concurrency))
-	errs := errors.M{}
-	errs.Append(walker.Walk(ctx, sc.prefixFn, sc.fileFn, args...))
+	errs.Append(walker.Walk(ctx, sc.prefixFn, sc.fileFn, prefix))
 	errs.Append(globalDatabaseManager.CloseAll(ctx))
 	cancel()
 	return errs.Err()
+}
+
+func deleteErrors(ctx context.Context, prefix string) (map[string]struct{}, error) {
+	db, err := globalDatabaseManager.DatabaseFor(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+	em := map[string]struct{}{}
+	deletions := []string{}
+	sc := db.NewScanner("", 0, filewalk.ScanErrors())
+	for sc.Scan(ctx) {
+		p, pi := sc.PrefixInfo()
+		if !strings.HasPrefix(p, prefix) {
+			continue
+		}
+		em[p] = struct{}{}
+		deletions = append(deletions, p)
+		debug(ctx, 2, "error for %v will be deleted: %v", prefix, pi.Err)
+	}
+	errs := &errors.M{}
+	if len(deletions) > 0 {
+		n, err := db.DeleteErrors(ctx, deletions)
+		if err != nil {
+			debug(ctx, 2, "delete error for %v: %v", deletions[n+1], err)
+		}
+		debug(ctx, 2, "deleted %v errors", n)
+		errs.Append(err)
+	}
+	errs.Append(sc.Err())
+	return em, errs.Err()
 }

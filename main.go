@@ -49,7 +49,7 @@ func init() {
 	lsFlagSet := subcmd.MustRegisterFlagStruct(&lsFlags{}, nil, nil)
 	eraseFlagSet := subcmd.MustRegisterFlagStruct(&eraseFlags{}, nil, nil)
 
-	analyzeCmd := subcmd.NewCommand("analyze", analyzeFlagSet, analyze)
+	analyzeCmd := subcmd.NewCommand("analyze", analyzeFlagSet, analyze, subcmd.ExactlyNumArguments(1))
 	analyzeCmd.Document("analyze the file system to build a database of file counts, disk usage etc", "<directory/prefix>+")
 
 	summaryCmd := subcmd.NewCommand("summary", summaryFlagSet, summary, subcmd.ExactlyNumArguments(1))
@@ -82,7 +82,11 @@ func init() {
 	dbRefreshStatsCmd := subcmd.NewCommand("refresh-stats", dbRefreshStatsFlagSet, dbRefreshStats, subcmd.ExactlyNumArguments(1))
 	dbRefreshStatsCmd.Document("refresh statistics by recalculating them over the entire database")
 
-	dbCmds := subcmd.NewCommandSet(dbCompactCmd, dbStatsCmd, dbEraseCmd, dbRefreshStatsCmd)
+	dbRmPrefixesFlagSet := subcmd.NewFlagSet()
+	dmRmPrefixesCmd := subcmd.NewCommand("rm-prefixes", dbRmPrefixesFlagSet, dbRmPrefixes)
+	dmRmPrefixesCmd.Document("delete the specified prefixes, recursively, from the database")
+
+	dbCmds := subcmd.NewCommandSet(dbCompactCmd, dbStatsCmd, dbEraseCmd, dbRefreshStatsCmd, dmRmPrefixesCmd)
 
 	dbCommands := subcmd.NewCommandLevel("database", dbCmds)
 	dbCommands.Document("database management commands")

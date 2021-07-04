@@ -169,7 +169,7 @@ func lsr(ctx context.Context, values interface{}, args []string) error {
 }
 
 func listErrors(ctx context.Context, values interface{}, args []string) error {
-	db, err := globalDatabaseManager.DatabaseFor(ctx, args[0], filewalk.ReadOnly())
+	db, err := globalDatabaseManager.DatabaseFor(ctx, args[0], filewalk.ErrorsOnly(), filewalk.ReadOnly())
 	if err != nil {
 		return err
 	}
