@@ -102,9 +102,11 @@ func (sc *scanState) fileFn(ctx context.Context, prefix string, info *filewalk.I
 	if err != nil {
 		debug(ctx, 1, "deletion error: %v: %v\n", prefix, err)
 		pi.Err = timestampedError(fmt.Sprintf("deletion: %v", err))
-		// Take care to keep an undeleted children in the database so that
+		// Take care to keep any undeleted children in the database so that
 		// they can be deleted in a subsequent invocation.
-		pi.Children = pi.Children[deleted+1:]
+		if deleted > 0 && deleted+1 < len(pi.Children) {
+			pi.Children = pi.Children[deleted+1:]
+		}
 	}
 	// only update the database
 	if err := globalDatabaseManager.Set(ctx, prefix, &pi); err != nil {
@@ -132,8 +134,11 @@ func findMissing(prefix string, previous, current []filewalk.Info) (remaining []
 func handleDeletedChildren(ctx context.Context, layout config.Layout, prefix string, children []filewalk.Info) ([]filewalk.Info, int, error) {
 	var existing filewalk.PrefixInfo
 	ok, err := globalDatabaseManager.Get(ctx, prefix, &existing)
-	if !ok || err != nil {
-		return nil, 0, err
+	if err != nil {
+		return nil, 0, fmt.Errorf("database: %v: %v", prefix, err)
+	}
+	if !ok {
+		return nil, 0, nil
 	}
 	if !strings.HasSuffix(prefix, layout.Separator) {
 		prefix += layout.Separator
@@ -146,7 +151,7 @@ func handleDeletedChildren(ctx context.Context, layout config.Layout, prefix str
 		deleted, err = globalDatabaseManager.Delete(ctx, layout.Separator, prefix, deletedChildren)
 		debug(ctx, 1, "deleted (recursively): %v: remaining %v\n", deleted, len(remaining))
 		if err != nil {
-			fmt.Printf("deletion error: %v %v\n", prefix, err)
+			fmt.Printf("delete error: %v %v\n", prefix, err)
 		}
 	}
 	return remaining, deleted, err
