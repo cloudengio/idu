@@ -44,7 +44,7 @@ func TestMain(m *testing.M) {
 func runIDU(args ...string) (string, error) {
 	cmd := exec.Command(iduCommand, args...)
 	out, err := cmd.CombinedOutput()
-	return string(out), err
+	return string(out), fmt.Errorf("%v: %v", strings.Join(cmd.Args, " "), err)
 }
 
 func containsAnyOf(got string, expected ...string) error {
