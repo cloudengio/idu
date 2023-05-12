@@ -12,6 +12,7 @@ import (
 	_ "net/http/pprof"
 	"path/filepath"
 	"runtime"
+	debugpkg "runtime/debug"
 	"time"
 
 	"cloudeng.io/cmd/idu/internal/config"
@@ -38,6 +39,7 @@ type GlobalFlags struct {
 	Units       string                `subcmd:"units,decimal,display usage in decimal (KB) or binary (KiB) formats"`
 	Verbose     int                   `subcmd:"v,0,higher values show more debugging output"`
 	HTTP        string                `subcmd:"http,,set to a port to enable http serving of /debug/vars and profiling"`
+	GCPercent   int                   `subcmd:"gcpercent,50,value to use for runtime/debug.SetGCPercent"`
 }
 
 func init() {
@@ -108,7 +110,10 @@ func init() {
 	cmdSet.WithMain(mainWrapper)
 }
 
-func mainWrapper(ctx context.Context, cmdRunner func() error) error {
+func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error) error {
+
+	debugpkg.SetGCPercent(globalFlags.GCPercent)
+
 	err := flags.OneOf(globalFlags.Units).Validate("decimal", "decimal", "binary")
 	if err != nil {
 		return err
@@ -151,7 +156,7 @@ func mainWrapper(ctx context.Context, cmdRunner func() error) error {
 		}
 		go http.Serve(ln, nil)
 	}
-	return cmdRunner()
+	return cmdRunner(ctx)
 }
 
 func main() {

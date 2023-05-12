@@ -215,7 +215,7 @@ func analyze(ctx context.Context, values interface{}, args []string) error {
 	errs := errors.M{}
 	errorMap, err := deleteErrors(ctx, prefix)
 	if err != nil {
-		return err
+		return fmt.Errorf("deleting errors: %v", err)
 	}
 	sc := scanState{
 		exclusions:  exclusions,
@@ -258,5 +258,8 @@ func deleteErrors(ctx context.Context, prefix string) (map[string]struct{}, erro
 		errs.Append(err)
 	}
 	errs.Append(sc.Err())
+	if err := errs.Err(); err != nil {
+		debug(ctx, 2, "deletion errors: %v", err)
+	}
 	return em, errs.Err()
 }

@@ -8,7 +8,9 @@ import (
 	"context"
 	"expvar"
 	"os"
+	"runtime"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"golang.org/x/text/language"
@@ -31,6 +33,9 @@ type progressTracker struct {
 	numDeletions, numErrors, lastFiles      int64
 	interval                                time.Duration
 	start                                   time.Time
+	lastGC                                  time.Time
+	memstats                                runtime.MemStats
+	rusage                                  syscall.Rusage
 }
 
 func newProgressTracker(ctx context.Context, interval time.Duration) *progressTracker {
@@ -39,6 +44,7 @@ func newProgressTracker(ctx context.Context, interval time.Duration) *progressTr
 		interval: interval,
 		start:    time.Now(),
 	}
+	pt.refreshMemstats()
 	go pt.display(ctx)
 	return pt
 }
@@ -54,7 +60,17 @@ func (pt *progressTracker) send(ctx context.Context, u progressUpdate) {
 	}
 }
 
+func (pt *progressTracker) refreshMemstats() {
+	if time.Since(pt.lastGC) > (5 * time.Minute) {
+		runtime.GC()
+		runtime.ReadMemStats(&pt.memstats)
+		syscall.Getrusage(0, &pt.rusage)
+		pt.lastGC = time.Now()
+	}
+}
+
 func (pt *progressTracker) summary() {
+	pt.refreshMemstats()
 	ifmt := message.NewPrinter(language.English)
 	ifmt.Printf("\n")
 	ifmt.Printf("        prefixes : % 15v\n", atomic.LoadInt64(&pt.numPrefixesFinished))
@@ -63,6 +79,9 @@ func (pt *progressTracker) summary() {
 	ifmt.Printf("          reused : % 15v\n", atomic.LoadInt64(&pt.numReused))
 	ifmt.Printf("          errors : % 15v\n", atomic.LoadInt64(&pt.numErrors))
 	ifmt.Printf("        run time : % 15v\n", time.Since(pt.start))
+	ifmt.Printf("      heap alloc : % 15.6fGiB\n", float64(pt.memstats.HeapAlloc)/(1024*1024*1024))
+	ifmt.Printf("  max heap alloc : % 15.6fGiB\n", float64(pt.memstats.HeapSys)/(1024*1024*1024))
+	ifmt.Printf(" max process RSS : %15.6fGiB\n", float64(pt.rusage.Maxrss)/(1024*1024))
 }
 
 func isInteractive() bool {
@@ -99,6 +118,13 @@ func (pt *progressTracker) display(ctx context.Context) {
 			progressMap.Add("deletions", int64(update.deletions))
 			progressMap.Add("reused", int64(update.reused))
 			progressMap.Add("errors", int64(update.errors))
+			fl := &expvar.Float{}
+			fl.Set(float64(pt.memstats.HeapAlloc) / (1024 * 1024 * 1024))
+			progressMap.Set("heap-alloc-GiB", fl)
+			fl.Set(float64(pt.memstats.HeapSys) / (1024 * 1024 * 1024))
+			progressMap.Set("max-heap-alloc-GiB", fl)
+			fl.Set(float64(pt.rusage.Maxrss) / (1024 * 1024))
+			progressMap.Set("max-RSS-GiB", fl)
 
 		case <-ctx.Done():
 			return
@@ -107,7 +133,7 @@ func (pt *progressTracker) display(ctx context.Context) {
 			last := atomic.SwapInt64(&pt.lastFiles, atomic.LoadInt64(&pt.numFiles))
 			rate := float64(pt.numFiles-last) / since.Seconds()
 			started, finished := atomic.LoadInt64(&pt.numPrefixesStarted), atomic.LoadInt64(&pt.numPrefixesFinished)
-			ifmt.Printf("% 8v(%3v) prefixes, % 8v files, % 8v reused, % 6v errors, % 9.2f stats/second  % 8v, (%s)  %s",
+			ifmt.Printf("% 8v(%3v) prefixes, % 8v files, % 8v reused, % 6v errors, % 9.2f stats/second  % 8v, (%s)  (%3.6f/%3.6f/%3.6f GiB) %s",
 				finished,
 				started-finished,
 				atomic.LoadInt64(&pt.numFiles),
@@ -116,6 +142,9 @@ func (pt *progressTracker) display(ctx context.Context) {
 				rate,
 				time.Since(pt.start).Truncate(time.Second),
 				time.Now().Format("15:04:05"),
+				float64(pt.memstats.HeapAlloc)/(1024*1024*1024),
+				float64(pt.memstats.HeapSys)/(1024*1024*1024),
+				float64(pt.rusage.Maxrss)/(1024*1024),
 				cr)
 			lastReport = time.Now()
 		}

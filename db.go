@@ -142,7 +142,13 @@ func dbRmPrefixes(ctx context.Context, values interface{}, args []string) error 
 		}
 		layout := globalConfig.LayoutFor(prefix)
 		_, err = db.Delete(ctx, layout.Separator, []string{prefix}, true)
-		errs.Append(err)
+		if err != nil {
+			errs.Append(fmt.Errorf("prefix deletion: %v", err))
+		}
+		_, err = db.DeleteErrors(ctx, []string{prefix})
+		if err != nil {
+			errs.Append(fmt.Errorf("error deletion: %v", err))
+		}
 	}
 	errs.Append(globalDatabaseManager.CloseAll(ctx))
 	return errs.Err()
