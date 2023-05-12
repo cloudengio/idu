@@ -71,7 +71,7 @@ func TestHelp(t *testing.T) {
 	if err := containsAnyOf(out, base...); err != nil {
 		t.Fatal(err)
 	}
-	err := containsAnyOf(out, "[--config=$HOME/.idu.yml --exit-profile= --h=true --http= --units=decimal --v=0]")
+	err := containsAnyOf(out, "[--config=$HOME/.idu.yml --exit-profile= --gcpercent=50 --h=true --http= --units=decimal --v=0]")
 	if err != nil {
 		t.Fatal(err)
 	}
