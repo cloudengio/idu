@@ -59,7 +59,15 @@ func runIDU(args ...string) (string, error) {
 		}
 	}
 
+	fi, err = os.Stat(iduCommand)
+	if err != nil {
+		fmt.Printf("STAT CMD: %v\n", fi.Name())
+	} else {
+		fmt.Printf("ERR CMD: %v\n", err)
+	}
+
 	cmd := exec.Command(iduCommand, args...)
+	fmt.Printf("CMD: %#v\n", cmd)
 	out, err := cmd.CombinedOutput()
 	return string(out), fmt.Errorf("%v: %v", strings.Join(cmd.Args, " "), err)
 }
