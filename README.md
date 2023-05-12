@@ -1,6 +1,10 @@
+![linux](https://github.com/cloudengio/idu/actions/workflows/linux.yml/badge.svg)
+![macos](https://github.com/cloudengio/idu/actions/workflows/macos.yml/badge.svg)
+![windows](https://github.com/cloudengio/idu/actions/workflows/windows.yml/badge.svg)
+![CodeQL](https://github.com/cloudengio/idu/actions/workflows/codeql.yml/badge.svg)
+
 # idu - incremental, database backed, du.
 
-[![CircleCI](https://circleci.com/gh/cloudengio/idu.svg?style=svg)](https://circleci.com/gh/cloudengio/idu) [![Go Report Card](https://goreportcard.com/badge/cloudeng.io/idu)](https://goreportcard.com/report/cloudeng.io/idu)
 
 `idu` analyzes file system structure and disk usage to build a database that
 suports incremental re-scanning to support large local and clould based
