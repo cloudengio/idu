@@ -31,4 +31,5 @@ jobs:
 
       - name: Test
         run: |
+          pwd
           go test --race --covermode=atomic ./...
