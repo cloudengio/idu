@@ -32,6 +32,7 @@ func TestMain(m *testing.M) {
 	tmpDir, _ := ioutil.TempDir("", "idu")
 	bin, err := buildIDU(tmpDir)
 	if err != nil {
+		fmt.Printf("failed to build idu: %v\n", err)
 		os.RemoveAll(tmpDir)
 		os.Exit(1)
 	}

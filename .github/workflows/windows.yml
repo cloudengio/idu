@@ -32,6 +32,5 @@ jobs:
         run: |
           pwd
           git status
-          go build .
-          go run . --help
+          go build -o x cloudeng.io/cmd/idu
           go test --race --covermode=atomic ./...
