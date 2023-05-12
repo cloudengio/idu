@@ -10,7 +10,6 @@ import (
 	"os"
 	"runtime"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"golang.org/x/text/language"
@@ -35,7 +34,7 @@ type progressTracker struct {
 	start                                   time.Time
 	lastGC                                  time.Time
 	memstats                                runtime.MemStats
-	rusage                                  syscall.Rusage
+	sysMemstats                             *sysMemstats
 }
 
 func newProgressTracker(ctx context.Context, interval time.Duration) *progressTracker {
@@ -64,7 +63,7 @@ func (pt *progressTracker) refreshMemstats() {
 	if time.Since(pt.lastGC) > (5 * time.Minute) {
 		runtime.GC()
 		runtime.ReadMemStats(&pt.memstats)
-		syscall.Getrusage(0, &pt.rusage)
+		pt.sysMemstats.update()
 		pt.lastGC = time.Now()
 	}
 }
@@ -81,7 +80,7 @@ func (pt *progressTracker) summary() {
 	ifmt.Printf("        run time : % 15v\n", time.Since(pt.start))
 	ifmt.Printf("      heap alloc : % 15.6fGiB\n", float64(pt.memstats.HeapAlloc)/(1024*1024*1024))
 	ifmt.Printf("  max heap alloc : % 15.6fGiB\n", float64(pt.memstats.HeapSys)/(1024*1024*1024))
-	ifmt.Printf(" max process RSS : %15.6fGiB\n", float64(pt.rusage.Maxrss)/(1024*1024))
+	ifmt.Printf(" max process RSS : %15.6fGiB\n", pt.sysMemstats.MaxRSSGiB())
 }
 
 func isInteractive() bool {
@@ -123,7 +122,7 @@ func (pt *progressTracker) display(ctx context.Context) {
 			progressMap.Set("heap-alloc-GiB", fl)
 			fl.Set(float64(pt.memstats.HeapSys) / (1024 * 1024 * 1024))
 			progressMap.Set("max-heap-alloc-GiB", fl)
-			fl.Set(float64(pt.rusage.Maxrss) / (1024 * 1024))
+			fl.Set(pt.sysMemstats.MaxRSSGiB())
 			progressMap.Set("max-RSS-GiB", fl)
 
 		case <-ctx.Done():
@@ -144,7 +143,7 @@ func (pt *progressTracker) display(ctx context.Context) {
 				time.Now().Format("15:04:05"),
 				float64(pt.memstats.HeapAlloc)/(1024*1024*1024),
 				float64(pt.memstats.HeapSys)/(1024*1024*1024),
-				float64(pt.rusage.Maxrss)/(1024*1024),
+				pt.sysMemstats.MaxRSSGiB(),
 				cr)
 			lastReport = time.Now()
 		}
