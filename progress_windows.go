@@ -6,8 +6,6 @@
 
 package main
 
-import "syscall"
-
 type sysMemstats struct{}
 
 func (s *sysMemstats) update() {
