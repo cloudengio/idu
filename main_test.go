@@ -43,13 +43,22 @@ func TestMain(m *testing.M) {
 
 func runIDU(args ...string) (string, error) {
 	dir := filepath.Dir(iduCommand)
-	fmt.Printf("DIR: %v\n", dir)
+	fmt.Printf("DIR: %v: cmd %v\n", dir, iduCommand)
 	fi, err := os.Stat(dir)
 	if err != nil {
 		fmt.Printf("STAT: %v\n", fi.Name())
 	} else {
 		fmt.Printf("ERR: %v\n", err)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			fmt.Printf("ERR: %v\n", err)
+		} else {
+			for _, e := range entries {
+				fmt.Printf("ENTRY: %v\n", e.Name())
+			}
+		}
 	}
+
 	cmd := exec.Command(iduCommand, args...)
 	out, err := cmd.CombinedOutput()
 	return string(out), fmt.Errorf("%v: %v", strings.Join(cmd.Args, " "), err)
