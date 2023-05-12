@@ -7,7 +7,7 @@ require (
 	cloudeng.io/cmdutil v0.0.0-20230427034012-5eaade00fd0f
 	cloudeng.io/errors v0.0.8
 	cloudeng.io/file v0.0.0-20230427034012-5eaade00fd0f
-	cloudeng.io/os v0.0.0-20230427034012-5eaade00fd0f
+	cloudeng.io/os v0.0.0-20230512210354-b9249e23695b
 	cloudeng.io/path v0.0.8
 	cloudeng.io/sync v0.0.8
 	cloudeng.io/sys v0.0.0-20230427034012-5eaade00fd0f // indirect

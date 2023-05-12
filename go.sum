@@ -37,6 +37,10 @@ cloudeng.io/os v0.0.0-20230307023515-8a194fbc7867/go.mod h1:gBS7WALqIPNN8ovv1DIu
 cloudeng.io/os v0.0.0-20230408194454-a3ea69cf3b9f/go.mod h1:VaeqTUuJjqsGWuUAz4ZK9e2/RVXvV138F1X+8t+UyoI=
 cloudeng.io/os v0.0.0-20230427034012-5eaade00fd0f h1:C3072usKydMbH73KPB1i2KmGn5vTD0Cq0ksvxM6mtI0=
 cloudeng.io/os v0.0.0-20230427034012-5eaade00fd0f/go.mod h1:VaeqTUuJjqsGWuUAz4ZK9e2/RVXvV138F1X+8t+UyoI=
+cloudeng.io/os v0.0.0-20230512190743-f8430251a475 h1:TBtfluvuHB/q8Fpnh6+9BsHziFJBRXPhYUSLmiX7V8Q=
+cloudeng.io/os v0.0.0-20230512190743-f8430251a475/go.mod h1:VaeqTUuJjqsGWuUAz4ZK9e2/RVXvV138F1X+8t+UyoI=
+cloudeng.io/os v0.0.0-20230512210354-b9249e23695b h1:rI23RaZqipFC/QLhLzlIymtTp6LAf1fi4DsC6emRAN8=
+cloudeng.io/os v0.0.0-20230512210354-b9249e23695b/go.mod h1:VaeqTUuJjqsGWuUAz4ZK9e2/RVXvV138F1X+8t+UyoI=
 cloudeng.io/path v0.0.3 h1:0xBVnBYTcSXT+NTK1cHV3XxFKbrn/RYYt8vXjRPyad8=
 cloudeng.io/path v0.0.3/go.mod h1:KKosYPzytd8hr6K2N/HeNplUkqbfcGWeVtHbTIXvkr8=
 cloudeng.io/path v0.0.4/go.mod h1:HTU24UoiQVjzSjN+K2kD8hpkBnoLGZh0OITJr3kfxUk=

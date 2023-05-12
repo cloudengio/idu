@@ -11,10 +11,9 @@ import (
 )
 
 type layoutSpec struct {
-	Type      string      `yaml:"type" cmd:"type of this layout"`
-	Prefix    string      `yaml:"prefix" cmd:"prefix that this layout applies to"`
-	Separator string      `yaml:"separator" cmd:"filename separator to use, defaults tp /"`
-	config    interface{} `yaml:"custom fields" cmd:"layout specific configuration fields"` //nolint:structcheck
+	Type      string `yaml:"type" cmd:"type of this layout"`
+	Prefix    string `yaml:"prefix" cmd:"prefix that this layout applies to"`
+	Separator string `yaml:"separator" cmd:"filename separator to use, defaults tp /"`
 }
 
 type layout struct {

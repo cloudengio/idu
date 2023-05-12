@@ -14,9 +14,8 @@ import (
 )
 
 type databaseSpec struct {
-	Prefix string      `yaml:"prefix" cmd:"use this database for this prefix"`
-	Type   string      `yaml:"type" cmd:"type of database to be used"`
-	config interface{} `yaml:"custom fields" cmd:"database specific configuration fields"` //nolint:structcheck
+	Prefix string `yaml:"prefix" cmd:"use this database for this prefix"`
+	Type   string `yaml:"type" cmd:"type of database to be used"`
 }
 
 type database struct {

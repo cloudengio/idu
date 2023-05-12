@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	_ "net/http/pprof"
+
+	// G108
+	_ "net/http/pprof" //nolint:gosec
 	"path/filepath"
 	"runtime"
 	debugpkg "runtime/debug"
@@ -154,7 +156,8 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 		if ln, err = net.Listen("tcp", port); err != nil {
 			return err
 		}
-		go http.Serve(ln, nil)
+		// gosec G114
+		go http.Serve(ln, nil) //nolint:gosec
 	}
 	return cmdRunner(ctx)
 }
