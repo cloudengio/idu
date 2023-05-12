@@ -33,4 +33,5 @@ jobs:
           pwd
           git status
           go build .
+          go run . --help
           go test --race --covermode=atomic ./...
