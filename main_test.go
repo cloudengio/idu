@@ -42,6 +42,14 @@ func TestMain(m *testing.M) {
 }
 
 func runIDU(args ...string) (string, error) {
+	dir := filepath.Dir(iduCommand)
+	fmt.Printf("DIR: %v\n", dir)
+	fi, err := os.Stat(dir)
+	if err != nil {
+		fmt.Printf("STAT: %v\n", fi.Name())
+	} else {
+		fmt.Printf("ERR: %v\n", err)
+	}
 	cmd := exec.Command(iduCommand, args...)
 	out, err := cmd.CombinedOutput()
 	return string(out), fmt.Errorf("%v: %v", strings.Join(cmd.Args, " "), err)
