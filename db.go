@@ -7,7 +7,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
 	"cloudeng.io/errors"
@@ -142,22 +141,14 @@ func dbRmPrefixes(ctx context.Context, values interface{}, args []string) error 
 			continue
 		}
 		layout := globalConfig.LayoutFor(prefix)
-		prefixes := make([]string, 0, 1000)
-		sc := db.NewScanner(prefix, -1, filewalk.ScanLimit(10000))
-		for sc.Scan(ctx) {
-			sp, _ := sc.PrefixInfo()
-			prefixes = append(prefixes, sp)
+		_, err = db.Delete(ctx, layout.Separator, []string{prefix}, true)
+		if err != nil {
+			errs.Append(fmt.Errorf("prefix deletion: %v", err))
 		}
-		errs.Append(sc.Err())
-		sort.Slice(prefixes, func(i, j int) bool {
-			return prefixes[i] > prefixes[j]
-		})
-		for _, s := range prefixes {
-			debug(ctx, 2, "deleting %s\n", s)
+		_, err = db.DeleteErrors(ctx, []string{prefix})
+		if err != nil {
+			errs.Append(fmt.Errorf("error deletion: %v", err))
 		}
-		_, err = db.Delete(ctx, layout.Separator, prefixes, false)
-		errs.Append(err)
-
 	}
 	errs.Append(globalDatabaseManager.CloseAll(ctx))
 	return errs.Err()
