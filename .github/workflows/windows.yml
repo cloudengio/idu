@@ -18,7 +18,8 @@ jobs:
         run: |
           git config --global core.autocrlf false
           git config --global core.eol lf
-          git config --global --add safe.directory ${{ github.workspace }}
+          git config --list
+          git status
 
       - name: Checkout code
         uses: actions/checkout@v3
