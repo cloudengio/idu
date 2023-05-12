@@ -32,7 +32,6 @@ func TestMain(m *testing.M) {
 	tmpDir, _ := ioutil.TempDir("", "idu")
 	bin, err := buildIDU(tmpDir)
 	if err != nil {
-		fmt.Printf("failed to build idu: %v\n", err)
 		os.RemoveAll(tmpDir)
 		os.Exit(1)
 	}
@@ -52,14 +51,17 @@ func containsAnyOf(got string, expected ...string) error {
 	for _, want := range expected {
 		if !strings.Contains(got, want) {
 			_, file, line, _ := runtime.Caller(1)
-			return fmt.Errorf("%v:%v: %v does not contain %v", filepath.Base(file), line, got, want)
+			return fmt.Errorf("%v:%v: %q does not contain %v", filepath.Base(file), line, got, want)
 		}
 	}
 	return nil
 }
 
 func TestHelp(t *testing.T) {
-	out, _ := runIDU("help")
+	out, err := runIDU("help")
+	if err != nil {
+		t.Fatal(err)
+	}
 	base := []string{
 		"idu: analyze file systems to create a database of per-file and aggregate size",
 		"errors - list the contents of the errors database",
@@ -72,7 +74,7 @@ func TestHelp(t *testing.T) {
 	if err := containsAnyOf(out, base...); err != nil {
 		t.Fatal(err)
 	}
-	err := containsAnyOf(out, "[--config=$HOME/.idu.yml --exit-profile= --gcpercent=50 --h=true --http= --units=decimal --v=0]")
+	err = containsAnyOf(out, "[--config=$HOME/.idu.yml --exit-profile= --gcpercent=50 --h=true --http= --units=decimal --v=0]")
 	if err != nil {
 		t.Fatal(err)
 	}
