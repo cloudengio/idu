@@ -19,18 +19,9 @@ import (
 
 var iduCommand string
 
-func buildIDU(tmpDir string) (string, error) {
-	bin, err := executil.GoBuild(context.Background(), filepath.Join(tmpDir, "idu"), "cloudeng.io/cmd/idu")
-	if err != nil {
-		return "", err
-	}
-	fmt.Printf("BIN: %v\n", bin)
-	return bin, nil
-}
-
 func TestMain(m *testing.M) {
 	tmpDir, _ := os.MkdirTemp("", "idu")
-	bin, err := buildIDU(tmpDir)
+	bin, err := executil.GoBuild(context.Background(), filepath.Join(tmpDir, "idu"), "cloudeng.io/cmd/idu")
 	if err != nil {
 		os.RemoveAll(tmpDir)
 		os.Exit(1)
