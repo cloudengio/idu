@@ -12,10 +12,12 @@ import (
 	"strings"
 	"time"
 
+	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/cmd/idu/internal/exclusions"
 	"cloudeng.io/cmdutil"
 	"cloudeng.io/errors"
+	"cloudeng.io/file"
 	"cloudeng.io/file/filewalk"
 	"cloudeng.io/path/cloudpath"
 )
@@ -57,16 +59,16 @@ func formatVarUpdate(status string, nFiles, nChildren int) stringer {
 	return stringer(fmt.Sprintf("%v: %v: %v/%v", time.Now().Format(time.Stamp), status, nFiles, nChildren))
 }
 
-func (sc *scanState) fileFn(ctx context.Context, prefix string, info *filewalk.Info, ch <-chan filewalk.Contents) ([]filewalk.Info, error) {
+func (sc *scanState) fileFn(ctx context.Context, prefix string, info file.Info, ch <-chan filewalk.Contents) (file.InfoList, error) {
 	activeMap.Set(prefix, formatVarUpdate("start", 0, 0))
 	defer activeMap.Delete(prefix)
 	sc.pt.send(ctx, progressUpdate{prefixStart: 1})
-	pi := filewalk.PrefixInfo{
-		ModTime: info.ModTime,
-		UserID:  info.UserID,
-		GroupID: info.GroupID,
-		Mode:    info.Mode,
-		Size:    info.Size,
+	pi := internal.PrefixInfo{
+		ModTime: info.ModTime(),
+		UserID:  info.User(),
+		GroupID: info.Group(),
+		Mode:    info.Mode(),
+		Size:    info.Size(),
 	}
 	layout := globalConfig.LayoutFor(prefix)
 	debug(ctx, 1, "prefix: %v\n", prefix)
@@ -90,8 +92,8 @@ func (sc *scanState) fileFn(ctx context.Context, prefix string, info *filewalk.I
 		}
 		debug(ctx, 2, "prefix: %v # files: %v # children: %v\n", prefix, len(results.Files), len(results.Children))
 		for _, file := range results.Files {
-			debug(ctx, 3, "prefix/file: %v/%v\n", prefix, file.Name)
-			pi.DiskUsage += layout.Calculator.Calculate(file.Size)
+			debug(ctx, 3, "prefix/file: %v/%v\n", prefix, file.Name())
+			pi.DiskUsage += layout.Calculator.Calculate(file.Size())
 			pi.Files = append(pi.Files, file)
 		}
 		pi.Children = append(pi.Children, results.Children...)
@@ -116,14 +118,14 @@ func (sc *scanState) fileFn(ctx context.Context, prefix string, info *filewalk.I
 	return pi.Children, nil
 }
 
-func findMissing(prefix string, previous, current []filewalk.Info) (remaining []filewalk.Info, deleted []string) {
+func findMissing(prefix string, previous, current file.InfoList) (remaining file.InfoList, deleted []string) {
 	cm := make(map[string]struct{}, len(previous))
 	for _, cur := range current {
-		cm[cur.Name] = struct{}{}
+		cm[cur.Name()] = struct{}{}
 	}
 	for _, prev := range previous {
-		if _, ok := cm[prev.Name]; !ok {
-			deleted = append(deleted, prefix+prev.Name)
+		if _, ok := cm[prev.Name()]; !ok {
+			deleted = append(deleted, prefix+prev.Name())
 		} else {
 			remaining = append(remaining, prev)
 		}
@@ -131,8 +133,8 @@ func findMissing(prefix string, previous, current []filewalk.Info) (remaining []
 	return
 }
 
-func handleDeletedChildren(ctx context.Context, layout config.Layout, prefix string, children []filewalk.Info) ([]filewalk.Info, int, error) {
-	var existing filewalk.PrefixInfo
+func handleDeletedChildren(ctx context.Context, layout config.Layout, prefix string, children file.InfoList) (file.InfoList, int, error) {
+	var existing internal.PrefixInfo
 	ok, err := globalDatabaseManager.Get(ctx, prefix, &existing)
 	if err != nil {
 		return nil, 0, fmt.Errorf("database: %v: %v", prefix, err)
@@ -157,7 +159,7 @@ func handleDeletedChildren(ctx context.Context, layout config.Layout, prefix str
 	return remaining, deleted, err
 }
 
-func (sc *scanState) prefixFn(ctx context.Context, prefix string, info *filewalk.Info, err error) (bool, []filewalk.Info, error) {
+func (sc *scanState) prefixFn(ctx context.Context, prefix string, info file.Info, err error) (bool, file.InfoList, error) {
 	prefixMap.Set(prefix, stringer(time.Now().Format(time.StampMilli)))
 	defer prefixMap.Delete(prefix)
 	if err != nil {
@@ -176,12 +178,12 @@ func (sc *scanState) prefixFn(ctx context.Context, prefix string, info *filewalk
 		return false, nil, nil
 	}
 
-	var existing filewalk.PrefixInfo
+	var existing internal.PrefixInfo
 	var unchanged bool
 	ok, err := globalDatabaseManager.Get(ctx, prefix, &existing)
 	if err == nil && ok {
-		if existing.ModTime == info.ModTime &&
-			existing.Mode == info.Mode {
+		if existing.ModTime == info.ModTime() &&
+			existing.Mode == info.Mode() {
 			unchanged = true
 		}
 	}
@@ -224,7 +226,7 @@ func analyze(ctx context.Context, values interface{}, args []string) error {
 		incremental: flagValues.Incremental,
 		errorMap:    errorMap,
 	}
-	walker := filewalk.New(sc.fs, filewalk.Concurrency(flagValues.Concurrency))
+	walker := filewalk.New(sc.fs, filewalk.WithConcurrency(flagValues.Concurrency))
 	errs.Append(walker.Walk(ctx, sc.prefixFn, sc.fileFn, prefix))
 	errs.Append(globalDatabaseManager.CloseAll(ctx))
 	cancel()
@@ -238,7 +240,7 @@ func deleteErrors(ctx context.Context, prefix string) (map[string]struct{}, erro
 	}
 	em := map[string]struct{}{}
 	deletions := []string{}
-	sc := db.NewScanner("", 0, filewalk.ScanErrors())
+	sc := db.NewScanner("", 0, internal.ScanErrors())
 	for sc.Scan(ctx) {
 		p, pi := sc.PrefixInfo()
 		if !strings.HasPrefix(p, prefix) {

@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"cloudeng.io/algo/container/heap"
+	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmdutil/flags"
 	"cloudeng.io/errors"
-	"cloudeng.io/file/filewalk"
 	"cloudeng.io/sync/errgroup"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
@@ -33,7 +33,7 @@ type findFlags struct {
 
 type finder struct {
 	pt               *progressTracker
-	db               filewalk.Database
+	db               internal.Database
 	sep              string
 	user, group      string
 	prefixRE, fileRE []*regexp.Regexp
@@ -42,7 +42,7 @@ type finder struct {
 type results struct {
 	prefix            string
 	sep               string
-	prefixInfo        filewalk.PrefixInfo
+	prefixInfo        internal.PrefixInfo
 	nFiles, nChildren int
 }
 
@@ -56,7 +56,7 @@ func match(regexps []*regexp.Regexp, value string) bool {
 }
 
 func (fr *finder) find(ctx context.Context, resultsCh chan results, root string) error {
-	sc := fr.db.NewScanner(root, 0, filewalk.ScanLimit(100000))
+	sc := fr.db.NewScanner(root, 0, internal.ScanLimit(100000))
 	user, group := fr.user, fr.group
 	prefixRE, fileRE := fr.prefixRE, fr.fileRE
 	for sc.Scan(ctx) {
@@ -88,7 +88,7 @@ func (fr *finder) find(ctx context.Context, resultsCh chan results, root string)
 			continue
 		}
 		for _, fi := range pi.Files {
-			if match(fileRE, fi.Name) {
+			if match(fileRE, fi.Name()) {
 				found.Files = append(found.Files, fi)
 			}
 		}
@@ -140,7 +140,7 @@ func find(ctx context.Context, values interface{}, args []string) error {
 	finders = errgroup.WithConcurrency(finders, len(args))
 	for _, root := range args {
 		root := root
-		db, err := globalDatabaseManager.DatabaseFor(ctx, root, filewalk.ReadOnly())
+		db, err := globalDatabaseManager.DatabaseFor(ctx, root, internal.ReadOnly())
 		if err != nil {
 			return err
 		}

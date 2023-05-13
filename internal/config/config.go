@@ -13,10 +13,10 @@ import (
 	"sort"
 	"strings"
 
+	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmdutil/structdoc"
 	"cloudeng.io/errors"
 	"cloudeng.io/file/diskusage"
-	"cloudeng.io/file/filewalk"
 	"gopkg.in/yaml.v2"
 )
 
@@ -30,12 +30,12 @@ type Layout struct {
 
 // DatabaseOpenFunc is called to open a filewalk.Database instance in
 // write or read-only mode.
-type DatabaseOpenFunc func(ctx context.Context, opts ...filewalk.DatabaseOption) (filewalk.Database, error)
+type DatabaseOpenFunc func(ctx context.Context, opts ...internal.DatabaseOption) (internal.Database, error)
 
-// DatabaseDeleteFunc is called to delete an instance of filewalk.Database.
+// DatabaseDeleteFunc is called to delete an instance of internal.Database.
 type DatabaseDeleteFunc func(ctx context.Context) error
 
-// Database represents a means of creating instances of filewalk.Database
+// Database represents a means of creating instances of internal.Database
 // configured as per the yaml configuration file that is to be used for
 // storing data for entries within the specified prefix.
 type Database struct {
