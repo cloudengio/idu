@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"os"
 
+	"cloudeng.io/cmd/internal/localdb"
 	"cloudeng.io/file/filewalk"
-	"cloudeng.io/file/filewalk/localdb"
 )
 
 type databaseSpec struct {
