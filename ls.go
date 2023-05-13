@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"cloudeng.io/algo/container/heap"
+	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmdutil"
 	"cloudeng.io/errors"
-	"cloudeng.io/file/filewalk"
 	"cloudeng.io/sync/errgroup"
 )
 
@@ -28,12 +28,12 @@ type lsFlags struct {
 	User       string `subcmd:"user,,show information for this user only"`
 }
 
-func lsTree(ctx context.Context, pt *progressTracker, db filewalk.Database, root, user string, flags *lsFlags) (files, children, disk *heap.KeyedInt64, nerrors int64, err error) {
+func lsTree(ctx context.Context, pt *progressTracker, db internal.Database, root, user string, flags *lsFlags) (files, children, disk *heap.KeyedInt64, nerrors int64, err error) {
 	files, children, disk = heap.NewKeyedInt64(heap.Descending), heap.NewKeyedInt64(heap.Descending), heap.NewKeyedInt64(heap.Descending)
 	if flags.ShowDirs {
 		fmt.Printf("     disk usage :  # files : # dirs : directory/prefix\n")
 	}
-	sc := db.NewScanner(root, flags.Limit, filewalk.ScanLimit(10000))
+	sc := db.NewScanner(root, flags.Limit, internal.ScanLimit(10000))
 	for sc.Scan(ctx) {
 		prefix, pi := sc.PrefixInfo()
 		if len(user) > 0 && pi.UserID != user {
@@ -56,12 +56,12 @@ func lsTree(ctx context.Context, pt *progressTracker, db filewalk.Database, root
 			fmt.Printf("% 15v : % 8v : % 6v : %s\n", fsize(pi.DiskUsage), len(pi.Files), len(pi.Children), prefix)
 			if flags.ShowDirs {
 				for _, fi := range pi.Children {
-					fmt.Printf("    % 15v : % 40v: % 10v : %v\n", fsize(fi.Size), fi.ModTime, globalUserManager.nameForUID(fi.UserID), fi.Name)
+					fmt.Printf("    % 15v : % 40v: % 10v : %v\n", fsize(fi.Size()), fi.ModTime(), globalUserManager.nameForUID(fi.User()), fi.Name())
 				}
 			}
 			if flags.ShowFiles {
 				for _, fi := range pi.Files {
-					fmt.Printf("    % 15v : % 40v: % 10v : %v\n", fsize(fi.Size), fi.ModTime, globalUserManager.nameForUID(fi.UserID), fi.Name)
+					fmt.Printf("    % 15v : % 40v: % 10v : %v\n", fsize(fi.Size()), fi.ModTime(), globalUserManager.nameForUID(fi.User()), fi.Name())
 				}
 			}
 			continue
@@ -75,10 +75,10 @@ func lsTree(ctx context.Context, pt *progressTracker, db filewalk.Database, root
 func topNMetrics(top []struct {
 	K string
 	V int64
-}) []filewalk.Metric {
-	m := make([]filewalk.Metric, len(top))
+}) []internal.Metric {
+	m := make([]internal.Metric, len(top))
 	for i, kv := range top {
-		m[i] = filewalk.Metric{Prefix: kv.K, Value: kv.V}
+		m[i] = internal.Metric{Prefix: kv.K, Value: kv.V}
 	}
 	return m
 }
@@ -96,7 +96,7 @@ func lsr(ctx context.Context, values interface{}, args []string) error {
 		root                  string
 		files, children, disk *heap.KeyedInt64
 		errors                int64
-		db                    filewalk.Database
+		db                    internal.Database
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -117,7 +117,7 @@ func lsr(ctx context.Context, values interface{}, args []string) error {
 	resultsCh := make(chan results)
 	for _, root := range args {
 		root := root
-		db, err := globalDatabaseManager.DatabaseFor(ctx, root, filewalk.ReadOnly())
+		db, err := globalDatabaseManager.DatabaseFor(ctx, root, internal.ReadOnly())
 		if err != nil {
 			return err
 		}
@@ -169,11 +169,11 @@ func lsr(ctx context.Context, values interface{}, args []string) error {
 }
 
 func listErrors(ctx context.Context, values interface{}, args []string) error {
-	db, err := globalDatabaseManager.DatabaseFor(ctx, args[0], filewalk.ErrorsOnly(), filewalk.ReadOnly())
+	db, err := globalDatabaseManager.DatabaseFor(ctx, args[0], internal.ErrorsOnly(), internal.ReadOnly())
 	if err != nil {
 		return err
 	}
-	sc := db.NewScanner("", 0, filewalk.ScanErrors())
+	sc := db.NewScanner("", 0, internal.ScanErrors())
 	for sc.Scan(ctx) {
 		prefix, info := sc.PrefixInfo()
 		fmt.Printf("%v: %v\n", prefix, info.Err)

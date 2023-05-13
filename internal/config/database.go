@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"os"
 
-	"cloudeng.io/cmd/internal/localdb"
-	"cloudeng.io/file/filewalk"
+	"cloudeng.io/cmd/idu/internal"
+	"cloudeng.io/cmd/idu/internal/localdb"
 )
 
 type databaseSpec struct {
@@ -57,7 +57,7 @@ func (d *database) UnmarshalYAML(unmarshal func(interface{}) error) error {
 
 func localOpen(spec interface{}) (DatabaseOpenFunc, DatabaseDeleteFunc, string) {
 	dir := os.ExpandEnv(spec.(*localDatabaseSpec).Directory)
-	open := func(ctx context.Context, opts ...filewalk.DatabaseOption) (filewalk.Database, error) {
+	open := func(ctx context.Context, opts ...internal.DatabaseOption) (internal.Database, error) {
 		return localdb.Open(ctx, dir, opts)
 	}
 	delete := func(ctx context.Context) error {

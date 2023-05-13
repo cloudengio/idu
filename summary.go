@@ -14,8 +14,8 @@ import (
 	"sort"
 	"strconv"
 
+	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/errors"
-	"cloudeng.io/file/filewalk"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 )
@@ -40,12 +40,12 @@ type groupFlags struct {
 	WriteFiles string `subcmd:"reports-dir,,write per-group statistics to the specified directory"`
 }
 
-func printSummaryStats(ctx context.Context, out io.Writer, nFiles, nChildren, nBytes, nErrors int64, topN int, topFiles, topChildren, topBytes []filewalk.Metric) {
+func printSummaryStats(ctx context.Context, out io.Writer, nFiles, nChildren, nBytes, nErrors int64, topN int, topFiles, topChildren, topBytes []internal.Metric) {
 	ifmt := message.NewPrinter(language.English)
 
-	printMetric := func(metric []filewalk.Metric, bytes bool) {
+	printMetric := func(metric []internal.Metric, bytes bool) {
 		for _, m := range metric {
-			db, _ := globalDatabaseManager.DatabaseFor(ctx, m.Prefix, filewalk.ReadOnly())
+			db, _ := globalDatabaseManager.DatabaseFor(ctx, m.Prefix, internal.ReadOnly())
 			name := globalUserManager.nameForPrefix(ctx, db, m.Prefix)
 			if bytes {
 				ifmt.Fprintf(out, "%20v: %v (%v)\n", fsize(m.Value), m.Prefix, name)
@@ -78,7 +78,7 @@ type mergedStats struct {
 	nChildren int64
 }
 
-func mergeStats(ctx context.Context, db filewalk.Database, root string, nFiles, nChildren, nBytes, nErrors int64, topN int, topFiles, topChildren, topBytes []filewalk.Metric) []mergedStats {
+func mergeStats(ctx context.Context, db internal.Database, root string, nFiles, nChildren, nBytes, nErrors int64, topN int, topFiles, topChildren, topBytes []internal.Metric) []mergedStats {
 	existing := map[string]mergedStats{}
 	existing[root] = mergedStats{
 		prefix:    root,
@@ -88,7 +88,7 @@ func mergeStats(ctx context.Context, db filewalk.Database, root string, nFiles, 
 		nChildren: nChildren,
 	}
 
-	setv := func(m filewalk.Metric, which int) {
+	setv := func(m internal.Metric, which int) {
 		e := existing[m.Prefix]
 		e.prefix = m.Prefix
 		switch which {
@@ -140,24 +140,24 @@ func writeTSVSummary(ctx context.Context, out *os.File, merged []mergedStats) er
 	return wr.Error()
 }
 
-func getAllStats(ctx context.Context, db filewalk.Database, n int, opts ...filewalk.MetricOption) (
+func getAllStats(ctx context.Context, db internal.Database, n int, opts ...internal.MetricOption) (
 	nFiles, nChildren, nBytes, nErrors int64,
-	topFiles, topChildren, topBytes []filewalk.Metric,
+	topFiles, topChildren, topBytes []internal.Metric,
 	err error) {
 	errs := errors.M{}
-	nFiles, err = db.Total(ctx, filewalk.TotalFileCount, opts...)
+	nFiles, err = db.Total(ctx, internal.TotalFileCount, opts...)
 	errs.Append(err)
-	nChildren, err = db.Total(ctx, filewalk.TotalPrefixCount, opts...)
+	nChildren, err = db.Total(ctx, internal.TotalPrefixCount, opts...)
 	errs.Append(err)
-	nBytes, err = db.Total(ctx, filewalk.TotalDiskUsage, opts...)
+	nBytes, err = db.Total(ctx, internal.TotalDiskUsage, opts...)
 	errs.Append(err)
-	nErrors, err = db.Total(ctx, filewalk.TotalErrorCount, opts...)
+	nErrors, err = db.Total(ctx, internal.TotalErrorCount, opts...)
 	errs.Append(err)
-	topFiles, err = db.TopN(ctx, filewalk.TotalFileCount, n, opts...)
+	topFiles, err = db.TopN(ctx, internal.TotalFileCount, n, opts...)
 	errs.Append(err)
-	topChildren, err = db.TopN(ctx, filewalk.TotalPrefixCount, n, opts...)
+	topChildren, err = db.TopN(ctx, internal.TotalPrefixCount, n, opts...)
 	errs.Append(err)
-	topBytes, err = db.TopN(ctx, filewalk.TotalDiskUsage, n, opts...)
+	topBytes, err = db.TopN(ctx, internal.TotalDiskUsage, n, opts...)
 	errs.Append(err)
 	err = errs.Err()
 	return
@@ -165,14 +165,14 @@ func getAllStats(ctx context.Context, db filewalk.Database, n int, opts ...filew
 
 func summary(ctx context.Context, values interface{}, args []string) error {
 	flagValues := values.(*summaryFlags)
-	db, err := globalDatabaseManager.DatabaseFor(ctx, args[0], filewalk.ReadOnly())
+	db, err := globalDatabaseManager.DatabaseFor(ctx, args[0], internal.ReadOnly())
 	if err != nil {
 		return err
 	}
 	defer globalDatabaseManager.CloseAll(ctx)
 	nFiles, nChildren, nBytes, nErrors,
 		topFiles, topChildren, topBytes, err :=
-		getAllStats(ctx, db, flagValues.TopN, filewalk.Global())
+		getAllStats(ctx, db, flagValues.TopN, internal.Global())
 	if err != nil {
 		return err
 	}
@@ -180,7 +180,7 @@ func summary(ctx context.Context, values interface{}, args []string) error {
 
 	nFiles, nChildren, nBytes, nErrors,
 		topFiles, topChildren, topBytes, err =
-		getAllStats(ctx, db, flagValues.TSVTopN, filewalk.Global())
+		getAllStats(ctx, db, flagValues.TSVTopN, internal.Global())
 	if err != nil {
 		return err
 	}
@@ -197,7 +197,7 @@ func summary(ctx context.Context, values interface{}, args []string) error {
 	return nil
 }
 
-func printUsers(ctx context.Context, db filewalk.Database) error {
+func printUsers(ctx context.Context, db internal.Database) error {
 	users, err := db.UserIDs(ctx)
 	if err != nil {
 		return err
@@ -214,7 +214,7 @@ func printUsers(ctx context.Context, db filewalk.Database) error {
 	return nil
 }
 
-func printGroups(ctx context.Context, db filewalk.Database) error {
+func printGroups(ctx context.Context, db internal.Database) error {
 	groups, err := db.GroupIDs(ctx)
 	if err != nil {
 		return err
@@ -255,7 +255,7 @@ func reportForUserOrGroup(dir, name string) (io.Writer, func() error, error) {
 
 func userSummary(ctx context.Context, values interface{}, args []string) error {
 	flagValues := values.(*userFlags)
-	db, err := globalDatabaseManager.DatabaseFor(ctx, args[0], filewalk.ReadOnly())
+	db, err := globalDatabaseManager.DatabaseFor(ctx, args[0], internal.ReadOnly())
 	if err != nil {
 		return err
 	}
@@ -279,7 +279,7 @@ func userSummary(ctx context.Context, values interface{}, args []string) error {
 		key := globalUserManager.uidForName(name)
 		out, close, err := reportForUserOrGroup(flagValues.WriteFiles, name)
 		errs.Append(err)
-		nFiles, nChildren, nBytes, nErrors, topFiles, topChildren, topBytes, err := getAllStats(ctx, db, flagValues.TopN, filewalk.UserID(key))
+		nFiles, nChildren, nBytes, nErrors, topFiles, topChildren, topBytes, err := getAllStats(ctx, db, flagValues.TopN, internal.UserID(key))
 		errs.Append(err)
 		fmt.Fprintf(out, "\nSummary for %v (%v)\n", name, usr)
 		printSummaryStats(ctx, out, nFiles, nChildren, nBytes, nErrors, flagValues.TopN, topFiles, topChildren, topBytes)
@@ -291,7 +291,7 @@ func userSummary(ctx context.Context, values interface{}, args []string) error {
 
 func groupSummary(ctx context.Context, values interface{}, args []string) error {
 	flagValues := values.(*groupFlags)
-	db, err := globalDatabaseManager.DatabaseFor(ctx, args[0], filewalk.ReadOnly())
+	db, err := globalDatabaseManager.DatabaseFor(ctx, args[0], internal.ReadOnly())
 	if err != nil {
 		return err
 	}
@@ -317,7 +317,7 @@ func groupSummary(ctx context.Context, values interface{}, args []string) error 
 		out, close, err := reportForUserOrGroup(flagValues.WriteFiles, name)
 		errs.Append(err)
 		nFiles, nChildren, nBytes, nErrors,
-			topFiles, topChildren, topBytes, err := getAllStats(ctx, db, flagValues.TopN, filewalk.GroupID(key))
+			topFiles, topChildren, topBytes, err := getAllStats(ctx, db, flagValues.TopN, internal.GroupID(key))
 		errs.Append(err)
 		fmt.Fprintf(out, "\nSummary for %v (%v)\n", name, grp)
 		printSummaryStats(ctx, out, nFiles, nChildren, nBytes, nErrors, flagValues.TopN, topFiles, topChildren, topBytes)

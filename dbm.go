@@ -9,29 +9,29 @@ import (
 	"fmt"
 	"sync"
 
+	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/errors"
-	"cloudeng.io/file/filewalk"
 	"cloudeng.io/os/userid"
 )
 
 type databaseManager struct {
 	sync.Mutex
-	dbs map[string]filewalk.Database
+	dbs map[string]internal.Database
 }
 
 var globalDatabaseManager = databaseManager{
-	dbs: map[string]filewalk.Database{},
+	dbs: map[string]internal.Database{},
 }
 
-func (dbm *databaseManager) DatabaseFor(ctx context.Context, prefix string, opts ...filewalk.DatabaseOption) (filewalk.Database, error) {
+func (dbm *databaseManager) DatabaseFor(ctx context.Context, prefix string, opts ...internal.DatabaseOption) (internal.Database, error) {
 	dbm.Lock()
 	defer dbm.Unlock()
 	db, _, err := dbm.databaseForLocked(ctx, prefix, opts...)
 	return db, err
 }
 
-func (dbm *databaseManager) databaseForLocked(ctx context.Context, prefix string, opts ...filewalk.DatabaseOption) (filewalk.Database, config.Database, error) {
+func (dbm *databaseManager) databaseForLocked(ctx context.Context, prefix string, opts ...internal.DatabaseOption) (internal.Database, config.Database, error) {
 	cfg, ok := globalConfig.DatabaseFor(prefix)
 	if !ok {
 		return nil, cfg, fmt.Errorf("no database is configured for %v", prefix)
@@ -48,7 +48,7 @@ func (dbm *databaseManager) databaseForLocked(ctx context.Context, prefix string
 	return db, cfg, nil
 }
 
-func (dbm *databaseManager) Set(ctx context.Context, prefix string, info *filewalk.PrefixInfo, opts ...filewalk.DatabaseOption) error {
+func (dbm *databaseManager) Set(ctx context.Context, prefix string, info *internal.PrefixInfo, opts ...internal.DatabaseOption) error {
 	db, err := dbm.DatabaseFor(ctx, prefix, opts...)
 	if err != nil {
 		return err
@@ -56,7 +56,7 @@ func (dbm *databaseManager) Set(ctx context.Context, prefix string, info *filewa
 	return db.Set(ctx, prefix, info)
 }
 
-func (dbm *databaseManager) Get(ctx context.Context, prefix string, info *filewalk.PrefixInfo, opts ...filewalk.DatabaseOption) (bool, error) {
+func (dbm *databaseManager) Get(ctx context.Context, prefix string, info *internal.PrefixInfo, opts ...internal.DatabaseOption) (bool, error) {
 	db, err := dbm.DatabaseFor(ctx, prefix, opts...)
 	if err != nil {
 		return false, err
@@ -64,7 +64,7 @@ func (dbm *databaseManager) Get(ctx context.Context, prefix string, info *filewa
 	return db.Get(ctx, prefix, info)
 }
 
-func (dbm *databaseManager) Delete(ctx context.Context, separator, prefix string, prefixes []string, opts ...filewalk.DatabaseOption) (int, error) {
+func (dbm *databaseManager) Delete(ctx context.Context, separator, prefix string, prefixes []string, opts ...internal.DatabaseOption) (int, error) {
 	db, err := dbm.DatabaseFor(ctx, prefix, opts...)
 	if err != nil {
 		return 0, err
@@ -101,7 +101,7 @@ func (dbm *databaseManager) CloseAll(ctx context.Context) error {
 	for _, db := range dbm.dbs {
 		errs.Append(db.Close(ctx))
 	}
-	dbm.dbs = map[string]filewalk.Database{}
+	dbm.dbs = map[string]internal.Database{}
 	return errs.Err()
 }
 
@@ -145,8 +145,8 @@ func (um *userManager) nameForGID(gid string) string {
 	return gid
 }
 
-func (um *userManager) nameForPrefix(ctx context.Context, db filewalk.Database, prefix string) string {
-	var pi filewalk.PrefixInfo
+func (um *userManager) nameForPrefix(ctx context.Context, db internal.Database, prefix string) string {
+	var pi internal.PrefixInfo
 	ok, err := db.Get(ctx, prefix, &pi)
 	if err != nil || !ok {
 		return "(unknown)"
