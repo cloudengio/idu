@@ -27,12 +27,47 @@ import (
 )
 
 var (
-	cmdSet       *subcmd.CommandSet
 	globalFlags  GlobalFlags
 	globalConfig *config.Config
+)
+
+var (
 	panicBuf     = make([]byte, 1024*1024)
 	bytesPrinter func(size int64) (float64, string)
 )
+
+var commands = `name: idu
+summary: determine disk usage incrementally using a database
+commands:
+  - name: analyze
+    summary: analyze the file system to build a database of file counts, disk usage etc
+    arguments:
+      - <directory/prefix>
+  - name: config
+    summary: describe the current configuration
+  - name: summary
+    summary: summarize file count and disk usage
+    arguments:
+      - <directory/prefix>
+  - name: user
+    summary: summarize file count and disk usage on a per user basis
+  - name: group
+    summary: summarize file count and disk usage on a per group basis
+  - name: find
+    summary: find prefixes/files in statistics database
+  - name: lsr
+    summary: list the contents of the database
+    arguments:
+       - <prefix>
+       - ...
+  - name: database
+    summary: database management commands
+    commands:
+    - name: stats
+      summary: display database stastistics
+    - name: erase
+      summary: erase the database
+`
 
 type GlobalFlags struct {
 	ExitProfile profiling.ProfileFlag `subcmd:"exit-profile,,'write a profile on exit; the format is <profile-name>:<file> and the flag may be repeated to request multiple profile types, use cpu to request cpu profiling in addition to predefined profiles in runtime/pprof'"`
@@ -44,72 +79,23 @@ type GlobalFlags struct {
 	GCPercent   int                   `subcmd:"gcpercent,50,value to use for runtime/debug.SetGCPercent"`
 }
 
-func init() {
-	analyzeFlagSet := subcmd.MustRegisterFlagStruct(&analyzeFlags{}, nil, nil)
-	summaryFlagSet := subcmd.MustRegisterFlagStruct(&summaryFlags{}, nil, nil)
-	userFlagSet := subcmd.MustRegisterFlagStruct(&userFlags{}, nil, nil)
-	groupFlagSet := subcmd.MustRegisterFlagStruct(&groupFlags{}, nil, nil)
-	findFlagSet := subcmd.MustRegisterFlagStruct(&findFlags{}, nil, nil)
-	lsFlagSet := subcmd.MustRegisterFlagStruct(&lsFlags{}, nil, nil)
-	eraseFlagSet := subcmd.MustRegisterFlagStruct(&eraseFlags{}, nil, nil)
-
-	analyzeCmd := subcmd.NewCommand("analyze", analyzeFlagSet, analyze, subcmd.ExactlyNumArguments(1))
-	analyzeCmd.Document("analyze the file system to build a database of file counts, disk usage etc", "<directory/prefix>+")
-
-	summaryCmd := subcmd.NewCommand("summary", summaryFlagSet, summary, subcmd.ExactlyNumArguments(1))
-	summaryCmd.Document("summarize file count and disk usage")
-
-	userSummaryCmd := subcmd.NewCommand("user", userFlagSet, userSummary, subcmd.AtLeastNArguments(1))
-	userSummaryCmd.Document("summarize file count and disk usage on a per user basis", "<prefix> <users>...")
-
-	groupSummaryCmd := subcmd.NewCommand("group", groupFlagSet, groupSummary, subcmd.AtLeastNArguments(1))
-	groupSummaryCmd.Document("summarize file count and disk usage on a per group basis", "<prefix> <groups>...")
-
-	findCmd := subcmd.NewCommand("find", findFlagSet, find)
-	findCmd.Document("find prefixes/files in statistics database")
-
-	lsrCmd := subcmd.NewCommand("lsr", lsFlagSet, lsr, subcmd.AtLeastNArguments(1))
-	lsrCmd.Document("list the contents of the database")
-
-	dbEraseCmd := subcmd.NewCommand("erase", eraseFlagSet, dbErase, subcmd.ExactlyNumArguments(1))
-	dbEraseCmd.Document("erase the file and statistics database")
-
-	dbStatsFlagSet := subcmd.MustRegisterFlagStruct(&configFlags{}, nil, nil)
-	dbStatsCmd := subcmd.NewCommand("stats", dbStatsFlagSet, dbStats, subcmd.AtLeastNArguments(1))
-	dbStatsCmd.Document("display database stastistics")
-
-	dbCompactFlagSet := subcmd.MustRegisterFlagStruct(&configFlags{}, nil, nil)
-	dbCompactCmd := subcmd.NewCommand("compact", dbCompactFlagSet, dbCompact, subcmd.AtLeastNArguments(1))
-	dbCompactCmd.Document("perform database compaction")
-
-	dbRefreshStatsFlagSet := subcmd.NewFlagSet()
-	dbRefreshStatsCmd := subcmd.NewCommand("refresh-stats", dbRefreshStatsFlagSet, dbRefreshStats, subcmd.ExactlyNumArguments(1))
-	dbRefreshStatsCmd.Document("refresh statistics by recalculating them over the entire database")
-
-	dbRmPrefixesFlagSet := subcmd.NewFlagSet()
-	dmRmPrefixesCmd := subcmd.NewCommand("rm-prefixes", dbRmPrefixesFlagSet, dbRmPrefixes)
-	dmRmPrefixesCmd.Document("delete the specified prefixes, recursively, from the database")
-
-	dbCmds := subcmd.NewCommandSet(dbCompactCmd, dbStatsCmd, dbEraseCmd, dbRefreshStatsCmd, dmRmPrefixesCmd)
-
-	dbCommands := subcmd.NewCommandLevel("database", dbCmds)
-	dbCommands.Document("database management commands")
-
-	configFlagSet := subcmd.MustRegisterFlagStruct(&configFlags{}, nil, nil)
-	configCmd := subcmd.NewCommand("config", configFlagSet, configManager, subcmd.WithoutArguments())
-	configCmd.Document("describe the current configuration")
-
-	errorsFlagSet := subcmd.NewFlagSet()
-	errorsCmd := subcmd.NewCommand("errors", errorsFlagSet, listErrors, subcmd.ExactlyNumArguments(1))
-	errorsCmd.Document("list the contents of the errors database")
-
-	cmdSet = subcmd.NewCommandSet(analyzeCmd, configCmd, errorsCmd, lsrCmd, findCmd, summaryCmd, userSummaryCmd, groupSummaryCmd, dbCommands)
-	cmdSet.Document(`idu: analyze file systems to create a database of per-file and aggregate size stastistics to support incremental updates and subsequent interrogation. Local and cloud based filesystems are contemplated. See https://github.com/cloudengio/blob/master/idu/README.md for full details.`)
-
+func cli() *subcmd.CommandSetYAML {
+	cmdSet := subcmd.MustFromYAMLTemplate(commands)
+	cmdSet.Set("analyze").MustRunner(analyze, &analyzeFlags{})
+	cmdSet.Set("summary").MustRunner(summary, &summaryFlags{})
+	cmdSet.Set("user").MustRunner(userSummary, &userFlags{})
+	cmdSet.Set("group").MustRunner(groupSummary, &groupFlags{})
+	cmdSet.Set("find").MustRunner(find, &findFlags{})
+	cmdSet.Set("lsr").MustRunner(lsr, &lsFlags{})
+	cmdSet.Set("config").MustRunner(configManager, &configFlags{})
+	db := &database{}
+	cmdSet.Set("database", "statistics").MustRunner(db.stats, &struct{}{})
+	cmdSet.Set("database", "erase").MustRunner(db.erase, &eraseFlags{})
 	globals := subcmd.GlobalFlagSet()
 	globals.MustRegisterFlagStruct(&globalFlags, nil, nil)
 	cmdSet.WithGlobalFlags(globals)
 	cmdSet.WithMain(mainWrapper)
+	return cmdSet
 }
 
 func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error) error {
@@ -163,7 +149,7 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 }
 
 func main() {
-	cmdSet.MustDispatch(context.Background())
+	cli().MustDispatch(context.Background())
 }
 
 func debug(ctx context.Context, level int, format string, args ...interface{}) {

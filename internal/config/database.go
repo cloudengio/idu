@@ -10,7 +10,7 @@ import (
 	"os"
 
 	"cloudeng.io/file/filewalk"
-	"cloudeng.io/file/filewalk/localdb"
+	"cloudeng.io/idu/localdb"
 )
 
 type databaseSpec struct {

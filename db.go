@@ -15,11 +15,13 @@ import (
 	"golang.org/x/text/message"
 )
 
+type database struct{}
+
 type eraseFlags struct {
 	ReallyDelete bool `subcmd:"really,false,must be set to erase the database"`
 }
 
-func dbErase(ctx context.Context, values interface{}, args []string) error {
+func (db *database) erase(ctx context.Context, values interface{}, args []string) error {
 	flagValues := values.(*eraseFlags)
 	if !flagValues.ReallyDelete {
 		fmt.Printf("use --really to erase/delete the database\n")
@@ -33,6 +35,7 @@ func dbErase(ctx context.Context, values interface{}, args []string) error {
 	return dbCfg.Delete(ctx)
 }
 
+/*
 func dbRefreshStats(ctx context.Context, values interface{}, args []string) error {
 	db, err := globalDatabaseManager.DatabaseFor(ctx, args[0], filewalk.ResetStats())
 	if err != nil {
@@ -60,9 +63,9 @@ func dbRefreshStats(ctx context.Context, values interface{}, args []string) erro
 		return fmt.Errorf("scanner error: %v", sc.Err())
 	}
 	return globalDatabaseManager.CloseAll(ctx)
-}
+}*/
 
-func printDBStats(prefix string, stats []filewalk.DatabaseStats) {
+func (db *database) printDBStats(prefix string, stats []filewalk.DatabaseStats) {
 	ifmt := message.NewPrinter(language.English)
 	ifmt.Printf("%v\n", prefix)
 	ifmt.Printf("%s\n\n", strings.Repeat("=", len(prefix)))
@@ -77,22 +80,22 @@ func printDBStats(prefix string, stats []filewalk.DatabaseStats) {
 	}
 }
 
-func getStats(ctx context.Context, prefix string) ([]filewalk.DatabaseStats, error) {
-	db, err := globalDatabaseManager.DatabaseFor(ctx, prefix, filewalk.ReadOnly())
+func (db *database) getStats(ctx context.Context, prefix string) ([]filewalk.DatabaseStats, error) {
+	ldb, err := globalDatabaseManager.DatabaseFor(ctx, prefix, filewalk.ReadOnly())
 	if err != nil {
 		return nil, err
 	}
 	defer globalDatabaseManager.Close(ctx, prefix)
-	return db.Stats()
+	return ldb.Stats()
 }
 
-func dbStats(ctx context.Context, values interface{}, args []string) error {
+func (db *database) stats(ctx context.Context, values interface{}, args []string) error {
 	for i, prefix := range args {
-		stats, err := getStats(ctx, prefix)
+		stats, err := db.getStats(ctx, prefix)
 		if err != nil {
 			return err
 		}
-		printDBStats(prefix, stats)
+		db.printDBStats(prefix, stats)
 		if i < (len(args) - 1) {
 			fmt.Println()
 		}
@@ -100,8 +103,8 @@ func dbStats(ctx context.Context, values interface{}, args []string) error {
 	return nil
 }
 
-func dbTotalSizeAndKeys(ctx context.Context, prefix string) (size, entries int64, err error) {
-	stats, err := getStats(ctx, prefix)
+func (db *database) dbTotalSizeAndKeys(ctx context.Context, prefix string) (size, entries int64, err error) {
+	stats, err := db.getStats(ctx, prefix)
 	if err != nil {
 		return
 	}
@@ -112,16 +115,16 @@ func dbTotalSizeAndKeys(ctx context.Context, prefix string) (size, entries int64
 	return
 }
 
-func dbCompact(ctx context.Context, values interface{}, args []string) error {
+func (db *database) dbCompact(ctx context.Context, values interface{}, args []string) error {
 	var errs errors.M
 	ifmt := message.NewPrinter(language.English)
 	for _, prefix := range args {
-		beforeSize, beforeEntries, _ := dbTotalSizeAndKeys(ctx, prefix)
+		beforeSize, beforeEntries, _ := db.dbTotalSizeAndKeys(ctx, prefix)
 		if err := globalDatabaseManager.Compact(ctx, prefix); err != nil {
 			errs.Append(err)
 			continue
 		}
-		afterSize, afterEntries, err := dbTotalSizeAndKeys(ctx, prefix)
+		afterSize, afterEntries, err := db.dbTotalSizeAndKeys(ctx, prefix)
 		errs.Append(err)
 		ifmt.Printf("compacted database for: %v: entries %v -> %v, size %v -> %v\n",
 			prefix,
@@ -132,7 +135,7 @@ func dbCompact(ctx context.Context, values interface{}, args []string) error {
 	return errs.Err()
 }
 
-func dbRmPrefixes(ctx context.Context, values interface{}, args []string) error {
+func (db *database) dbRmPrefixes(ctx context.Context, values interface{}, args []string) error {
 	var errs errors.M
 	for _, prefix := range args {
 		db, err := globalDatabaseManager.DatabaseFor(ctx, prefix)
