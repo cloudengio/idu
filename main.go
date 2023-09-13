@@ -80,7 +80,7 @@ type GlobalFlags struct {
 }
 
 func cli() *subcmd.CommandSetYAML {
-	cmdSet := subcmd.MustFromYAMLTemplate(commands)
+	cmdSet := subcmd.MustFromYAML(commands)
 	cmdSet.Set("analyze").MustRunner(analyze, &analyzeFlags{})
 	cmdSet.Set("summary").MustRunner(summary, &summaryFlags{})
 	cmdSet.Set("user").MustRunner(userSummary, &userFlags{})
@@ -89,7 +89,7 @@ func cli() *subcmd.CommandSetYAML {
 	cmdSet.Set("lsr").MustRunner(lsr, &lsFlags{})
 	cmdSet.Set("config").MustRunner(configManager, &configFlags{})
 	db := &database{}
-	cmdSet.Set("database", "statistics").MustRunner(db.stats, &struct{}{})
+	cmdSet.Set("database", "stats").MustRunner(db.stats, &struct{}{})
 	cmdSet.Set("database", "erase").MustRunner(db.erase, &eraseFlags{})
 	globals := subcmd.GlobalFlagSet()
 	globals.MustRegisterFlagStruct(&globalFlags, nil, nil)

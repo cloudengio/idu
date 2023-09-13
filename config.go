@@ -7,7 +7,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+	"os"
 
 	"cloudeng.io/cmd/idu/internal/config"
 )
@@ -26,7 +26,7 @@ func configManager(ctx context.Context, values interface{}, args []string) error
 	if err != nil {
 		return fmt.Errorf("failed to parse file %v: %v", globalFlags.ConfigFile, err)
 	}
-	buf, _ := ioutil.ReadFile(globalFlags.ConfigFile)
+	buf, _ := os.ReadFile(globalFlags.ConfigFile)
 	fmt.Println(string(buf))
 	return err
 }

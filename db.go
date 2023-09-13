@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"strings"
 
+	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/errors"
-	"cloudeng.io/file/filewalk"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 )
@@ -37,11 +37,11 @@ func (db *database) erase(ctx context.Context, values interface{}, args []string
 
 /*
 func dbRefreshStats(ctx context.Context, values interface{}, args []string) error {
-	db, err := globalDatabaseManager.DatabaseFor(ctx, args[0], filewalk.ResetStats())
+	db, err := globalDatabaseManager.DatabaseFor(ctx, args[0], internal.ResetStats())
 	if err != nil {
 		return err
 	}
-	sc := db.NewScanner(args[0], 0, filewalk.ScanLimit(500))
+	sc := db.NewScanner(args[0], 0, internal.ScanLimit(500))
 	i := 0
 	printer := message.NewPrinter(language.English)
 	for sc.Scan(ctx) {
@@ -49,7 +49,7 @@ func dbRefreshStats(ctx context.Context, values interface{}, args []string) erro
 		layout := globalConfig.LayoutFor(prefix)
 		info.DiskUsage = 0
 		for _, file := range info.Files {
-			info.DiskUsage += layout.Calculator.Calculate(file.Size)
+			info.DiskUsage += layout.Calculator.Calculate(file.Size())
 		}
 		if err := db.Set(ctx, prefix, info); err != nil {
 			return fmt.Errorf("failed to set: %v: %v", prefix, err)
@@ -65,7 +65,7 @@ func dbRefreshStats(ctx context.Context, values interface{}, args []string) erro
 	return globalDatabaseManager.CloseAll(ctx)
 }*/
 
-func (db *database) printDBStats(prefix string, stats []filewalk.DatabaseStats) {
+func (db *database) printDBStats(prefix string, stats []internal.DatabaseStats) {
 	ifmt := message.NewPrinter(language.English)
 	ifmt.Printf("%v\n", prefix)
 	ifmt.Printf("%s\n\n", strings.Repeat("=", len(prefix)))
@@ -80,8 +80,8 @@ func (db *database) printDBStats(prefix string, stats []filewalk.DatabaseStats) 
 	}
 }
 
-func (db *database) getStats(ctx context.Context, prefix string) ([]filewalk.DatabaseStats, error) {
-	ldb, err := globalDatabaseManager.DatabaseFor(ctx, prefix, filewalk.ReadOnly())
+func (db *database) getStats(ctx context.Context, prefix string) ([]internal.DatabaseStats, error) {
+	ldb, err := globalDatabaseManager.DatabaseFor(ctx, prefix, internal.ReadOnly())
 	if err != nil {
 		return nil, err
 	}
