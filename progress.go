@@ -12,24 +12,17 @@ import (
 	"sync/atomic"
 	"time"
 
+	"cloudeng.io/cmd/idu/internal"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 )
 
-type progressUpdate struct {
-	prefixStart int
-	prefixDone  int
-	files       int
-	deletions   int
-	errors      int
-	reused      int
-}
-
 type progressTracker struct {
-	ch                                      chan progressUpdate
 	numPrefixesStarted, numPrefixesFinished int64
-	numFiles, numReused                     int64
-	numDeletions, numErrors, lastFiles      int64
+	numFiles, numUnchanged                  int64
+	numDeletions, numErrors                 int64
+	syncScans                               int64
+	listOps, statOps                        int64
 	interval                                time.Duration
 	start                                   time.Time
 	lastGC                                  time.Time
@@ -39,48 +32,87 @@ type progressTracker struct {
 
 func newProgressTracker(ctx context.Context, interval time.Duration) *progressTracker {
 	pt := &progressTracker{
-		ch:       make(chan progressUpdate, 10),
-		interval: interval,
-		start:    time.Now(),
+		interval:    interval,
+		start:       time.Now(),
+		sysMemstats: &sysMemstats{},
 	}
 	pt.refreshMemstats()
 	go pt.display(ctx)
 	return pt
 }
 
-func (pt *progressTracker) send(ctx context.Context, u progressUpdate) {
-	if pt == nil {
-		return
+func (pt *progressTracker) startPrefix() {
+	atomic.AddInt64(&pt.numPrefixesStarted, 1)
+}
+
+func (pt *progressTracker) donePrefix(deletions, errors, files int) {
+	atomic.AddInt64(&pt.numPrefixesFinished, 1)
+	atomic.AddInt64(&pt.numDeletions, int64(deletions))
+	atomic.AddInt64(&pt.numErrors, int64(errors))
+	atomic.AddInt64(&pt.numFiles, int64(files))
+}
+
+func (pt *progressTracker) unchanged() {
+	atomic.AddInt64(&pt.numUnchanged, 1)
+}
+
+func (pt *progressTracker) walkerStats(syncScans, listOps, statOps int64) {
+	if syncScans > 0 {
+		atomic.StoreInt64(&pt.syncScans, syncScans)
 	}
-	select {
-	case <-ctx.Done():
-		return
-	case pt.ch <- u:
+	if listOps > 0 {
+		atomic.StoreInt64(&pt.listOps, listOps)
+	}
+	if statOps > 0 {
+		atomic.StoreInt64(&pt.statOps, statOps)
 	}
 }
 
-func (pt *progressTracker) refreshMemstats() {
+func (pt *progressTracker) refreshMemstats() bool {
 	if time.Since(pt.lastGC) > (5 * time.Minute) {
 		runtime.GC()
 		runtime.ReadMemStats(&pt.memstats)
 		pt.sysMemstats.update()
 		pt.lastGC = time.Now()
+		return true
 	}
+	return false
 }
 
-func (pt *progressTracker) summary() {
+func (pt *progressTracker) summary(ctx context.Context) {
 	pt.refreshMemstats()
 	ifmt := message.NewPrinter(language.English)
 	ifmt.Printf("\n")
 	ifmt.Printf("        prefixes : % 15v\n", atomic.LoadInt64(&pt.numPrefixesFinished))
 	ifmt.Printf("           files : % 15v\n", atomic.LoadInt64(&pt.numFiles))
-	ifmt.Printf("prefix deletions : % 15v\n", atomic.LoadInt64(&pt.numDeletions))
-	ifmt.Printf("          reused : % 15v\n", atomic.LoadInt64(&pt.numReused))
+	ifmt.Printf("       deletions : % 15v\n", atomic.LoadInt64(&pt.numDeletions))
+	ifmt.Printf("       unchanged : % 15v\n", atomic.LoadInt64(&pt.numUnchanged))
 	ifmt.Printf("          errors : % 15v\n", atomic.LoadInt64(&pt.numErrors))
+	ifmt.Printf("      sync scans : % 15v\n", atomic.LoadInt64(&pt.syncScans))
+	ifmt.Printf("        list ops : % 15v\n", atomic.LoadInt64(&pt.listOps))
+	ifmt.Printf("        stat ops : % 15v\n", atomic.LoadInt64(&pt.statOps))
 	ifmt.Printf("        run time : % 15v\n", time.Since(pt.start))
 	ifmt.Printf("      heap alloc : % 15.6fGiB\n", float64(pt.memstats.HeapAlloc)/(1024*1024*1024))
 	ifmt.Printf("  max heap alloc : % 15.6fGiB\n", float64(pt.memstats.HeapSys)/(1024*1024*1024))
-	ifmt.Printf(" max process RSS : %15.6fGiB\n", pt.sysMemstats.MaxRSSGiB())
+	ifmt.Printf(" max process RSS : % 15.6fGiB\n", pt.sysMemstats.MaxRSSGiB())
+	pt.log(ctx)
+}
+
+func (pt *progressTracker) log(ctx context.Context) {
+	internal.Log(ctx, globalLogger, internal.LogPrefix, "summary",
+		"prefixes started", atomic.LoadInt64(&pt.numPrefixesStarted),
+		"prefixes", atomic.LoadInt64(&pt.numPrefixesFinished),
+		"files", atomic.LoadInt64(&pt.numFiles),
+		"deletions", atomic.LoadInt64(&pt.numDeletions),
+		"unchanged", atomic.LoadInt64(&pt.numUnchanged),
+		"errors", atomic.LoadInt64(&pt.numErrors),
+		"sync scans", atomic.LoadInt64(&pt.syncScans),
+		"list ops", atomic.LoadInt64(&pt.listOps),
+		"stat ops", atomic.LoadInt64(&pt.statOps),
+		"run time", time.Since(pt.start),
+		"heap alloc GiB", float64(pt.memstats.HeapAlloc)/(1024*1024*1024),
+		"max heap alloc GiB", float64(pt.memstats.HeapSys)/(1024*1024*1024),
+		"max process RSS GiB", pt.sysMemstats.MaxRSSGiB())
 }
 
 func isInteractive() bool {
@@ -101,22 +133,15 @@ func (pt *progressTracker) display(ctx context.Context) {
 		cr = "\n"
 	}
 	lastReport := time.Now()
+	var lastPrefixes, lastStats int64
+
 	for {
 		select {
-		case update := <-pt.ch:
-			atomic.AddInt64(&pt.numPrefixesStarted, int64(update.prefixStart))
-			atomic.AddInt64(&pt.numPrefixesFinished, int64(update.prefixDone))
-			atomic.AddInt64(&pt.numFiles, int64(update.files))
-			atomic.AddInt64(&pt.numDeletions, int64(update.deletions))
-			atomic.AddInt64(&pt.numReused, int64(update.reused))
-			atomic.AddInt64(&pt.numErrors, int64(update.errors))
-
-			progressMap.Add("started", int64(update.prefixStart))
-			progressMap.Add("finished", int64(update.prefixDone))
-			progressMap.Add("files", int64(update.files))
-			progressMap.Add("deletions", int64(update.deletions))
-			progressMap.Add("reused", int64(update.reused))
-			progressMap.Add("errors", int64(update.errors))
+		case <-time.After(pt.interval):
+		case <-ctx.Done():
+			return
+		}
+		if pt.refreshMemstats() {
 			fl := &expvar.Float{}
 			fl.Set(float64(pt.memstats.HeapAlloc) / (1024 * 1024 * 1024))
 			progressMap.Set("heap-alloc-GiB", fl)
@@ -124,28 +149,35 @@ func (pt *progressTracker) display(ctx context.Context) {
 			progressMap.Set("max-heap-alloc-GiB", fl)
 			fl.Set(pt.sysMemstats.MaxRSSGiB())
 			progressMap.Set("max-RSS-GiB", fl)
+		}
 
-		case <-ctx.Done():
-			return
-		}
-		if since := time.Since(lastReport); since > pt.interval {
-			last := atomic.SwapInt64(&pt.lastFiles, atomic.LoadInt64(&pt.numFiles))
-			rate := float64(pt.numFiles-last) / since.Seconds()
-			started, finished := atomic.LoadInt64(&pt.numPrefixesStarted), atomic.LoadInt64(&pt.numPrefixesFinished)
-			ifmt.Printf("% 8v(%3v) prefixes, % 8v files, % 8v reused, % 6v errors, % 9.2f stats/second  % 8v, (%s)  (%3.6f/%3.6f/%3.6f GiB) %s",
-				finished,
-				started-finished,
-				atomic.LoadInt64(&pt.numFiles),
-				atomic.LoadInt64(&pt.numReused),
-				atomic.LoadInt64(&pt.numErrors),
-				rate,
-				time.Since(pt.start).Truncate(time.Second),
-				time.Now().Format("15:04:05"),
-				float64(pt.memstats.HeapAlloc)/(1024*1024*1024),
-				float64(pt.memstats.HeapSys)/(1024*1024*1024),
-				pt.sysMemstats.MaxRSSGiB(),
-				cr)
-			lastReport = time.Now()
-		}
+		since := time.Since(lastReport)
+
+		current := atomic.LoadInt64(&pt.numPrefixesFinished)
+		prefixRate := (float64(current - lastPrefixes)) / float64(since.Seconds())
+		lastPrefixes = current
+
+		current = atomic.LoadInt64(&pt.statOps)
+		statRate := (float64(current - lastStats)) / float64(since.Seconds())
+		lastStats = current
+
+		lastReport = time.Now()
+
+		started, finished := atomic.LoadInt64(&pt.numPrefixesStarted), atomic.LoadInt64(&pt.numPrefixesFinished)
+
+		runningFor := time.Since(pt.start).Truncate(time.Second)
+
+		ifmt.Printf("% 8v(%3v) prefixes, % 8v files, % 8v unchanged, % 5v errors, % 9.0f (prefixes/s), % 9.0f (stats/second)  % 8v, (%s) %s",
+			finished,
+			started-finished,
+			atomic.LoadInt64(&pt.numFiles),
+			atomic.LoadInt64(&pt.numUnchanged),
+			atomic.LoadInt64(&pt.numErrors),
+			prefixRate,
+			statRate,
+			runningFor,
+			time.Now().Format("15:04:05"),
+			cr)
+		pt.log(ctx)
 	}
 }

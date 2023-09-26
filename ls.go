@@ -7,20 +7,18 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
-	"cloudeng.io/algo/container/heap"
 	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/cmdutil"
-	"cloudeng.io/errors"
-	"cloudeng.io/sync/errgroup"
+	"cloudeng.io/cmd/idu/internal/config"
+	"cloudeng.io/cmd/idu/internal/database/boltdb"
 )
 
 type lsFlags struct {
 	Limit      int    `subcmd:"limit,-1,'limit the number of items to list'"`
 	TopN       int    `subcmd:"top,10,'show the top prefixes by file/prefix counts and disk usage, set to zero to disable'"`
+	Recurse    bool   `subcmd:"recurse,false,list prefixes recursively"`
 	Summary    bool   `subcmd:"summary,true,show summary statistics"`
 	ShowDirs   bool   `subcmd:"prefixes,false,show information on each prefix"`
 	ShowFiles  bool   `subcmd:"files,false,show information on individual files"`
@@ -28,7 +26,22 @@ type lsFlags struct {
 	User       string `subcmd:"user,,show information for this user only"`
 }
 
-func lsTree(ctx context.Context, pt *progressTracker, db internal.Database, root, user string, flags *lsFlags) (files, children, disk *heap.KeyedInt64, nerrors int64, err error) {
+type logFlags struct {
+	internal.TimeRangeFlags
+}
+
+type errorFlags struct {
+	Prefix bool   `subcmd:"prefix,false,list errors by prefix"`
+	From   string `subcmd:"from,,the time to start listing errors"`
+	To     string `subcmd:"to,,the time to stop listing errors"`
+}
+
+type lister struct {
+	prefix config.Prefix
+}
+
+/*
+func (l *lister) lsTree(ctx context.Context, pt *progressTracker, db internal.Database, root, user string, flags *lsFlags) (files, children, disk *heap.KeyedInt64, nerrors int64, err error) {
 	files, children, disk = heap.NewKeyedInt64(heap.Descending), heap.NewKeyedInt64(heap.Descending), heap.NewKeyedInt64(heap.Descending)
 	if flags.ShowDirs {
 		fmt.Printf("     disk usage :  # files : # dirs : directory/prefix\n")
@@ -51,17 +64,18 @@ func lsTree(ctx context.Context, pt *progressTracker, db internal.Database, root
 		}
 		files.Update(prefix, int64(len(pi.Files)))
 		children.Update(prefix, int64(len(pi.Children)))
-		disk.Update(prefix, pi.DiskUsage)
+		storageBytes := l.prefix.StorageBytes(pi.Size)
+		disk.Update(prefix, storageBytes)
 		if flags.ShowDirs || flags.ShowFiles {
-			fmt.Printf("% 15v : % 8v : % 6v : %s\n", fsize(pi.DiskUsage), len(pi.Files), len(pi.Children), prefix)
+			fmt.Printf("% 15v : % 8v : % 6v : %s\n", fmtSize(storageBytes), len(pi.Files), len(pi.Children), prefix)
 			if flags.ShowDirs {
 				for _, fi := range pi.Children {
-					fmt.Printf("    % 15v : % 40v: % 10v : %v\n", fsize(fi.Size()), fi.ModTime(), globalUserManager.nameForUID(fi.User()), fi.Name())
+					fmt.Printf("    % 15v : % 40v: % 10v : %v\n", fmtSize(fi.Size()), fi.ModTime(), globalUserManager.nameForUID(fi.User()), fi.Name())
 				}
 			}
 			if flags.ShowFiles {
 				for _, fi := range pi.Files {
-					fmt.Printf("    % 15v : % 40v: % 10v : %v\n", fsize(fi.Size()), fi.ModTime(), globalUserManager.nameForUID(fi.User()), fi.Name())
+					fmt.Printf("    % 15v : % 40v: % 10v : %v\n", fmtSize(fi.Size()), fi.ModTime(), globalUserManager.nameForUID(fi.User()), fi.Name())
 				}
 			}
 			continue
@@ -71,7 +85,8 @@ func lsTree(ctx context.Context, pt *progressTracker, db internal.Database, root
 	err = sc.Err()
 	return
 }
-
+*/
+/*
 func topNMetrics(top []struct {
 	K string
 	V int64
@@ -81,17 +96,30 @@ func topNMetrics(top []struct {
 		m[i] = internal.Metric{Prefix: kv.K, Value: kv.V}
 	}
 	return m
-}
+}*/
 
-func lsr(ctx context.Context, values interface{}, args []string) error {
+func (l *lister) prefixes(ctx context.Context, values interface{}, args []string) error {
 	flagValues := values.(*lsFlags)
-
 	if len(args) > 1 {
 		flagValues.ShowFiles = false
 		flagValues.ShowDirs = false
 		flagValues.Summary = true
 	}
+	_, path, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], boltdb.ReadOnly())
+	if err != nil {
+		return err
+	}
+	return db.Scan(ctx, path, func(_ context.Context, k string, v []byte) bool {
+		var pi internal.PrefixInfo
+		if err := pi.UnmarshalBinary(v); err != nil {
+			return false
+		}
+		fmt.Printf("%v %#v\n", k, pi)
+		return strings.HasPrefix(k, path)
+	})
+}
 
+/*
 	type results struct {
 		root                  string
 		files, children, disk *heap.KeyedInt64
@@ -99,9 +127,6 @@ func lsr(ctx context.Context, values interface{}, args []string) error {
 		db                    internal.Database
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	cmdutil.HandleSignals(cancel, os.Interrupt, os.Kill)
 
 	key := ""
 	if usr := flagValues.User; len(usr) > 0 {
@@ -164,22 +189,58 @@ func lsr(ctx context.Context, values interface{}, args []string) error {
 
 		printSummaryStats(ctx, os.Stdout, nFiles, nChildren, nBytes, nErrors, flagValues.TopN, topFiles, topChildren, topBytes)
 	}
-	errs.Append(globalDatabaseManager.CloseAll(ctx))
+	errs.Append(db.Close())
 	return errs.Err()
-}
+}*/
 
-func listErrors(ctx context.Context, values interface{}, args []string) error {
-	db, err := globalDatabaseManager.DatabaseFor(ctx, args[0], internal.ErrorsOnly(), internal.ReadOnly())
+func (l *lister) errors(ctx context.Context, values interface{}, args []string) error {
+	ef := values.(*errorFlags)
+	_, path, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], boltdb.ReadOnly())
 	if err != nil {
 		return err
 	}
-	sc := db.NewScanner("", 0, internal.ScanErrors())
-	for sc.Scan(ctx) {
-		prefix, info := sc.PrefixInfo()
-		fmt.Printf("%v: %v\n", prefix, info.Err)
+	defer db.Close(ctx)
+	if ef.Prefix {
+		return db.VisitErrorsKey(ctx, path,
+			func(_ context.Context, when time.Time, key string, detail []byte) bool {
+				fmt.Printf("%s: %s\n", key, detail)
+				return true
+			})
 	}
-	errs := errors.M{}
-	errs.Append(sc.Err())
-	errs.Append(globalDatabaseManager.CloseAll(ctx))
-	return errs.Err()
+	from, to := time.Time{}, time.Now()
+	if len(ef.From) > 0 {
+		from, err = time.Parse(time.RFC3339, ef.From)
+		if err != nil {
+			return err
+		}
+	}
+	if len(ef.To) > 0 {
+		to, err = time.Parse(time.RFC3339, ef.To)
+		if err != nil {
+			return err
+		}
+	}
+	return db.VisitErrorsWhen(ctx, from, to, func(_ context.Context, when time.Time, key string, detail []byte) bool {
+		fmt.Printf("%s: %s\n", key, detail)
+		return true
+	})
+}
+
+func (l *lister) logs(ctx context.Context, values interface{}, args []string) error {
+	fv := values.(*logFlags)
+	_, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], boltdb.ReadOnly())
+	if err != nil {
+		return err
+	}
+	defer db.Close(ctx)
+
+	from, to, err := fv.TimeRangeFlags.FromTo()
+	if err != nil {
+		return err
+	}
+	return db.VisitLogs(ctx, from, to,
+		func(_ context.Context, begin, end time.Time, detail []byte) bool {
+			fmt.Printf("%v...%v: %v: %s\n", begin, end, end.Sub(begin), detail)
+			return true
+		})
 }

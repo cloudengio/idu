@@ -4,23 +4,7 @@
 
 package main
 
-import (
-	"context"
-	"fmt"
-	"os"
-	"regexp"
-	"strings"
-	"time"
-
-	"cloudeng.io/algo/container/heap"
-	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/cmdutil/flags"
-	"cloudeng.io/errors"
-	"cloudeng.io/sync/errgroup"
-	"golang.org/x/text/language"
-	"golang.org/x/text/message"
-)
-
+/*
 type findFlags struct {
 	User        string          `subcmd:"user,,restrict output to the specified user"`
 	Group       string          `subcmd:"group,,restrict output to the specified group"`
@@ -206,3 +190,4 @@ func find(ctx context.Context, values interface{}, args []string) error {
 	}
 	return errs.Err()
 }
+*/

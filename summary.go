@@ -4,22 +4,6 @@
 
 package main
 
-import (
-	"context"
-	"encoding/csv"
-	"fmt"
-	"io"
-	"os"
-	"path/filepath"
-	"sort"
-	"strconv"
-
-	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/errors"
-	"golang.org/x/text/language"
-	"golang.org/x/text/message"
-)
-
 type summaryFlags struct {
 	TopN    int    `subcmd:"top,20,show the top prefixes by file count and disk usage"`
 	TSVTopN int    `subcmd:"tsv-top,200,'include the top prefixes by file count and disk usage in the tsv output, if any'"`
@@ -40,6 +24,7 @@ type groupFlags struct {
 	WriteFiles string `subcmd:"reports-dir,,write per-group statistics to the specified directory"`
 }
 
+/*
 func printSummaryStats(ctx context.Context, out io.Writer, nFiles, nChildren, nBytes, nErrors int64, topN int, topFiles, topChildren, topBytes []internal.Metric) {
 	ifmt := message.NewPrinter(language.English)
 
@@ -326,3 +311,4 @@ func groupSummary(ctx context.Context, values interface{}, args []string) error 
 	errs.Append(globalDatabaseManager.CloseAll(ctx))
 	return errs.Err()
 }
+*/

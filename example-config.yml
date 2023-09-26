@@ -1,23 +1,13 @@
 databases:
   - prefix: "/Users/cnicolaou"
-    type: "local"
-    directory: ./local-database/home
+    location: ./local-database/cnicolaou
   - prefix: "/Users/cnicolaou/Dropbox (Personal)"
-    type: "local"
-    directory: ./local-database/dropbox
-  - prefix: "/Users/cnicolaou/Dropbox (Personal)/github.com/cloudengio/idu"
-    type: "local"
-    directory: ./local-database/idu
-  - prefix: "/Users/cnicolaou/Dropbox/github.com/cloudengio/idu"
-    type: "local"
-    directory: ./local-database/idu
+    location: ./local-database/dropbox
   - prefix: "/usr/local"
-    type: "local"
-    directory: ./local-database/usr-local
+    location: ./local-database/usr-local
   - prefix: "/tmp"
-    type: "local"
-    directory: ./local-database/tmp
-layouts:
+    location: ./local-database/tmp
+parameters:
   - type: "block"
     prefix: "/"
     block_size: 4096

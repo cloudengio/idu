@@ -4,21 +4,15 @@
 
 package main
 
-import (
-	"context"
-	"fmt"
-	"strings"
-
-	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/errors"
-	"golang.org/x/text/language"
-	"golang.org/x/text/message"
-)
-
-type database struct{}
+type dbCmd struct{}
 
 type eraseFlags struct {
 	ReallyDelete bool `subcmd:"really,false,must be set to erase the database"`
+}
+
+/*
+func (db *database) compact(ctx context.Context, values interface{}, args []string) error {
+	return db.dbCompact(ctx, values, args)
 }
 
 func (db *database) erase(ctx context.Context, values interface{}, args []string) error {
@@ -63,7 +57,8 @@ func dbRefreshStats(ctx context.Context, values interface{}, args []string) erro
 		return fmt.Errorf("scanner error: %v", sc.Err())
 	}
 	return globalDatabaseManager.CloseAll(ctx)
-}*/
+}
+
 
 func (db *database) printDBStats(prefix string, stats []internal.DatabaseStats) {
 	ifmt := message.NewPrinter(language.English)
@@ -156,3 +151,4 @@ func (db *database) dbRmPrefixes(ctx context.Context, values interface{}, args [
 	errs.Append(globalDatabaseManager.CloseAll(ctx))
 	return errs.Err()
 }
+*/

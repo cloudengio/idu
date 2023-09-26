@@ -4,25 +4,17 @@
 
 package internal
 
-import (
-	"context"
-	"io/fs"
-	"time"
-
-	"cloudeng.io/file"
-)
-
+/*
 // PrefixInfo represents information on a given prefix.
 type PrefixInfo struct {
-	ModTime   time.Time
-	Size      int64
-	UserID    string
-	GroupID   string
-	Mode      fs.FileMode
-	Children  file.InfoList
-	Files     file.InfoList
-	DiskUsage int64 // DiskUsage is the total amount of storage required for the files under this prefix taking the filesystem's layout/block size into account.
-	Err       string
+	ModTime  time.Time
+	Size     int64
+	UserID   string
+	GroupID  string
+	Mode     fs.FileMode
+	Children file.InfoList
+	Files    file.InfoList
+	Err      string
 }
 
 // Metric represents a value associated with a prefix.
@@ -240,3 +232,4 @@ type DatabaseScanner interface {
 	PrefixInfo() (string, *PrefixInfo)
 	Err() error
 }
+*/

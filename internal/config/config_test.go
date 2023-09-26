@@ -12,67 +12,62 @@ import (
 )
 
 const simple = `
-databases:
-  - prefix: /tmp
-    type: local
-    directory: ./db-tmp
-  - prefix: /
-    type: local
-    directory: ./db-local
-layouts:
-  - type: block
-    prefix: "/"
-    block_size: 4096
-  - type: "block"
-    prefix: "/labs/asbhatt"
-    block_size: 4096
-  - type: "raid0"
-    prefix: "/labs/bar"
-    num_stripes: 3
-    stripe_size: 1024
-exclusions:
-  - prefix: "/Users/cnicolaou"
-    regexps:
-      - ".DS_Store$"
-  - prefix: "/tmp"
-    regexps:
-       - ".DS_Store$"
-       - "something"
- `
+- prefix: /tmp
+  database: ./db-tmp
+  exclusions:
+    - something
+  layout:
+    calculator: block
+    parameters:
+      size: 4096
+- prefix: /
+  directory: ./db-local
+  concurrency: 10
+  exclusions:
+    - "/.DS_Store$"
+    - "something"
+`
 
 func TestSimple(t *testing.T) {
 	cfg, err := config.ParseConfig([]byte(simple))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(cfg.Databases), 2; got != want {
+	if got, want := len(cfg.Prefixes), 2; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	if got, want := cfg.Databases[0].Type, "local"; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-
-	if got, want := cfg.Databases[1].Description, "local database in ./db-local"; got != want {
+	if got, want := cfg.Prefixes[0].Prefix, "/tmp"; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
-	if got, want := len(cfg.Layouts), 3; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-	if got, want := cfg.Layouts[0].Calculator.String(), "simple: 4096"; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-	if got, want := cfg.Layouts[2].Prefix, "/"; got != want {
+	if got, want := cfg.Prefixes[0].StorageBytes(3), int64(4096); got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
-	if got, want := len(cfg.Exclusions), 2; got != want {
+	if got, want := cfg.Prefixes[1].Regexps[1].String() == "something", true; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	if got, want := len(cfg.Exclusions[1].Regexps), 2; got != want {
+
+	if got, want := cfg.Prefixes[1].Concurrency == 10, true; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	if got, want := cfg.Exclusions[1].Regexps[1].String(), "something"; got != want {
+
+}
+
+func TestPrefixMatch(t *testing.T) {
+	cfg, err := config.ParseConfig([]byte(simple))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, path, ok := cfg.ForPrefix("/tmp")
+	if got, want := p, "/tmp"; !ok || got.Prefix != want || path != "" {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	p, path, ok = cfg.ForPrefix("/tmp/xyz")
+	if got, want := p, "/tmp"; !ok || got.Prefix != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if got, want := path, "/xyx"; !ok || got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }
@@ -81,9 +76,9 @@ func TestDocumentation(t *testing.T) {
 	got := config.Documentation()
 	for _, expected := range []string{
 		"raid0",
-		"local",
-		"Supported Databases:",
-		"Supported Layouts:",
+		"prefix:",
+		"when building",
+		"raid0",
 	} {
 		if !strings.Contains(got, expected) {
 			t.Errorf("documentation does not contain: %q", expected)

@@ -4,24 +4,14 @@
 
 package main
 
-import (
-	"context"
-	"fmt"
-	"sync"
-
-	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/cmd/idu/internal/config"
-	"cloudeng.io/errors"
-	"cloudeng.io/os/userid"
-)
-
+/*
 type databaseManager struct {
 	sync.Mutex
-	dbs map[string]internal.Database
+	dbs map[string]database.T
 }
 
 var globalDatabaseManager = databaseManager{
-	dbs: map[string]internal.Database{},
+	dbs: map[string]database.T{},
 }
 
 func (dbm *databaseManager) DatabaseFor(ctx context.Context, prefix string, opts ...internal.DatabaseOption) (internal.Database, error) {
@@ -153,3 +143,4 @@ func (um *userManager) nameForPrefix(ctx context.Context, db internal.Database, 
 	}
 	return um.nameForUID(pi.UserID)
 }
+*/
