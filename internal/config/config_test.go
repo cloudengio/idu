@@ -21,11 +21,12 @@ const simple = `
     parameters:
       size: 4096
 - prefix: /
-  directory: ./db-local
+  database: ./db-local
   concurrency: 10
   exclusions:
-    - "/.DS_Store$"
-    - "something"
+    - /.DS_Store$"
+    - ^/System/Volumes/
+    - ^/System/Volumes$
 `
 
 func TestSimple(t *testing.T) {
@@ -44,7 +45,19 @@ func TestSimple(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
-	if got, want := cfg.Prefixes[1].Regexps[1].String() == "something", true; got != want {
+	if got, want := cfg.Prefixes[1].Exclude("something"), false; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
+	if got, want := cfg.Prefixes[1].Exclude("/System/Volumes/XX"), true; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
+	if got, want := cfg.Prefixes[1].Exclude("/System/Volumes"), true; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
+	if got, want := cfg.Prefixes[1].Exclude("/System/VolumesX"), false; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
@@ -67,8 +80,8 @@ func TestPrefixMatch(t *testing.T) {
 	if got, want := p, "/tmp"; !ok || got.Prefix != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	if got, want := path, "/xyx"; !ok || got != want {
-		t.Errorf("got %v, want %v", got, want)
+	if got, want := path, "xyz"; !ok || got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
 

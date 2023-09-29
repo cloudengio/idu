@@ -40,6 +40,41 @@ type lister struct {
 	prefix config.Prefix
 }
 
+func (l *lister) prefixes(ctx context.Context, values interface{}, args []string) error {
+	flagValues := values.(*lsFlags)
+	if len(args) > 1 {
+		flagValues.ShowFiles = false
+		flagValues.ShowDirs = false
+		flagValues.Summary = true
+	}
+	_, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], boltdb.ReadOnly())
+	if err != nil {
+		return err
+	}
+
+	return db.Scan(ctx, args[0], func(_ context.Context, k string, v []byte) bool {
+		if !strings.HasPrefix(k, args[0]) {
+			return false
+		}
+		var pi internal.PrefixInfo
+		if err := pi.UnmarshalBinary(v); err != nil {
+			return false
+		}
+		fmt.Printf("%v %v %v %v\n", k, fmtSize(pi.Size), pi.Mode, pi.ModTime)
+		if flagValues.ShowFiles {
+			for _, fi := range pi.Files {
+				fmt.Printf("    %v %v %v %v\n", fi.Name(), fmtSize(fi.Size()), fi.Mode(), fi.ModTime())
+			}
+		}
+		if flagValues.ShowDirs {
+			for _, e := range pi.Children {
+				fmt.Printf("    / %v %v\n", e.Name, e.Type)
+			}
+		}
+		return true
+	})
+}
+
 /*
 func (l *lister) lsTree(ctx context.Context, pt *progressTracker, db internal.Database, root, user string, flags *lsFlags) (files, children, disk *heap.KeyedInt64, nerrors int64, err error) {
 	files, children, disk = heap.NewKeyedInt64(heap.Descending), heap.NewKeyedInt64(heap.Descending), heap.NewKeyedInt64(heap.Descending)
@@ -97,27 +132,6 @@ func topNMetrics(top []struct {
 	}
 	return m
 }*/
-
-func (l *lister) prefixes(ctx context.Context, values interface{}, args []string) error {
-	flagValues := values.(*lsFlags)
-	if len(args) > 1 {
-		flagValues.ShowFiles = false
-		flagValues.ShowDirs = false
-		flagValues.Summary = true
-	}
-	_, path, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], boltdb.ReadOnly())
-	if err != nil {
-		return err
-	}
-	return db.Scan(ctx, path, func(_ context.Context, k string, v []byte) bool {
-		var pi internal.PrefixInfo
-		if err := pi.UnmarshalBinary(v); err != nil {
-			return false
-		}
-		fmt.Printf("%v %#v\n", k, pi)
-		return strings.HasPrefix(k, path)
-	})
-}
 
 /*
 	type results struct {

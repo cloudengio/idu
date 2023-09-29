@@ -7,6 +7,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -51,7 +52,11 @@ func (t T) ForPrefix(path string) (Prefix, string, bool) {
 	if longest.Prefix == "" {
 		return Prefix{}, "", false
 	}
-	return longest, strings.TrimPrefix(path, longest.Prefix), true
+	np := strings.TrimPrefix(path, longest.Prefix)
+	if len(np) > 0 && string(np[0]) == longest.Separator {
+		np = np[1:]
+	}
+	return longest, np, true
 }
 
 // Exclude returns true if path should be excluded/ignored.
@@ -97,6 +102,9 @@ func ParseConfig(buf []byte) (T, error) {
 		}
 		if p.ScanSize == 0 {
 			cfg.Prefixes[i].ScanSize = 1000
+		}
+		if len(p.Separator) == 0 {
+			cfg.Prefixes[i].Separator = string(filepath.Separator)
 		}
 	}
 	return cfg, nil

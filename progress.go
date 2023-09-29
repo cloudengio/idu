@@ -20,9 +20,9 @@ import (
 type progressTracker struct {
 	numPrefixesStarted, numPrefixesFinished int64
 	numFiles, numUnchanged                  int64
-	numDeletions, numErrors                 int64
+	numErrors                               int64
 	syncScans                               int64
-	listOps, statOps                        int64
+	numStats                                int64
 	interval                                time.Duration
 	start                                   time.Time
 	lastGC                                  time.Time
@@ -45,26 +45,20 @@ func (pt *progressTracker) startPrefix() {
 	atomic.AddInt64(&pt.numPrefixesStarted, 1)
 }
 
-func (pt *progressTracker) donePrefix(deletions, errors, files int) {
+func (pt *progressTracker) donePrefix(errors, files, stats int) {
 	atomic.AddInt64(&pt.numPrefixesFinished, 1)
-	atomic.AddInt64(&pt.numDeletions, int64(deletions))
 	atomic.AddInt64(&pt.numErrors, int64(errors))
 	atomic.AddInt64(&pt.numFiles, int64(files))
+	atomic.AddInt64(&pt.numStats, int64(stats))
 }
 
 func (pt *progressTracker) unchanged() {
 	atomic.AddInt64(&pt.numUnchanged, 1)
 }
 
-func (pt *progressTracker) walkerStats(syncScans, listOps, statOps int64) {
+func (pt *progressTracker) walkerStats(syncScans int64) {
 	if syncScans > 0 {
 		atomic.StoreInt64(&pt.syncScans, syncScans)
-	}
-	if listOps > 0 {
-		atomic.StoreInt64(&pt.listOps, listOps)
-	}
-	if statOps > 0 {
-		atomic.StoreInt64(&pt.statOps, statOps)
 	}
 }
 
@@ -85,30 +79,25 @@ func (pt *progressTracker) summary(ctx context.Context) {
 	ifmt.Printf("\n")
 	ifmt.Printf("        prefixes : % 15v\n", atomic.LoadInt64(&pt.numPrefixesFinished))
 	ifmt.Printf("           files : % 15v\n", atomic.LoadInt64(&pt.numFiles))
-	ifmt.Printf("       deletions : % 15v\n", atomic.LoadInt64(&pt.numDeletions))
 	ifmt.Printf("       unchanged : % 15v\n", atomic.LoadInt64(&pt.numUnchanged))
 	ifmt.Printf("          errors : % 15v\n", atomic.LoadInt64(&pt.numErrors))
 	ifmt.Printf("      sync scans : % 15v\n", atomic.LoadInt64(&pt.syncScans))
-	ifmt.Printf("        list ops : % 15v\n", atomic.LoadInt64(&pt.listOps))
-	ifmt.Printf("        stat ops : % 15v\n", atomic.LoadInt64(&pt.statOps))
-	ifmt.Printf("        run time : % 15v\n", time.Since(pt.start))
+	ifmt.Printf("        stat ops : % 15v\n", atomic.LoadInt64(&pt.numStats))
+	ifmt.Printf("        run time : % 15v\n", time.Since(pt.start).Truncate(time.Second))
 	ifmt.Printf("      heap alloc : % 15.6fGiB\n", float64(pt.memstats.HeapAlloc)/(1024*1024*1024))
 	ifmt.Printf("  max heap alloc : % 15.6fGiB\n", float64(pt.memstats.HeapSys)/(1024*1024*1024))
 	ifmt.Printf(" max process RSS : % 15.6fGiB\n", pt.sysMemstats.MaxRSSGiB())
 	pt.log(ctx)
 }
-
 func (pt *progressTracker) log(ctx context.Context) {
 	internal.Log(ctx, globalLogger, internal.LogPrefix, "summary",
 		"prefixes started", atomic.LoadInt64(&pt.numPrefixesStarted),
 		"prefixes", atomic.LoadInt64(&pt.numPrefixesFinished),
 		"files", atomic.LoadInt64(&pt.numFiles),
-		"deletions", atomic.LoadInt64(&pt.numDeletions),
 		"unchanged", atomic.LoadInt64(&pt.numUnchanged),
 		"errors", atomic.LoadInt64(&pt.numErrors),
 		"sync scans", atomic.LoadInt64(&pt.syncScans),
-		"list ops", atomic.LoadInt64(&pt.listOps),
-		"stat ops", atomic.LoadInt64(&pt.statOps),
+		"stat ops", atomic.LoadInt64(&pt.numStats),
 		"run time", time.Since(pt.start),
 		"heap alloc GiB", float64(pt.memstats.HeapAlloc)/(1024*1024*1024),
 		"max heap alloc GiB", float64(pt.memstats.HeapSys)/(1024*1024*1024),
@@ -157,7 +146,7 @@ func (pt *progressTracker) display(ctx context.Context) {
 		prefixRate := (float64(current - lastPrefixes)) / float64(since.Seconds())
 		lastPrefixes = current
 
-		current = atomic.LoadInt64(&pt.statOps)
+		current = atomic.LoadInt64(&pt.numStats)
 		statRate := (float64(current - lastStats)) / float64(since.Seconds())
 		lastStats = current
 
@@ -167,14 +156,14 @@ func (pt *progressTracker) display(ctx context.Context) {
 
 		runningFor := time.Since(pt.start).Truncate(time.Second)
 
-		ifmt.Printf("% 8v(%3v) prefixes, % 8v files, % 8v unchanged, % 5v errors, % 9.0f (prefixes/s), % 9.0f (stats/second)  % 8v, (%s) %s",
+		ifmt.Printf("% 8v(%3v) prefixes, % 8v files, % 9.0f (prefixes/s), % 9.0f (stats/second) % 8v unchanged, % 5v errors,% 8v, (%s) %s",
 			finished,
 			started-finished,
 			atomic.LoadInt64(&pt.numFiles),
-			atomic.LoadInt64(&pt.numUnchanged),
-			atomic.LoadInt64(&pt.numErrors),
 			prefixRate,
 			statRate,
+			atomic.LoadInt64(&pt.numUnchanged),
+			atomic.LoadInt64(&pt.numErrors),
 			runningFor,
 			time.Now().Format("15:04:05"),
 			cr)

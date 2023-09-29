@@ -181,7 +181,7 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 			return err
 		}
 	}
-	globalLogger = slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{}))
+	globalLogger = slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{AddSource: true}))
 
 	ctx, cancel := context.WithCancel(ctx)
 	cmdutil.HandleSignals(cancel, os.Interrupt, os.Kill)
