@@ -11,25 +11,30 @@ import (
 	"time"
 
 	"cloudeng.io/file"
+	"cloudeng.io/file/diskusage"
 	"cloudeng.io/file/filewalk"
 )
 
 type PrefixInfo struct {
-	UserID     uint32
-	GroupID    uint32
-	Mode       fs.FileMode
-	ModTime    time.Time
-	UserStats  StatsList
-	GroupStats StatsList
-	Children   filewalk.EntryList
-	Files      file.InfoList
-	idms       idMaps
+	UserID        uint32
+	GroupID       uint32
+	Size          uint64
+	Mode          fs.FileMode
+	ModTime       time.Time
+	Children      filewalk.EntryList
+	Files         file.InfoList
+	userIDMap     idMaps
+	groupIDMap    idMaps
+	idMapsCreated bool
 }
 
 func (pi *PrefixInfo) MarshalBinary() (data []byte, err error) {
+	pi.createIDMaps()
+
 	data = make([]byte, 0, 100)
 	data = append(data, 0x1) // version
 
+	data = binary.AppendUvarint(data, pi.Size)            // user id
 	data = binary.AppendUvarint(data, uint64(pi.UserID))  // user id
 	data = binary.AppendUvarint(data, uint64(pi.GroupID)) // groupd id
 
@@ -41,13 +46,12 @@ func (pi *PrefixInfo) MarshalBinary() (data []byte, err error) {
 	data = binary.AppendVarint(data, int64(len(out)))
 	data = append(data, out...)
 
-	//data, err = pi.idms.appendBinary(data) // idmaps
-	data, err = pi.UserStats.AppendBinary(data) // stats
+	data, err = pi.userIDMap.appendBinary(data) // user id map
 	if err != nil {
 		return nil, err
 	}
 
-	data, err = pi.GroupStats.AppendBinary(data) // stats
+	data, err = pi.groupIDMap.appendBinary(data) // group id map
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +71,9 @@ func (pi *PrefixInfo) UnmarshalBinary(data []byte) error {
 		return fmt.Errorf("PrefixInfo: invalid version of binary encoding: got %x, want %x", data[0], 0x1)
 	}
 	var n int
-	data = data[1:] // version
+	data = data[1:]                   // version
+	pi.Size, n = binary.Uvarint(data) // size
+	data = data[n:]
 
 	uid, n := binary.Uvarint(data) // userid
 	data = data[n:]
@@ -84,86 +90,157 @@ func (pi *PrefixInfo) UnmarshalBinary(data []byte) error {
 	}
 	data = data[ts:]
 
-	//data, err = pi.idms.decodeBinary(data) // idmaps
-	//if err != nil {
-	//	return err
-	//}
-
 	var err error
 
-	data, err = pi.UserStats.DecodeBinary(data) // stats
+	data, err = pi.userIDMap.decodeBinary(data) // user id maps
 	if err != nil {
 		return err
 	}
-	data, err = pi.GroupStats.DecodeBinary(data) // stats
+	data, err = pi.groupIDMap.decodeBinary(data) // group id maps
 	if err != nil {
 		return err
 	}
+	pi.idMapsCreated = true
+
 	data, err = pi.Children.DecodeBinary(data) // children
 	if err != nil {
 		return err
 	}
-	pi.Files, data, err = file.DecodeBinaryInfoList(data) // files
+	pi.Files, _, err = file.DecodeBinaryInfoList(data) // files
 	if err != nil {
 		return err
 	}
+
 	return err
 }
 
-func newIDMapIfNeeded(idms *idMaps, uid, gid uint32, n int) int {
-	if mi := idms.idMapFor(uid, gid); mi >= 0 {
+func newIDMapIfNeeded(idms *idMaps, id uint32, n int) int {
+	if mi := idms.idMapFor(id); mi >= 0 {
 		return mi
 	}
-	*idms = append(*idms, newIDMap(uid, gid, n))
+	*idms = append(*idms, newIDMap(id, n))
 	return len(*idms) - 1
 }
 
 func (pi *PrefixInfo) createIDMaps() {
-	pi.idms = nil
-	idmsPrefix := newIDMap(pi.UserID, pi.GroupID, len(pi.Files))
+	if pi.idMapsCreated {
+		return
+	}
+	prefixUserMap := newIDMap(pi.UserID, len(pi.Files))
+	prefixGroupMap := newIDMap(pi.GroupID, len(pi.Files))
+
 	for i, file := range pi.Files {
-		uid, gid, ok := UserInfo(file)
-		if !ok {
-			continue
+		uid, gid := pi.GetUserGroup(file)
+		if pi.UserID == uid {
+			prefixUserMap.set(i)
+		} else {
+			mi := newIDMapIfNeeded(&pi.userIDMap, uid, len(pi.Files))
+			pi.userIDMap[mi].set(i)
 		}
-		if pi.UserID == uid && pi.GroupID == gid {
-			idmsPrefix.set(i)
-			continue
+		if pi.GroupID == gid {
+			prefixGroupMap.set(i)
+		} else {
+			mi := newIDMapIfNeeded(&pi.groupIDMap, gid, len(pi.Files))
+			pi.groupIDMap[mi].set(i)
 		}
-		mi := newIDMapIfNeeded(&pi.idms, uid, gid, len(pi.Files))
-		pi.idms[mi].set(i)
 	}
-	if len(pi.idms) > 0 {
-		pi.idms = append([]idMap{idmsPrefix}, pi.idms...)
+	if len(pi.userIDMap) > 0 {
+		pi.userIDMap = append([]idMap{prefixUserMap}, pi.userIDMap...)
 	}
+
+	if len(pi.groupIDMap) > 0 {
+		pi.groupIDMap = append([]idMap{prefixGroupMap}, pi.groupIDMap...)
+	}
+	pi.idMapsCreated = true
 }
 
-func (pi *PrefixInfo) ComputeStats() {
+func (pi *PrefixInfo) ComputeStats(calculator diskusage.Calculator) (userStats, groupStats StatsList) {
 	pi.createIDMaps()
 
-	//	are we double counting here.....
+	userStats = make([]Stats, len(pi.userIDMap))
+	groupStats = make([]Stats, len(pi.groupIDMap))
 
-	//	what happens when group id appears twice in two combos - need to separate them
-	//	again don't we...
-
-	//	for i := range pi.idms {
-	//		userStats, groupStats := pi.computeStatsForUserGroup(i, func(size uint64) uint64 { return size })
-	//	}
-}
-
-func (pi *PrefixInfo) computeStatsForUserGroup(idx int, storageBytes func(uint64) uint64) (userStats, groupStats Stats) {
-	pi.createIDMaps()
-	idm := pi.idms[idx]
-	sc := newIdMapScanner(idm)
-	userStats.ID, groupStats.ID = idm.UserID, idm.GroupID
-	for sc.next() {
-		pos := sc.pos()
-		fi := pi.Files[pos]
-		userStats.Files++
-		userStats.Bytes += uint64(fi.Size())
-		userStats.StorageBytes += storageBytes(uint64(fi.Size()))
+	for i, idm := range pi.userIDMap {
+		userStats[i] = pi.computeStatsForID(idm, calculator)
 	}
-	userStats.Dirs = uint64(len(pi.Children))
-	groupStats = userStats
+
+	for i, idm := range pi.groupIDMap {
+		groupStats[i] = pi.computeStatsForID(idm, calculator)
+	}
 	return
+}
+
+func (pi *PrefixInfo) computeStatsForID(idm idMap, calculator diskusage.Calculator) Stats {
+	var stats Stats
+	sc := newIdMapScanner(idm)
+	for sc.next() {
+		fi := pi.Files[sc.pos()]
+		stats.Files++
+		stats.Bytes += fi.Size()
+		stats.StorageBytes += calculator.Calculate(fi.Size())
+	}
+	return stats
+}
+
+type IDSanner interface {
+	Next() bool
+	Info() file.Info
+}
+
+type nullScanner struct {
+	n     int
+	i     file.Info
+	files file.InfoList
+}
+
+func (s *nullScanner) Next() bool {
+	if s.n >= len(s.files) {
+		return false
+	}
+	s.i = s.files[s.n]
+	s.n++
+	return true
+}
+
+func (s *nullScanner) Info() file.Info {
+	return s.i
+}
+
+type idmapScanner struct {
+	sc    *idMapScanner
+	files file.InfoList
+}
+
+func (s *idmapScanner) Next() bool {
+	return s.sc.next()
+}
+
+func (s *idmapScanner) Info() file.Info {
+	return s.files[s.sc.pos()]
+}
+
+func (pi *PrefixInfo) UserIDScan(id uint32) (IDSanner, error) {
+	return pi.newIDScan(id, true, pi.userIDMap)
+}
+
+func (pi *PrefixInfo) GroupIDScan(id uint32) (IDSanner, error) {
+	return pi.newIDScan(id, false, pi.groupIDMap)
+}
+
+func (pi *PrefixInfo) newIDScan(id uint32, userID bool, idms idMaps) (IDSanner, error) {
+	pi.createIDMaps()
+	idm := idms.idMapFor(id)
+	if idm < 0 {
+		if userID && id == pi.UserID {
+			return &nullScanner{files: pi.Files}, nil
+		}
+		if !userID && id == pi.GroupID {
+			return &nullScanner{files: pi.Files}, nil
+		}
+		if userID {
+			return nil, fmt.Errorf("no such user id: %v", id)
+		}
+		return nil, fmt.Errorf("no such group id: %v", id)
+	}
+	return &idmapScanner{sc: newIdMapScanner(idms[idm]), files: pi.Files}, nil
 }

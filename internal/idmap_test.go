@@ -14,7 +14,7 @@ import (
 )
 
 func testIDMapScanner(t *testing.T, positions ...int) {
-	idm := newIDMap(3, 3, 257)
+	idm := newIDMap(3, 257)
 	for _, p := range positions {
 		idm.set(p)
 	}
@@ -29,7 +29,7 @@ func testIDMapScanner(t *testing.T, positions ...int) {
 }
 
 func TestIDMapScan(t *testing.T) {
-	idm := newIDMap(5, 5, 64*2+1)
+	idm := newIDMap(5, 64*2+1)
 
 	hasVals := func(vals ...uint64) {
 		if got, want := idm.Pos, vals; !reflect.DeepEqual(got, want) {
@@ -70,19 +70,16 @@ func TestIDMapScan(t *testing.T) {
 
 func TestIDMaps(t *testing.T) {
 	var idms idMaps
-	idms = append(idms, newIDMap(1, 100, 64), newIDMap(2, 200, 64))
+	idms = append(idms, newIDMap(1, 64), newIDMap(2, 64))
 
-	if got, want := idms.idMapFor(1, 100), 0; got != want {
+	if got, want := idms.idMapFor(1), 0; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	if got, want := idms.idMapFor(2, 200), 1; got != want {
+	if got, want := idms.idMapFor(2), 1; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
-	if got, want := idms.idMapFor(4, 4), -1; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-	if got, want := idms.idMapFor(2, 4), -1; got != want {
+	if got, want := idms.idMapFor(4), -1; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
@@ -116,8 +113,10 @@ func TestCreateIDMaps(t *testing.T) {
 	}
 
 	pi.createIDMaps()
-	if pi.idms != nil {
-		t.Errorf("expected idms to be nil")
+	npi := BinaryRoundTrip(t, &pi)
+
+	if npi.userIDMap != nil || npi.groupIDMap != nil {
+		t.Errorf("expected idms to be nil: %v, %v", npi.userIDMap, npi.groupIDMap)
 	}
 
 	fl = append(fl,
@@ -132,18 +131,30 @@ func TestCreateIDMaps(t *testing.T) {
 	}
 
 	pi.createIDMaps()
-	if got, want := len(pi.idms), 3; got != want {
+	npi = BinaryRoundTrip(t, &pi)
+
+	if got, want := len(npi.userIDMap), 3; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
-	if got, want := pi.idms.idMapFor(1, 2), 0; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-	if got, want := pi.idms.idMapFor(4, 2), 1; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-	if got, want := pi.idms.idMapFor(10, 11), 2; got != want {
+	if got, want := len(npi.groupIDMap), 2; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
+	if got, want := npi.userIDMap.idMapFor(1), 0; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if got, want := npi.userIDMap.idMapFor(4), 1; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if got, want := npi.userIDMap.idMapFor(10), 2; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
+	if got, want := npi.groupIDMap.idMapFor(2), 0; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if got, want := npi.groupIDMap.idMapFor(11), 1; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
 }

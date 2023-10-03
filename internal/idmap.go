@@ -7,19 +7,16 @@ package internal
 import (
 	"encoding/binary"
 	"math/bits"
-
-	"cloudeng.io/file"
 )
 
+// idMap is a bit map of file positions for a given id.
 type idMap struct {
-	UserID, GroupID uint32
-	Pos             []uint64
-	bitPos          int
+	ID  uint32
+	Pos []uint64
 }
 
 func (idm idMap) appendBinary(data []byte) ([]byte, error) {
-	data = binary.AppendUvarint(data, uint64(idm.UserID))
-	data = binary.AppendUvarint(data, uint64(idm.GroupID))
+	data = binary.AppendUvarint(data, uint64(idm.ID))
 	data = binary.AppendUvarint(data, uint64(len(idm.Pos)))
 	for _, p := range idm.Pos {
 		data = binary.AppendUvarint(data, p)
@@ -31,15 +28,15 @@ func (idm *idMap) decodeBinary(data []byte) ([]byte, error) {
 	var n int
 	uid, n := binary.Uvarint(data)
 	data = data[n:]
-	gid, n := binary.Uvarint(data)
-	data = data[n:]
-	idm.UserID, idm.GroupID = uint32(uid), uint32(gid)
+	idm.ID = uint32(uid)
 	l, n := binary.Uvarint(data)
 	data = data[n:]
-	idm.Pos = make([]uint64, l)
-	for i := range idm.Pos {
-		idm.Pos[i], n = binary.Uvarint(data)
-		data = data[n:]
+	if l > 0 {
+		idm.Pos = make([]uint64, l)
+		for i := range idm.Pos {
+			idm.Pos[i], n = binary.Uvarint(data)
+			data = data[n:]
+		}
 	}
 	return data, nil
 }
@@ -58,27 +55,28 @@ func (idms *idMaps) decodeBinary(data []byte) ([]byte, error) {
 	var n int
 	l, n := binary.Uvarint(data)
 	data = data[n:]
-	*idms = make([]idMap, l)
-	for i := range *idms {
-		data, _ = (*idms)[i].decodeBinary(data)
+	if l > 0 {
+		*idms = make([]idMap, l)
+		for i := range *idms {
+			data, _ = (*idms)[i].decodeBinary(data)
+		}
 	}
 	return data, nil
 }
 
-func (idms idMaps) idMapFor(uid, gid uint32) int {
+func (idms idMaps) idMapFor(id uint32) int {
 	for i, idm := range idms {
-		if idm.UserID == uid && idm.GroupID == gid {
+		if idm.ID == id {
 			return i
 		}
 	}
 	return -1
 }
 
-func newIDMap(uid, gid uint32, n int) idMap {
+func newIDMap(id uint32, n int) idMap {
 	return idMap{
-		UserID:  uid,
-		GroupID: gid,
-		Pos:     make([]uint64, n/64+1),
+		ID:  id,
+		Pos: make([]uint64, n/64+1),
 	}
 }
 
@@ -99,8 +97,7 @@ func newIdMapScanner(idm idMap) *idMapScanner {
 
 type idMapScanner struct {
 	idMap
-	bitPos  int
-	started bool
+	bitPos int
 }
 
 func select1(shift int, words []uint64) int {
@@ -132,17 +129,4 @@ func (idm *idMapScanner) next() bool {
 
 func (idm *idMapScanner) pos() int {
 	return idm.bitPos
-}
-
-func (idm *idMap) computeFileStats(files file.InfoList, storageBytes func(uint64) uint64) (userStats, groupStats Stats) {
-	userStats.ID, groupStats.ID = idm.UserID, idm.GroupID
-	sc := newIdMapScanner(*idm)
-	for sc.next() {
-		pos := sc.pos()
-		fi := files[pos]
-		userStats.Files++
-		userStats.Bytes += uint64(fi.Size())
-
-	}
-	return
 }

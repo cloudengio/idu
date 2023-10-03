@@ -102,7 +102,7 @@ func OpenDatabase(ctx context.Context, cfg config.Prefix, opts ...boltdb.Option)
 			}
 			return res.db, res.err
 		case <-time.After(time.Second):
-			fmt.Printf("waiting for database to open: %v: %s\t\t\r", cfg.Database, time.Now().Sub(start).Truncate(time.Second))
+			fmt.Printf("waiting for database to open: %v: %s\t\t\r", cfg.Database, time.Since(start).Truncate(time.Second))
 			delayed = true
 		}
 	}

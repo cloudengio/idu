@@ -168,13 +168,13 @@ func (w *walker) handlePrefix(ctx context.Context, state *prefixState, prefix st
 		return true, false, nil, err
 	}
 
-	uid, gid := internal.UserInfo(info)
+	uid, gid, _ := internal.UserInfo(info)
 	state.pi = internal.PrefixInfo{
-		ModTime: info.ModTime(),
 		UserID:  uid,
 		GroupID: gid,
-		Mode:    info.Mode(),
 		Size:    info.Size(),
+		ModTime: info.ModTime(),
+		Mode:    info.Mode(),
 	}
 
 	if info.Mode()&os.ModeSymlink == os.ModeSymlink {

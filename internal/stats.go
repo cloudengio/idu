@@ -8,20 +8,18 @@ import "encoding/binary"
 
 type Stats struct {
 	ID           uint32
-	Files        uint64 // number of files
-	Dirs         uint64 // number of directories
-	Bytes        uint64 // total size of files
-	StorageBytes uint64 // total size of files on disk
+	Files        int64 // number of files
+	Bytes        int64 // total size of files
+	StorageBytes int64 // total size of files on disk
 }
 
 type StatsList []Stats
 
 func (s *Stats) AppendBinary(data []byte) ([]byte, error) {
 	data = binary.AppendUvarint(data, uint64(s.ID))
-	data = binary.AppendUvarint(data, uint64(s.Files))
-	data = binary.AppendUvarint(data, uint64(s.Dirs))
-	data = binary.AppendUvarint(data, uint64(s.Bytes))
-	data = binary.AppendUvarint(data, uint64(s.StorageBytes))
+	data = binary.AppendVarint(data, s.Files)
+	data = binary.AppendVarint(data, s.Bytes)
+	data = binary.AppendVarint(data, s.StorageBytes)
 	return data, nil
 }
 
@@ -34,13 +32,11 @@ func (s *Stats) DecodeBinary(data []byte) ([]byte, error) {
 	id, n := binary.Uvarint(data)
 	data = data[n:]
 	s.ID = uint32(id)
-	s.Files, n = binary.Uvarint(data)
+	s.Files, n = binary.Varint(data)
 	data = data[n:]
-	s.Dirs, n = binary.Uvarint(data)
+	s.Bytes, n = binary.Varint(data)
 	data = data[n:]
-	s.Bytes, n = binary.Uvarint(data)
-	data = data[n:]
-	s.StorageBytes, n = binary.Uvarint(data)
+	s.StorageBytes, n = binary.Varint(data)
 	return data[n:], nil
 }
 

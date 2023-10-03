@@ -7,6 +7,7 @@ package boltdb
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/gob"
 	"fmt"
 
@@ -14,17 +15,23 @@ import (
 )
 
 type userInfo struct {
-	ID   int64
-	GIDS []int64
+	User string
+	GIDS []uint32
 }
 
 type groupInfo struct {
-	GID int64
+	Group string
 }
 
-func (db *Database) SetUser(_ context.Context, user string, id int64, gids []int64) error {
+func itob(v uint32) []byte {
+	b := make([]byte, 8)
+	binary.BigEndian.PutUint32(b, v)
+	return b
+}
+
+func (db *Database) SetUser(_ context.Context, id uint32, user string, gids []uint32) error {
 	u := userInfo{
-		ID:   id,
+		User: user,
 		GIDS: gids,
 	}
 	var buf bytes.Buffer
@@ -36,11 +43,11 @@ func (db *Database) SetUser(_ context.Context, user string, id int64, gids []int
 		if b == nil {
 			return fmt.Errorf("no bucket for prefix: %v", db.prefix)
 		}
-		return b.Bucket([]byte(bucketUsers)).Put([]byte(user), buf.Bytes())
+		return b.Bucket([]byte(bucketUsers)).Put(itob(id), buf.Bytes())
 	})
 }
 
-func (db *Database) VisitUsers(ctx context.Context, user string, visitor func(ctx context.Context, user string, id int64, gids []int64) bool) error {
+func (db *Database) VisitUsers(ctx context.Context, user string, visitor func(ctx context.Context, id uint32, user string, gids []uint32) bool) error {
 	return db.bdb.View(func(tx *bolt.Tx) error {
 		cursor, k, v, err := db.initScan(tx, bucketUsers, user)
 		if err != nil {
@@ -51,7 +58,8 @@ func (db *Database) VisitUsers(ctx context.Context, user string, visitor func(ct
 			if err := gob.NewDecoder(bytes.NewBuffer(v)).Decode(&u); err != nil {
 				return err
 			}
-			if !visitor(ctx, string(k), u.ID, u.GIDS) {
+			id := binary.BigEndian.Uint32(k)
+			if !visitor(ctx, id, u.User, u.GIDS) {
 				break
 			}
 			select {
@@ -64,24 +72,25 @@ func (db *Database) VisitUsers(ctx context.Context, user string, visitor func(ct
 	})
 }
 
-func (db *Database) SetGroup(_ context.Context, group string, gid int64) error {
+func (db *Database) SetGroup(_ context.Context, gid uint32, group string) error {
 	g := groupInfo{
-		GID: gid,
+		Group: group,
 	}
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(&g); err != nil {
 		return err
 	}
+	id := itob(gid)
 	return db.bdb.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(db.prefix))
 		if b == nil {
 			return fmt.Errorf("no bucket for prefix: %v", db.prefix)
 		}
-		return b.Bucket([]byte(bucketGroups)).Put([]byte(group), buf.Bytes())
+		return b.Bucket([]byte(bucketGroups)).Put(id, buf.Bytes())
 	})
 }
 
-func (db *Database) VisitGroups(ctx context.Context, group string, visitor func(ctx context.Context, group string, gid int64) bool) error {
+func (db *Database) VisitGroups(ctx context.Context, group string, visitor func(ctx context.Context, gid uint32, group string) bool) error {
 	return db.bdb.View(func(tx *bolt.Tx) error {
 		cursor, k, v, err := db.initScan(tx, bucketGroups, group)
 		if err != nil {
@@ -92,7 +101,8 @@ func (db *Database) VisitGroups(ctx context.Context, group string, visitor func(
 			if err := gob.NewDecoder(bytes.NewBuffer(v)).Decode(&g); err != nil {
 				return err
 			}
-			if !visitor(ctx, string(k), g.GID) {
+			id := binary.BigEndian.Uint32(k)
+			if !visitor(ctx, id, g.Group) {
 				break
 			}
 			select {

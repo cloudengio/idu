@@ -191,7 +191,7 @@ func TestScan(t *testing.T) {
 	defer db.Close(ctx)
 	n, p := 0, "a"
 	err = db.Scan(ctx, "", func(_ context.Context, k string, v []byte) bool {
-		if got, want := string(k), fmt.Sprintf("/%v/%02v", p, n); got != want {
+		if got, want := k, fmt.Sprintf("/%v/%02v", p, n); got != want {
 			t.Errorf("got %v, want %v", got, want)
 		}
 		if got, want := string(v), fmt.Sprintf("%v%v", p, n); got != want {
@@ -203,10 +203,13 @@ func TestScan(t *testing.T) {
 		}
 		return true
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	n, p = 3, "z"
 	err = db.Scan(ctx, "/z/03", func(_ context.Context, k string, v []byte) bool {
-		if got, want := string(k), fmt.Sprintf("/%v/%02v", p, n); got != want {
+		if got, want := k, fmt.Sprintf("/%v/%02v", p, n); got != want {
 			t.Errorf("got %v, want %v", got, want)
 		}
 		if got, want := string(v), fmt.Sprintf("%v%v", p, n); got != want {
@@ -215,6 +218,9 @@ func TestScan(t *testing.T) {
 		n++
 		return true
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestErrors(t *testing.T) {
@@ -253,6 +259,9 @@ func TestErrors(t *testing.T) {
 			entries++
 			return true
 		})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got, want := entries, 3; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
@@ -264,7 +273,9 @@ func TestErrors(t *testing.T) {
 			entries++
 			return true
 		})
-
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got, want := entries, 3; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}

@@ -9,9 +9,76 @@ import (
 	"path/filepath"
 	"testing"
 
+	"cloudeng.io/cmd/idu/internal/database"
 	"cloudeng.io/cmd/idu/internal/database/boltdb"
 	"golang.org/x/exp/slices"
 )
+
+func createUsrGroupEntries(t *testing.T, ctx context.Context, db database.DB) {
+	if err := db.SetUser(ctx, 50, "u1", []uint32{32, 12}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetUser(ctx, 51, "u2", []uint32{32, 12, 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetGroup(ctx, 1, "g1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetGroup(ctx, 12, "g2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetGroup(ctx, 31, "g3"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testUsers(t *testing.T, ctx context.Context, db database.DB) {
+	err := db.VisitUsers(ctx, "", func(_ context.Context, uid uint32, u string, gids []uint32) bool {
+		switch uid {
+		case 50:
+			if got, want := u, "u1"; got != want {
+				t.Errorf("got %v, want %v", got, want)
+			}
+			if got, want := []uint32{32, 12}, gids; !slices.Equal(got, want) {
+				t.Errorf("got %v, want %v", got, want)
+			}
+		case 51:
+			if got, want := u, "u2"; got != want {
+				t.Errorf("got %v, want %v", got, want)
+			}
+			if got, want := []uint32{32, 12, 1}, gids; !slices.Equal(got, want) {
+				t.Errorf("got %v, want %v", got, want)
+			}
+		}
+		return true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testGroups(t *testing.T, ctx context.Context, db database.DB) {
+	err := db.VisitGroups(ctx, "", func(_ context.Context, gid uint32, g string) bool {
+		switch gid {
+		case 1:
+			if got, want := g, "g1"; got != want {
+				t.Errorf("got %v, want %v", got, want)
+			}
+		case 12:
+			if got, want := g, "g2"; got != want {
+				t.Errorf("got %v, want %v", got, want)
+			}
+		case 31:
+			if got, want := g, "g3"; got != want {
+				t.Errorf("got %v, want %v", got, want)
+			}
+		}
+		return true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestUserGroups(t *testing.T) {
 	ctx := context.Background()
@@ -22,64 +89,9 @@ func TestUserGroups(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := db.SetUser(ctx, "u1", 50, []int64{32, 12}); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.SetUser(ctx, "u2", 51, []int64{32, 12, 1}); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.SetGroup(ctx, "g1", 1); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.SetGroup(ctx, "g2", 12); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.SetGroup(ctx, "g3", 31); err != nil {
-		t.Fatal(err)
-	}
+	createUsrGroupEntries(t, ctx, db)
 
-	err = db.VisitUsers(ctx, "", func(_ context.Context, u string, uid int64, gids []int64) bool {
-		switch u {
-		case "u1":
-			if got, want := uid, int64(50); got != want {
-				t.Errorf("got %v, want 50", uid)
-			}
-			if got, want := []int64{32, 12}, gids; !slices.Equal(got, want) {
-				t.Errorf("got %v, want %v", got, want)
-			}
-		case "u2":
-			if got, want := uid, int64(51); got != want {
-				t.Errorf("got %v, want 51", uid)
-			}
-			if got, want := []int64{32, 12, 1}, gids; !slices.Equal(got, want) {
-				t.Errorf("got %v, want %v", got, want)
-			}
-		}
+	testUsers(t, ctx, db)
+	testGroups(t, ctx, db)
 
-		return true
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = db.VisitGroups(ctx, "", func(_ context.Context, g string, gid int64) bool {
-		switch g {
-		case "g1":
-			if got, want := gid, int64(1); got != want {
-				t.Errorf("got %v, want 1", gid)
-			}
-		case "g2":
-			if got, want := gid, int64(12); got != want {
-				t.Errorf("got %v, want 12", gid)
-			}
-		case "g3":
-			if got, want := gid, int64(31); got != want {
-				t.Errorf("got %v, want 31", gid)
-			}
-		}
-		return true
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 }

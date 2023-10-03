@@ -32,7 +32,6 @@ var BatchDelay = func(d time.Duration) Option {
 }
 
 type Options struct {
-	boltOpt       bolt.Options
 	batchDelaySet bool
 	batchDelay    time.Duration
 }

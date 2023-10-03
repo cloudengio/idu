@@ -76,6 +76,10 @@ func TestPrefixLookup(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
+}
+
+func TestPrefixLookupRelative(t *testing.T) {
+
 	pwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -83,11 +87,11 @@ func TestPrefixLookup(t *testing.T) {
 
 	for _, tc := range []string{".", "", "./"} {
 		here := `- prefix: ` + pwd + "\n"
-		cfg, err = config.ParseConfig([]byte(here))
+		cfg, err := config.ParseConfig([]byte(here))
 		if err != nil {
 			t.Fatal(err)
 		}
-		prefix, path, err = internal.LookupPrefix(cfg, tc)
+		prefix, path, err := internal.LookupPrefix(cfg, tc)
 		if err != nil {
 			t.Fatal(err)
 		}

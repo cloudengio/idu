@@ -79,16 +79,16 @@ type DB interface {
 	VisitErrorsKey(ctx context.Context, key string, visitor func(ctx context.Context, when time.Time, key string, val []byte) bool) error
 
 	// SetUser records a user and the group ids for the groups that they belong.
-	SetUser(ctx context.Context, user string, id int64, gids []int64) error
+	SetUser(ctx context.Context, id uint32, user string, gids []uint32) error
 
 	// SetGroup records a group and its gid.
-	SetGroup(ctx context.Context, user string, gid int64) error
+	SetGroup(ctx context.Context, gid uint32, user string) error
 
 	// VisitUsers calls visitor for every user starting at user.
-	VisitUsers(ctx context.Context, user string, visitor func(ctx context.Context, user string, id int64, gids []int64) bool) error
+	VisitUsers(ctx context.Context, user string, visitor func(ctx context.Context, id uint32, user string, gids []uint32) bool) error
 
 	// VisitGroups calls visitor for every group starting at group.
-	VisitGroups(ctx context.Context, group string, visitor func(ctx context.Context, group string, gid int64) bool) error
+	VisitGroups(ctx context.Context, group string, visitor func(ctx context.Context, gid uint32, group string) bool) error
 
 	// Clear clears all of the log or error entries.
 	Clear(ctx context.Context, logs, errors bool) error

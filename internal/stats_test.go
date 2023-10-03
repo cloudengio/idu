@@ -13,8 +13,8 @@ import (
 
 func TestEncoding(t *testing.T) {
 	sl := internal.StatsList{
-		{ID: 1, Files: 3, Dirs: 4, Bytes: 5, StorageBytes: 6},
-		{ID: 7, Files: 9, Dirs: 10, Bytes: 11, StorageBytes: 12},
+		{ID: 1, Files: 3, Bytes: 5, StorageBytes: 6},
+		{ID: 7, Files: 9, Bytes: 11, StorageBytes: 12},
 	}
 
 	buf, err := sl.MarshalBinary()
