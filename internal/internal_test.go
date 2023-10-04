@@ -7,6 +7,9 @@ package internal
 import (
 	"bytes"
 	"encoding/gob"
+	"fmt"
+	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -16,24 +19,30 @@ func GobRoundTrip(t *testing.T, pi *PrefixInfo) PrefixInfo {
 	buf := &bytes.Buffer{}
 	enc := gob.NewEncoder(buf)
 	if err := enc.Encode(pi); err != nil {
-		t.Fatal(err)
+		t.Fatalf("%s: %v", caller(), err)
 	}
 	var nfi PrefixInfo
 	dec := gob.NewDecoder(buf)
 	if err := dec.Decode(&nfi); err != nil {
-		t.Fatal(err)
+		t.Fatalf("%s: %v", caller(), err)
 	}
 	return nfi
+}
+
+func caller() string {
+	_, file, line, _ := runtime.Caller(2)
+	return fmt.Sprintf("%s:%v", filepath.Base(file), line)
 }
 
 func BinaryRoundTrip(t *testing.T, pi *PrefixInfo) PrefixInfo {
 	buf, err := pi.MarshalBinary()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("%s: %v", caller(), err)
 	}
 	var npi PrefixInfo
 	if err := npi.UnmarshalBinary(buf); err != nil {
-		t.Fatal(err)
+
+		t.Fatalf("%s: %v", caller(), err)
 	}
 	return npi
 }

@@ -2,7 +2,7 @@
 // Use of this source code is governed by the Apache-2.0
 // license that can be found in the LICENSE file.
 
-package internal_test
+package internal
 
 import (
 	"io/fs"
@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/file"
 )
 
@@ -27,12 +26,12 @@ func TestUserInfo(t *testing.T) {
 
 	fi := file.NewInfoFromFileInfo(info)
 
-	pi := internal.PrefixInfo{
-		UserID:  1,
-		GroupID: 2,
+	pi := PrefixInfo{
+		userID:  1,
+		groupID: 2,
 	}
 
-	uid, gid := pi.GetUserGroup(fi)
+	uid, gid := pi.GetUserGroupFile(fi)
 
 	if got, want := int(uid), os.Getuid(); got != want {
 		t.Errorf("got %v, want %v", got, want)
@@ -41,9 +40,9 @@ func TestUserInfo(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
-	pi.SetUserGroup(&fi, 600, 6)
+	pi.SetUserGroupFile(&fi, 600, 6)
 
-	uid, gid = pi.GetUserGroup(fi)
+	uid, gid = pi.GetUserGroupFile(fi)
 	if got, want := uid, uint32(600); got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}

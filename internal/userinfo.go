@@ -12,27 +12,30 @@ type userinfo struct {
 	uid, gid uint32
 }
 
-func (pi *PrefixInfo) GetUserGroup(fi file.Info) (userID, groupID uint32) {
+func (pi *PrefixInfo) GetUserGroupFile(fi file.Info) (userID, groupID uint32) {
 	if fi.Sys() == nil {
-		return pi.UserID, pi.GroupID
+		return pi.userID, pi.groupID
 	}
 	if ui, ok := fi.Sys().(userinfo); ok {
 		return ui.uid, ui.gid
 	}
 	u, g, ok := userGroupID(fi)
 	if !ok {
-		return pi.UserID, pi.GroupID
+		return pi.userID, pi.groupID
 	}
 	return u, g
 }
 
-func (pi *PrefixInfo) SetUserGroup(fi *file.Info, userID, groupID uint32) {
-	if pi.UserID == userID && pi.GroupID == groupID {
+func (pi *PrefixInfo) SetUserGroupFile(fi *file.Info, userID, groupID uint32) {
+	if pi.userID == userID && pi.groupID == groupID {
 		fi.SetSys(nil)
 	}
 	fi.SetSys(userinfo{userID, groupID})
 }
 
 func UserGroup(fi file.Info) (userID, groupID uint32, ok bool) {
+	if ui, ok := fi.Sys().(userinfo); ok {
+		return ui.uid, ui.gid, true
+	}
 	return userGroupID(fi)
 }

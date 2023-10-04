@@ -6,13 +6,20 @@ package internal
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math/bits"
+	"strings"
 )
 
-// idMap is a bit map of file positions for a given id.
+// idMap is a bit map of file positions for a given id. They are used
+// to encode/decode user/group information in a space efficient manner.
 type idMap struct {
 	ID  uint32
 	Pos []uint64
+}
+
+func (idm idMap) String() string {
+	return fmt.Sprintf("% 3d:%064b", idm.ID, idm.Pos)
 }
 
 func (idm idMap) appendBinary(data []byte) ([]byte, error) {
@@ -43,9 +50,22 @@ func (idm *idMap) decodeBinary(data []byte) ([]byte, error) {
 
 type idMaps []idMap
 
+func (idms idMaps) String() string {
+	out := strings.Builder{}
+	out.WriteString("[\n")
+	for _, idm := range idms {
+		out.WriteRune('\t')
+		out.WriteString(idm.String())
+		out.WriteRune('\n')
+	}
+	out.WriteString("]\n")
+	return out.String()
+}
+
 func (idms idMaps) appendBinary(data []byte) ([]byte, error) {
 	data = binary.AppendUvarint(data, uint64(len(idms)))
 	for _, idm := range idms {
+		//fmt.Printf("appending: %v %b\n", idm.ID, idm.Pos)
 		data, _ = idm.appendBinary(data)
 	}
 	return data, nil
@@ -58,6 +78,7 @@ func (idms *idMaps) decodeBinary(data []byte) ([]byte, error) {
 	if l > 0 {
 		*idms = make([]idMap, l)
 		for i := range *idms {
+			//fmt.Printf("decoding: %v/%v\n", i, l)
 			data, _ = (*idms)[i].decodeBinary(data)
 		}
 	}
@@ -71,6 +92,15 @@ func (idms idMaps) idMapFor(id uint32) int {
 		}
 	}
 	return -1
+}
+
+func (idms idMaps) idForPos(pos int) (uint32, bool) {
+	for _, idm := range idms {
+		if idm.isSet(pos) {
+			return idm.ID, true
+		}
+	}
+	return 0, false
 }
 
 func newIDMap(id uint32, n int) idMap {

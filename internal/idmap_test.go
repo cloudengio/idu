@@ -106,13 +106,15 @@ func TestCreateIDMaps(t *testing.T) {
 		file.NewInfo("1", 2, 0700, modtime, &syscall.Stat_t{Uid: 1, Gid: 2}),
 		file.NewInfo("2", 4, 0700, modtime, &syscall.Stat_t{Uid: 1, Gid: 2}))
 
-	pi := PrefixInfo{
-		UserID:  1,
-		GroupID: 2,
-		Files:   fl,
+	info := file.NewInfo("dir", 1, 0700, modtime, &syscall.Stat_t{Uid: 1, Gid: 2})
+	pi, err := NewPrefixInfo(info)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	pi.createIDMaps()
+	pi.AppendFiles(fl)
+	if err := pi.Finalize(); err != nil {
+		t.Fatal(err)
+	}
 	npi := BinaryRoundTrip(t, &pi)
 
 	if npi.userIDMap != nil || npi.groupIDMap != nil {
@@ -124,13 +126,18 @@ func TestCreateIDMaps(t *testing.T) {
 		file.NewInfo("2", 3, 0700, modtime, &syscall.Stat_t{Uid: 1, Gid: 2}),
 		file.NewInfo("3", 4, 0700, modtime, &syscall.Stat_t{Uid: 10, Gid: 11}))
 
-	pi = PrefixInfo{
-		UserID:  1,
-		GroupID: 2,
-		Files:   fl,
+	pi, err = NewPrefixInfo(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pi.AppendFiles(fl)
+	if err := pi.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	if err := pi.Finalize(); err != nil {
+		t.Fatal(err)
 	}
 
-	pi.createIDMaps()
 	npi = BinaryRoundTrip(t, &pi)
 
 	if got, want := len(npi.userIDMap), 3; got != want {

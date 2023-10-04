@@ -283,6 +283,10 @@ func (w *walker) Contents(ctx context.Context, state *prefixState, prefix string
 func (w *walker) Done(ctx context.Context, state *prefixState, prefix string) error {
 	// compute stats....
 
+	// need to add in stats for the prefix itself for the owner/group of
+	// the prefix - ie. +1 prefix, +size - no raw disk computation for
+	// dir entries though.
+
 	// aggregate, per user, per group.
 	defer w.pt.donePrefix(state.nerrors, state.nfiles, state.nstats)
 

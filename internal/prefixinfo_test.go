@@ -5,8 +5,6 @@
 package internal_test
 
 import (
-	"fmt"
-	"io/fs"
 	"os"
 	"reflect"
 	"syscall"
@@ -26,10 +24,16 @@ func scanFilesByID(ids internal.IDSanner) []string {
 	return n
 }
 
-func createPrefixInfo(now time.Time) internal.PrefixInfo {
+func createPrefixInfo(t *testing.T, now time.Time) internal.PrefixInfo {
+	info := file.NewInfo("0", 0, 0700, now.Truncate(0), &syscall.Stat_t{Uid: 1, Gid: 2})
+	pi, err := internal.NewPrefixInfo(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	var fl file.InfoList
 	fl = append(fl,
-		file.NewInfo("0", 0, 0700, now.Truncate(0), &syscall.Stat_t{Uid: 1, Gid: 3}),
+		file.NewInfo("0", 1, 0700, now.Truncate(0), &syscall.Stat_t{Uid: 1, Gid: 3}),
 		file.NewInfo("1", 1, 0700, now.Add(time.Minute).Truncate(0), &syscall.Stat_t{Uid: 1, Gid: 2}),
 	)
 	var el filewalk.EntryList
@@ -38,15 +42,8 @@ func createPrefixInfo(now time.Time) internal.PrefixInfo {
 		filewalk.Entry{Name: "1", Type: os.ModeDir},
 	)
 
-	pi := internal.PrefixInfo{
-		// NOTE, UserStats and GroupStats are not serialized.
-		UserID:   1,
-		GroupID:  2,
-		Mode:     fs.FileMode(0700),
-		ModTime:  time.Now(),
-		Children: el,
-		Files:    fl,
-	}
+	pi.AppendFiles(fl)
+	pi.AppendEntries(el)
 	return pi
 }
 
@@ -68,42 +65,50 @@ func scanGroups(t *testing.T, pi *internal.PrefixInfo, gid uint32) []string {
 
 func TestBinaryEncoding(t *testing.T) {
 
-	pi := createPrefixInfo(time.Now())
+	pi := createPrefixInfo(t, time.Now())
+	if err := pi.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	uid, gid := pi.UserGroup()
 
 	for _, fn := range []internal.RoundTripper{
 		internal.GobRoundTrip, internal.BinaryRoundTrip,
 	} {
 		npi := fn(t, &pi)
 
-		if got, want := npi.UserID, pi.UserID; got != want {
+		if !pi.Unchanged(npi) {
+			t.Errorf("prefix info is changed")
+		}
+		nuid, ngid := npi.UserGroup()
+		if got, want := uid, nuid; got != want {
 			t.Errorf("got %v, want %v", got, want)
 		}
-		if got, want := npi.GroupID, pi.GroupID; got != want {
+		if got, want := gid, ngid; got != want {
 			t.Errorf("got %v, want %v", got, want)
 		}
-		if got, want := npi.Mode, pi.Mode; got != want {
+		if got, want := npi.Mode(), pi.Mode(); got != want {
 			t.Errorf("got %v, want %v", got, want)
 		}
 
-		if got, want := npi.ModTime, pi.ModTime; !got.Equal(want) {
+		if got, want := npi.ModTime(), pi.ModTime(); !got.Equal(want) {
 			t.Errorf("got %v, want %v", got, want)
 		}
 
-		if got, want := npi.Children, pi.Children; !reflect.DeepEqual(got, want) {
+		if got, want := npi.Entries(), pi.Entries(); !reflect.DeepEqual(got, want) {
 			t.Errorf("got %v, want %v", got, want)
 		}
 
 		// Can't use reflect.DeepEqual because the SysInfo field is not
 		// encoded/decoded.
-		if got, want := len(npi.Files), len(pi.Files); got != want {
+		if got, want := len(npi.Files()), len(pi.Files()); got != want {
 			t.Errorf("got %v, want %v", got, want)
 		}
 
-		for i := range npi.Files {
-			if got, want := npi.Files[i].Name(), pi.Files[i].Name(); got != want {
+		for i := range npi.Files() {
+			if got, want := npi.Files()[i].Name(), pi.Files()[i].Name(); got != want {
 				t.Errorf("got %v, want %v", got, want)
 			}
-			if got, want := npi.Files[i].ModTime(), pi.Files[i].ModTime(); got != want {
+			if got, want := npi.Files()[i].ModTime(), pi.Files()[i].ModTime(); got != want {
 				t.Errorf("got %v, want %v", got, want)
 			}
 		}
@@ -135,37 +140,29 @@ func (diskCalc) String() string {
 
 func TestStats(t *testing.T) {
 	now := time.Now()
-	pi := createPrefixInfo(now)
+	pi := createPrefixInfo(t, now)
 	var fl file.InfoList
+	uid, gid := pi.UserGroup()
 	fl = append(fl,
-		file.NewInfo("0", 3, 0700, now, &syscall.Stat_t{Uid: pi.UserID, Gid: pi.GroupID}),
-		file.NewInfo("1", 7, 0700, now, &syscall.Stat_t{Uid: pi.UserID, Gid: pi.GroupID}),
+		file.NewInfo("0", 3, 0700, now, &syscall.Stat_t{Uid: uid, Gid: gid}),
+		file.NewInfo("1", 7, 0700, now, &syscall.Stat_t{Uid: uid, Gid: gid}),
 	)
-	pi.Files = fl
-
-	us, gs := pi.ComputeStats(diskCalc{})
-	fmt.Println(us, gs)
-	t.Fail()
-
-}
-
-/*
-	usl := internal.StatsList{
-		{ID: 1, Files: 3, Bytes: 50, StorageBytes: 60},
-		{ID: 7, Files: 9, Bytes: 70, StorageBytes: 80},
+	pi.AppendFiles(fl)
+	if err := pi.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+	us, gs, err := pi.ComputeStats(diskCalc{})
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	gsl := internal.StatsList{
-		{ID: 1, Files: 3, Bytes: 5, StorageBytes: 15},
-		{ID: 7, Files: 9, Bytes: 11, StorageBytes: 21},
-	}*/
+	if got, want := us, (internal.StatsList{{ID: uid, Files: 4, Bytes: 12, StorageBytes: 52}}); !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
 
-//if got, want := nfi.UserStats, pi.UserStats; !reflect.DeepEqual(got, want) {
-//	t.Errorf("got %v, want %v", got, want)
-//}
-
-//if got, want := nfi.GroupStats, pi.GroupStats; !reflect.DeepEqual(got, want) {
-//	t.Errorf("got %v, want %v", got, want)
-//}
-//UserStats:  usl,
-//GroupStats: gsl,
+	if got, want := gs, (internal.StatsList{
+		{ID: 2, Files: 3, Bytes: 11, StorageBytes: 41},
+		{ID: 3, Files: 1, Bytes: 1, StorageBytes: 11}}); !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
