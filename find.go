@@ -14,6 +14,7 @@ import (
 	"cloudeng.io/algo/container/heap"
 	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/database/boltdb"
+	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmdutil/flags"
 )
 
@@ -88,7 +89,7 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 		if !strings.HasPrefix(k, args[0]) {
 			return false
 		}
-		var pi internal.PrefixInfo
+		var pi prefixinfo.T
 		if err := pi.UnmarshalBinary(v); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to unmarshal value for %v: %v\n", k, err)
 			return false

@@ -15,6 +15,7 @@ import (
 	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/cmd/idu/internal/database"
+	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/errors"
 	"cloudeng.io/file"
 	"cloudeng.io/file/filewalk"
@@ -127,8 +128,8 @@ type prefixState struct {
 	prefix    string
 	unchanged bool
 	info      file.Info
-	existing  internal.PrefixInfo
-	pi        internal.PrefixInfo
+	existing  prefixinfo.T
+	pi        prefixinfo.T
 	start     time.Time
 	nerrors   int
 	nfiles    int
@@ -169,7 +170,7 @@ func (w *walker) handlePrefix(ctx context.Context, state *prefixState, prefix st
 		return true, false, nil, err
 	}
 
-	state.pi, err = internal.NewPrefixInfo(info)
+	state.pi, err = prefixinfo.New(info)
 	if err != nil {
 		w.dbLog(ctx, prefix, []byte(err.Error()))
 		return true, false, nil, err
@@ -306,7 +307,7 @@ func (w *walker) Done(ctx context.Context, state *prefixState, prefix string) er
 	return nil
 }
 
-func (w *walker) handleDeletedPrefixes(ctx context.Context, prefix string, current, previous internal.PrefixInfo) (int, error) {
+func (w *walker) handleDeletedPrefixes(ctx context.Context, prefix string, current, previous prefixinfo.T) (int, error) {
 	var deleted []string
 	cm := make(map[string]struct{}, len(current.Entries()))
 	for _, cur := range current.Entries() {
@@ -330,7 +331,7 @@ func (w *walker) handleDeletedPrefixes(ctx context.Context, prefix string, curre
 	return ndeleted, errs.Err()
 }
 
-func getPrefixInfo(ctx context.Context, db database.DB, key string, pi *internal.PrefixInfo) (bool, error) {
+func getPrefixInfo(ctx context.Context, db database.DB, key string, pi *prefixinfo.T) (bool, error) {
 	select {
 	case <-ctx.Done():
 		return false, ctx.Err()
@@ -347,7 +348,7 @@ func getPrefixInfo(ctx context.Context, db database.DB, key string, pi *internal
 	return true, pi.UnmarshalBinary(buf)
 }
 
-func setPrefixInfo(ctx context.Context, db database.DB, key string, pi *internal.PrefixInfo) error {
+func setPrefixInfo(ctx context.Context, db database.DB, key string, pi *prefixinfo.T) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

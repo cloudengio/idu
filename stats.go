@@ -19,6 +19,7 @@ import (
 	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/database"
 	"cloudeng.io/cmd/idu/internal/database/boltdb"
+	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/file/diskusage"
 )
 
@@ -133,7 +134,7 @@ func (st *statsCmds) computeStats(ctx context.Context, db database.DB, prefix st
 		if !strings.HasPrefix(k, prefix) {
 			return false
 		}
-		var pi internal.PrefixInfo
+		var pi prefixinfo.T
 		if err := pi.UnmarshalBinary(v); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to unmarshal value for %v: %v\n", k, err)
 			return false
@@ -270,8 +271,8 @@ type stats struct {
 	ByUser   *heaps[uint32]
 	ByGroup  *heaps[uint32]
 
-	userTotals  map[uint32]internal.Stats
-	groupTotals map[uint32]internal.Stats
+	userTotals  map[uint32]prefixinfo.Stats
+	groupTotals map[uint32]prefixinfo.Stats
 }
 
 func newHeaps[T comparable](prefix string, storageBytes bool, n int) *heaps[T] {
@@ -402,8 +403,8 @@ func newStats(prefix string, withStorageBytes bool, n int) *stats {
 		PerGroup:    newIdStats(prefix, withStorageBytes, n),
 		ByUser:      newHeaps[uint32](prefix, withStorageBytes, n),
 		ByGroup:     newHeaps[uint32](prefix, withStorageBytes, n),
-		userTotals:  map[uint32]internal.Stats{},
-		groupTotals: map[uint32]internal.Stats{},
+		userTotals:  map[uint32]prefixinfo.Stats{},
+		groupTotals: map[uint32]prefixinfo.Stats{},
 	}
 }
 
@@ -411,7 +412,7 @@ func (s *stats) prefixStats(prefix string, size, storageBytes, files, children i
 	s.Prefix.push(prefix, size, storageBytes, files, children)
 }
 
-func addToMap(stats map[uint32]internal.Stats, uid uint32, size, storageBytes, files, children int64) {
+func addToMap(stats map[uint32]prefixinfo.Stats, uid uint32, size, storageBytes, files, children int64) {
 	s := stats[uid]
 	s.Bytes += size
 	s.StorageBytes += storageBytes
@@ -420,14 +421,14 @@ func addToMap(stats map[uint32]internal.Stats, uid uint32, size, storageBytes, f
 	stats[uid] = s
 }
 
-func (s *stats) userStats(prefix string, us internal.StatsList) {
+func (s *stats) userStats(prefix string, us prefixinfo.StatsList) {
 	for _, u := range us {
 		s.PerUser.push(u.ID, prefix, u.Bytes, u.StorageBytes, u.Files, u.Prefixes)
 		addToMap(s.userTotals, u.ID, u.Bytes, u.StorageBytes, u.Files, u.Prefixes)
 	}
 }
 
-func (s *stats) groupStats(prefix string, ug internal.StatsList) {
+func (s *stats) groupStats(prefix string, ug prefixinfo.StatsList) {
 	for _, g := range ug {
 		s.PerGroup.push(g.ID, prefix, g.Bytes, g.StorageBytes, g.Files, g.Prefixes)
 		addToMap(s.groupTotals, g.ID, g.Bytes, g.StorageBytes, g.Files, g.Prefixes)

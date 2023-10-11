@@ -15,6 +15,7 @@ import (
 	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/cmd/idu/internal/database/boltdb"
+	"cloudeng.io/cmd/idu/internal/prefixinfo"
 )
 
 type lsFlags struct {
@@ -58,7 +59,7 @@ func (l *lister) prefixes(ctx context.Context, values interface{}, args []string
 		if !strings.HasPrefix(k, args[0]) {
 			return false
 		}
-		var pi internal.PrefixInfo
+		var pi prefixinfo.T
 		if err := pi.UnmarshalBinary(v); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to unmarshal value for %v: %v\n", k, err)
 			return false
