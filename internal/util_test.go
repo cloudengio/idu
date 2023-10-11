@@ -5,6 +5,7 @@
 package internal_test
 
 import (
+	"context"
 	"flag"
 	"os"
 	"testing"
@@ -49,37 +50,31 @@ const simple = `- prefix: /tmp
 `
 
 func TestPrefixLookup(t *testing.T) {
+	ctx := context.Background()
 	cfg, err := config.ParseConfig([]byte(simple))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	prefix, path, err := internal.LookupPrefix(cfg, "/tmp")
+	ctx, prefix, err := internal.LookupPrefix(ctx, cfg, "/tmp")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got, want := prefix.Prefix, "/tmp"; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	if got, want := path, ""; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
 
-	prefix, path, err = internal.LookupPrefix(cfg, "/tmp/xx")
+	ctx, prefix, err = internal.LookupPrefix(ctx, cfg, "/tmp/xx")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got, want := prefix.Prefix, "/tmp"; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	if got, want := path, "xx"; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-
 }
 
 func TestPrefixLookupRelative(t *testing.T) {
-
+	ctx := context.Background()
 	pwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -91,26 +86,21 @@ func TestPrefixLookupRelative(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		prefix, path, err := internal.LookupPrefix(cfg, tc)
+		ctx, prefix, err := internal.LookupPrefix(ctx, cfg, tc)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if got, want := prefix.Prefix, pwd; got != want {
-			t.Errorf("got %v, want %v", got, want)
-		}
-		if got, want := path, ""; got != want {
 			t.Errorf("got %v, want %v", got, want)
 		}
 
-		prefix, path, err = internal.LookupPrefix(cfg, "config")
+		ctx, prefix, err = internal.LookupPrefix(ctx, cfg, "config")
 		if err != nil {
 			t.Fatal(err)
 		}
 		if got, want := prefix.Prefix, pwd; got != want {
 			t.Errorf("got %v, want %v", got, want)
 		}
-		if got, want := path, "config"; got != want {
-			t.Errorf("got %v, want %v", got, want)
-		}
+
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/cmd/idu/internal/database"
 	"cloudeng.io/cmd/idu/internal/database/boltdb"
+	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmdutil/flags"
 )
 
@@ -99,12 +100,12 @@ func OpenPrefixAndDatabase(ctx context.Context, all config.T, prefix string, opt
 
 type prefixInfo struct {
 	name string
-	PrefixInfo
+	prefixinfo.T
 }
 
 // PrefixInfoAsFSInfo returns a fs.FileInfo for the supplied PrefixInfo.
-func PrefixInfoAsFSInfo(pi PrefixInfo, name string) fs.FileInfo {
-	return &prefixInfo{PrefixInfo: pi, name: name}
+func PrefixInfoAsFSInfo(pi prefixinfo.T, name string) fs.FileInfo {
+	return &prefixInfo{T: pi, name: name}
 }
 
 func (pi *prefixInfo) Name() string {
