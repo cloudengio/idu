@@ -10,76 +10,28 @@ import (
 	"encoding/csv"
 	"encoding/gob"
 	"fmt"
-	"os"
 	"strconv"
 	"time"
 
-	"golang.org/x/exp/maps"
+	"cloudeng.io/cmd/idu/internal/reports"
 )
 
 type tsvReports struct {
 }
 
 func (tr *tsvReports) generateReports(ctx context.Context, rf *reportsFlags, when time.Time, data []byte) error {
-	var sdb stats
+	var sdb reports.AllStats
 	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&sdb); err != nil {
 		return fmt.Errorf("failed to decode stats: %v", err)
 	}
-
 	filenames, err := newReportFilenames(rf.ReportDir, when, ".tsv")
 	if err != nil {
 		return err
 	}
-
-	topN := rf.TSV
-
-	merged := sdb.Prefix.merge(topN)
-	if err := os.WriteFile(filenames.summary("prefixes"), tr.formatMerged(merged), 0600); err != nil {
-		return err
-	}
-	maps.Clear(merged)
-	merged[sdb.Prefix.Prefix] = mergedStats{
-		Prefix:   sdb.Prefix.Prefix,
-		Bytes:    sdb.Prefix.TotalBytes,
-		Storage:  sdb.Prefix.TotalStorageBytes,
-		Files:    sdb.Prefix.TotalFiles,
-		Prefixes: sdb.Prefix.TotalPrefixes,
-	}
-
-	if err := os.WriteFile(filenames.summary("totals"), tr.formatMerged(merged), 0600); err != nil {
-		return err
-	}
-
-	for uid, us := range sdb.PerUser.ByPrefix {
-		merged := us.merge(topN)
-		if err := os.WriteFile(filenames.user(uid), tr.formatMerged(merged), 0600); err != nil {
-			return err
-		}
-	}
-
-	for gid, us := range sdb.PerGroup.ByPrefix {
-		merged := us.merge(topN)
-		if err := os.WriteFile(filenames.group(gid), tr.formatMerged(merged), 0600); err != nil {
-			return err
-		}
-	}
-
-	userMerged := sdb.ByUser.merge(topN)
-	userdata := tr.formatUserGroupMerged(userMerged, globalUserManager.nameForUID)
-	if err := os.WriteFile(filenames.summary("user"), userdata, 0600); err != nil {
-		return err
-	}
-
-	groupMerged := sdb.ByGroup.merge(topN)
-	groupdata := tr.formatUserGroupMerged(groupMerged, globalUserManager.nameForGID)
-	if err := os.WriteFile(filenames.summary("group"), groupdata, 0600); err != nil {
-		return err
-	}
-
-	return nil
+	return writeReportFiles(&sdb, filenames, tr.formatMerged, tr.formatUserGroupMerged, rf.TSV)
 }
 
-func (tr *tsvReports) formatMerged(merged map[string]mergedStats) []byte {
+func (tr *tsvReports) formatMerged(merged map[string]reports.MergedStats) []byte {
 	out := &bytes.Buffer{}
 	wr := csv.NewWriter(out)
 	wr.Comma = '\t'
@@ -95,7 +47,7 @@ func (tr *tsvReports) formatMerged(merged map[string]mergedStats) []byte {
 	return out.Bytes()
 }
 
-func (tr *tsvReports) formatUserGroupMerged(merged map[uint32]mergedStats, nameForID func(uint32) string) []byte {
+func (tr *tsvReports) formatUserGroupMerged(merged map[uint32]reports.MergedStats, nameForID func(uint32) string) []byte {
 	out := &bytes.Buffer{}
 	wr := csv.NewWriter(out)
 	wr.Comma = '\t'

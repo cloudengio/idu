@@ -111,7 +111,7 @@ func TestCreateIDMaps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pi.AppendFiles(fl)
+	pi.AppendInfoList(fl)
 	if err := pi.Finalize(); err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestCreateIDMaps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pi.AppendFiles(fl)
+	pi.AppendInfoList(fl)
 	if err := pi.Finalize(); err != nil {
 		t.Fatal(err)
 	}

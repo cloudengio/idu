@@ -56,7 +56,7 @@ func TestPrefixLookup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, prefix, err := internal.LookupPrefix(ctx, cfg, "/tmp")
+	_, prefix, err := internal.LookupPrefix(ctx, cfg, "/tmp")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestPrefixLookup(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
-	ctx, prefix, err = internal.LookupPrefix(ctx, cfg, "/tmp/xx")
+	_, prefix, err = internal.LookupPrefix(ctx, cfg, "/tmp/xx")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestPrefixLookupRelative(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ctx, prefix, err := internal.LookupPrefix(ctx, cfg, tc)
+		_, prefix, err := internal.LookupPrefix(ctx, cfg, tc)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -94,7 +94,7 @@ func TestPrefixLookupRelative(t *testing.T) {
 			t.Errorf("got %v, want %v", got, want)
 		}
 
-		ctx, prefix, err = internal.LookupPrefix(ctx, cfg, "config")
+		_, prefix, err = internal.LookupPrefix(ctx, cfg, "config")
 		if err != nil {
 			t.Fatal(err)
 		}

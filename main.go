@@ -7,10 +7,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
+	"strings"
 
 	// G108
 	_ "net/http/pprof" //nolint:gosec
@@ -114,7 +116,6 @@ commands:
 
 type GlobalFlags struct {
 	ExitProfile profiling.ProfileFlag `subcmd:"profile,,'write a profile on exit; the format is <profile-name>:<file> and the flag may be repeated to request multiple profile types, use cpu to request cpu profiling in addition to predefined profiles in runtime/pprof'"`
-	Human       bool                  `subcmd:"h,true,show sizes in human readable form"`
 	ConfigFile  string                `subcmd:"config,$HOME/.idu.yml,configuration file"`
 	Units       string                `subcmd:"units,decimal,display usage in decimal (KB) or binary (KiB) formats"`
 	Verbose     int                   `subcmd:"v,0,lower values show more debugging output"`
@@ -223,13 +224,19 @@ func main() {
 var printer = message.NewPrinter(language.English)
 
 func fmtSize(size int64) string {
-	if globalFlags.Human {
-		f, u := bytesPrinter(size)
-		return printer.Sprintf("% 8.3f %s", f, u)
-	}
-	return printer.Sprintf("%v", size)
+	f, u := bytesPrinter(size)
+	return printer.Sprintf("% 8.3f %s", f, u)
 }
 
 func fmtCount(count int64) string {
 	return printer.Sprintf("% 11v", count)
+}
+
+func banner(out io.Writer, ul string, format string, args ...any) {
+	buf := strings.Builder{}
+	o := fmt.Sprintf(format, args...)
+	buf.WriteString(o)
+	buf.WriteString(strings.Repeat(ul, len(o)))
+	buf.WriteRune('\n')
+	out.Write([]byte(buf.String()))
 }

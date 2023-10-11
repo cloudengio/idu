@@ -25,7 +25,7 @@ func scanFilesByID(ids prefixinfo.IDSanner) []string {
 }
 
 func createPrefixInfo(t *testing.T, now time.Time) prefixinfo.T {
-	info := file.NewInfo("0", 0, 0700, now.Truncate(0), &syscall.Stat_t{Uid: 1, Gid: 2})
+	info := file.NewInfo("0", 3, 0700, now.Truncate(0), &syscall.Stat_t{Uid: 1, Gid: 2})
 	pi, err := prefixinfo.New(info)
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +42,7 @@ func createPrefixInfo(t *testing.T, now time.Time) prefixinfo.T {
 		filewalk.Entry{Name: "1", Type: os.ModeDir},
 	)
 
-	pi.AppendFiles(fl)
+	pi.AppendInfoList(fl)
 	pi.AppendEntries(el)
 	return pi
 }
@@ -63,6 +63,22 @@ func scanGroups(t *testing.T, pi *prefixinfo.T, gid uint32) []string {
 	return scanFilesByID(sc)
 }
 
+func cmpFileInfoList(t *testing.T, got, want file.InfoList) {
+	// Can't use reflect.DeepEqual because the SysInfo field is not
+	// encoded/decoded.
+	if got, want := len(got), len(want); got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	for i := range got {
+		if got, want := got[i].Name(), want[i].Name(); got != want {
+			t.Errorf("got %v, want %v", got, want)
+		}
+		if got, want := got[i].ModTime(), want[i].ModTime(); !got.Equal(want) {
+			t.Errorf("got %v, want %v", got, want)
+		}
+	}
+}
+
 func TestBinaryEncoding(t *testing.T) {
 
 	pi := createPrefixInfo(t, time.Now())
@@ -75,7 +91,6 @@ func TestBinaryEncoding(t *testing.T) {
 		prefixinfo.GobRoundTrip, prefixinfo.BinaryRoundTrip,
 	} {
 		npi := fn(t, &pi)
-
 		if !pi.Unchanged(npi) {
 			t.Errorf("prefix info is changed")
 		}
@@ -98,20 +113,7 @@ func TestBinaryEncoding(t *testing.T) {
 			t.Errorf("got %v, want %v", got, want)
 		}
 
-		// Can't use reflect.DeepEqual because the SysInfo field is not
-		// encoded/decoded.
-		if got, want := len(npi.Files()), len(pi.Files()); got != want {
-			t.Errorf("got %v, want %v", got, want)
-		}
-
-		for i := range npi.Files() {
-			if got, want := npi.Files()[i].Name(), pi.Files()[i].Name(); got != want {
-				t.Errorf("got %v, want %v", got, want)
-			}
-			if got, want := npi.Files()[i].ModTime(), pi.Files()[i].ModTime(); got != want {
-				t.Errorf("got %v, want %v", got, want)
-			}
-		}
+		cmpFileInfoList(t, npi.FileInfo(), pi.FileInfo())
 
 		names := scanUsers(t, &pi, 1)
 		if got, want := names, []string{"0", "1"}; !reflect.DeepEqual(got, want) {
@@ -138,36 +140,107 @@ func (diskCalc) String() string {
 	return "plus10"
 }
 
-func TestStats(t *testing.T) {
+func createPrefixInfoForStats(t *testing.T, extra ...file.Info) prefixinfo.T {
 	now := time.Now()
 	pi := createPrefixInfo(t, now)
 	var fl file.InfoList
 	uid, gid := pi.UserGroup()
 	fl = append(fl,
-		file.NewInfo("0", 3, 0700, now, &syscall.Stat_t{Uid: uid, Gid: gid}),
-		file.NewInfo("1", 7, 0700, now, &syscall.Stat_t{Uid: uid, Gid: gid}),
-		file.NewInfo("2", 12, 0700|os.ModeDir, now, &syscall.Stat_t{Uid: uid, Gid: gid}),
+		file.NewInfo("2", 3, 0700, now, &syscall.Stat_t{Uid: uid, Gid: gid}),
+		file.NewInfo("3", 7, 0700, now, &syscall.Stat_t{Uid: uid, Gid: gid}),
+		file.NewInfo("4", 12, 0700|os.ModeDir, now, &syscall.Stat_t{Uid: uid, Gid: gid}),
 	)
-	pi.AppendFiles(fl)
+	pi.AppendInfoList(fl)
+	pi.AppendInfoList(extra)
 	if err := pi.Finalize(); err != nil {
 		t.Fatal(err)
 	}
-	totals, us, gs, err := pi.ComputeStats(diskCalc{})
+	return pi
+}
+
+func TestStatsTotals(t *testing.T) {
+	now := time.Now()
+	opi := createPrefixInfo(t, now)
+	uid, gid := opi.UserGroup()
+	pi0 := createPrefixInfoForStats(t,
+		file.NewInfo("5", 3, 0700, now, &syscall.Stat_t{Uid: uid, Gid: gid}),
+		file.NewInfo("6", 7, 0700, now, &syscall.Stat_t{Uid: uid, Gid: gid}),
+		file.NewInfo("7", 12, 0700|os.ModeDir, now, &syscall.Stat_t{Uid: uid, Gid: gid}))
+
+	pi1 := createPrefixInfoForStats(t,
+		file.NewInfo("5", 3, 0700, now, &syscall.Stat_t{Uid: uid * 100, Gid: gid * 100}),
+		file.NewInfo("6", 7, 0700, now, &syscall.Stat_t{Uid: uid * 101, Gid: gid * 101}),
+		file.NewInfo("7", 12, 0700|os.ModeDir, now, &syscall.Stat_t{Uid: uid * 102, Gid: gid * 102}))
+	for _, pi := range []prefixinfo.T{pi0, pi1} {
+		totals, _, _, err := pi.ComputeStats(diskCalc{})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		//uid, _ := pi.UserGroup()
+
+		/*
+			if got, want := us, (prefixinfo.StatsList{{ID: uid, Files: 4, Prefixes: 1, Bytes: 12, StorageBytes: 52, PrefixBytes: 12}}); !reflect.DeepEqual(got, want) {
+				t.Errorf("got %#v, want %#v", got, want)
+			}
+
+			if got, want := gs, (prefixinfo.StatsList{
+				{ID: 2, Files: 3, Prefixes: 1, Bytes: 11, StorageBytes: 41, PrefixBytes: 12},
+				{ID: 3, Files: 1, Prefixes: 0, Bytes: 1, StorageBytes: 11}}); !reflect.DeepEqual(got, want) {
+				t.Errorf("got %#v, want %#v", got, want)
+			}*/
+
+		if got, want := totals, (prefixinfo.Stats{Files: 6, Prefixes: 2, Bytes: 22, StorageBytes: 22 + 60, PrefixBytes: 24}); !reflect.DeepEqual(got, want) {
+			t.Errorf("got %#v, want %#v", got, want)
+		}
+
+		buf, err := totals.MarshalBinary()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var nstats prefixinfo.Stats
+		if err := nstats.UnmarshalBinary(buf); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := nstats, totals; !reflect.DeepEqual(got, want) {
+			t.Errorf("got %v, want %v", got, want)
+		}
+	}
+
+}
+
+func TestStatsUsers(t *testing.T) {
+	now := time.Now()
+	opi := createPrefixInfo(t, now)
+	uid, gid := opi.UserGroup()
+	pi := createPrefixInfoForStats(t,
+		file.NewInfo("5", 3, 0700, now, &syscall.Stat_t{Uid: uid, Gid: gid}),
+		file.NewInfo("6", 7, 0700, now, &syscall.Stat_t{Uid: uid, Gid: gid}),
+		file.NewInfo("7", 12, 0700|os.ModeDir, now, &syscall.Stat_t{Uid: uid, Gid: gid}))
+	_, us, gs, err := pi.ComputeStats(diskCalc{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if got, want := us, (prefixinfo.StatsList{{ID: uid, Files: 4, Prefixes: 1, Bytes: 12 + 12, StorageBytes: 52 + 12}}); !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v, want %v", got, want)
+	if got, want := us, (prefixinfo.StatsList{{ID: uid, Files: 6, Prefixes: 2, Bytes: 22, StorageBytes: 22 + 60, PrefixBytes: 24}}); !reflect.DeepEqual(got, want) {
+		t.Errorf("got %#v, want %#v", got, want)
 	}
 
 	if got, want := gs, (prefixinfo.StatsList{
-		{ID: 2, Files: 3, Prefixes: 1, Bytes: 11 + 12, StorageBytes: 41 + 12},
-		{ID: 3, Files: 1, Prefixes: 0, Bytes: 1, StorageBytes: 11}}); !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v, want %v", got, want)
+		{ID: 2, Files: 5, Prefixes: 2, Bytes: 21, StorageBytes: 21 + 50, PrefixBytes: 24},
+		{ID: 3, Files: 1, Prefixes: 0, Bytes: 1, StorageBytes: 1 + 10}}); !reflect.DeepEqual(got, want) {
+		t.Errorf("got %#v, want %#v", got, want)
 	}
 
-	if got, want := totals, (prefixinfo.Stats{Files: 4, Prefixes: 1, Bytes: 12 + 12, StorageBytes: 52 + 12}); !reflect.DeepEqual(got, want) {
+	buf, err := gs.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ngs prefixinfo.StatsList
+	if err := ngs.UnmarshalBinary(buf); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := ngs, gs; !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }

@@ -48,7 +48,7 @@ func New(info file.Info) (T, error) {
 	}, nil
 }
 
-func (pi *T) AppendFiles(files file.InfoList) {
+func (pi *T) AppendInfoList(files file.InfoList) {
 	pi.files = append(pi.files, files...)
 }
 
@@ -80,7 +80,10 @@ func (pi T) UserGroup() (uid, gid uint32) {
 	return pi.userID, pi.groupID
 }
 
-func (pi T) Files() file.InfoList {
+// FileInfo returns the list of file.Info's available for this prefix.
+// NOTE that these may contain directories, ie. entries for which
+// IsDir is true.
+func (pi T) FileInfo() file.InfoList {
 	return pi.files
 }
 
@@ -222,6 +225,7 @@ func (pi *T) validateSingleIDMaps(idms idMaps) error {
 	ids := map[uint32]struct{}{}
 	for _, idm := range idms {
 		if _, ok := ids[idm.ID]; ok {
+			return fmt.Errorf("duplicate id: %v", idm.ID)
 		}
 		ids[idm.ID] = struct{}{}
 	}
@@ -265,7 +269,6 @@ func (pi *T) finalizePerFileUserGroupInfo() {
 		gid, _ := pi.groupIDMap.idForPos(i)
 		pi.SetUserGroupFile(&pi.files[i], uid, gid)
 	}
-	return
 }
 
 // Finalize must be called after all files, entries etc have been added to
@@ -293,6 +296,8 @@ func (pi *T) finalize() error {
 
 // ComputeStats computes all available statistics for this Prefix, including
 // using the supplied calculator to determine on-disk raw storage usage.
+// Note that the size of the prefix itself is not included in the returned
+// PrefixBytes but rather is included in the PrefixBytes for its parent prefix.
 func (pi *T) ComputeStats(calculator diskusage.Calculator) (totals Stats, userStats, groupStats StatsList, err error) {
 	if !pi.finalized {
 		err = fmt.Errorf("prefix info not finalized")
@@ -304,13 +309,14 @@ func (pi *T) ComputeStats(calculator diskusage.Calculator) (totals Stats, userSt
 		totals.Bytes += us.Bytes
 		totals.Files += us.Files
 		totals.Prefixes += us.Prefixes
+		totals.PrefixBytes += us.PrefixBytes
 		totals.StorageBytes += us.StorageBytes
 	}
 	return
 }
 
 func (pi *T) computeStatsForIDMapOrFiles(idms idMaps, defaultID uint32, calculator diskusage.Calculator) []Stats {
-	if idms == nil || len(idms) == 0 {
+	if len(idms) == 0 {
 		var stats Stats
 		stats.ID = defaultID
 		for _, fi := range pi.files {
@@ -328,12 +334,12 @@ func (pi *T) computeStatsForIDMapOrFiles(idms idMaps, defaultID uint32, calculat
 func (pi *T) updateStats(s *Stats, fi file.Info, calculator diskusage.Calculator) {
 	if fi.IsDir() {
 		s.Prefixes++
-		s.StorageBytes += fi.Size()
+		s.PrefixBytes += fi.Size()
 	} else {
 		s.Files++
 		s.StorageBytes += calculator.Calculate(fi.Size())
+		s.Bytes += fi.Size()
 	}
-	s.Bytes += fi.Size()
 }
 
 func (pi *T) computeStatsForID(idm idMap, calculator diskusage.Calculator) Stats {

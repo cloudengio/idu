@@ -4,7 +4,9 @@
 
 package prefixinfo
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+)
 
 type Stats struct {
 	ID           uint32
@@ -12,6 +14,7 @@ type Stats struct {
 	Prefixes     int64 // number of prefixes/directories
 	Bytes        int64 // total size of files
 	StorageBytes int64 // total size of files on disk
+	PrefixBytes  int64 // total size of prefixes
 }
 
 type StatsList []Stats
@@ -21,6 +24,8 @@ func (s *Stats) AppendBinary(data []byte) ([]byte, error) {
 	data = binary.AppendVarint(data, s.Files)
 	data = binary.AppendVarint(data, s.Bytes)
 	data = binary.AppendVarint(data, s.StorageBytes)
+	data = binary.AppendVarint(data, s.PrefixBytes)
+	data = binary.AppendVarint(data, s.Prefixes)
 	return data, nil
 }
 
@@ -38,6 +43,10 @@ func (s *Stats) DecodeBinary(data []byte) ([]byte, error) {
 	s.Bytes, n = binary.Varint(data)
 	data = data[n:]
 	s.StorageBytes, n = binary.Varint(data)
+	data = data[n:]
+	s.PrefixBytes, n = binary.Varint(data)
+	data = data[n:]
+	s.Prefixes, n = binary.Varint(data)
 	return data[n:], nil
 }
 

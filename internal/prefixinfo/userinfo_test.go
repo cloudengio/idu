@@ -26,7 +26,7 @@ func TestUserInfo(t *testing.T) {
 
 	fi := file.NewInfoFromFileInfo(info)
 
-	pi := T{ userID:  1, groupID: 2, }
+	pi := T{userID: 1, groupID: 2}
 
 	uid, gid := pi.GetUserGroupFile(fi)
 

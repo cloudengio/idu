@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"text/template"
 	"time"
+
+	"cloudeng.io/cmd/idu/internal/reports"
 )
 
 func tpl(name string) *template.Template {
@@ -87,26 +89,26 @@ type markdownReports struct {
 }
 
 func (md *markdownReports) generateReports(ctx context.Context, rf *reportsFlags, when time.Time, data []byte) error {
-	var sdb stats
+	var sdb reports.AllStats
 	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&sdb); err != nil {
 		return err
 	}
 	out := &bytes.Buffer{}
 
 	if err := mdTotals.Execute(out, struct {
-		*heaps[string]
-		When string
+		Heaps *reports.Heaps[string]
+		When  string
 	}{
-		heaps: sdb.Prefix,
+		Heaps: sdb.Prefix,
 		When:  when.Format(time.RFC3339),
 	}); err != nil {
 		return err
 	}
 
 	h := sdb.Prefix
-	b, bp := h.popAll(h.Bytes, rf.Markdown)
-	fb, fbp := h.popAll(h.Files, rf.Markdown)
-	db, dbp := h.popAll(h.Prefixes, rf.Markdown)
+	b, bp := h.PopAll(h.Bytes, rf.Markdown)
+	fb, fbp := h.PopAll(h.Files, rf.Markdown)
+	db, dbp := h.PopAll(h.Prefixes, rf.Markdown)
 	mdh := mdHeap{
 		TopN:     rf.Markdown,
 		Bytes:    zipPerPrefix(b, bp),
@@ -114,7 +116,7 @@ func (md *markdownReports) generateReports(ctx context.Context, rf *reportsFlags
 		Prefixes: zipPerPrefix(db, dbp),
 	}
 	if h.StorageBytes != nil {
-		sb, sbp := h.popAll(h.StorageBytes, rf.Markdown)
+		sb, sbp := h.PopAll(h.StorageBytes, rf.Markdown)
 		mdh.StorageBytes = zipPerPrefix(sb, sbp)
 	}
 

@@ -65,7 +65,6 @@ func (idms idMaps) String() string {
 func (idms idMaps) appendBinary(data []byte) ([]byte, error) {
 	data = binary.AppendUvarint(data, uint64(len(idms)))
 	for _, idm := range idms {
-		//fmt.Printf("appending: %v %b\n", idm.ID, idm.Pos)
 		data, _ = idm.appendBinary(data)
 	}
 	return data, nil
@@ -78,7 +77,6 @@ func (idms *idMaps) decodeBinary(data []byte) ([]byte, error) {
 	if l > 0 {
 		*idms = make([]idMap, l)
 		for i := range *idms {
-			//fmt.Printf("decoding: %v/%v\n", i, l)
 			data, _ = (*idms)[i].decodeBinary(data)
 		}
 	}

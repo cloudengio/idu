@@ -12,7 +12,9 @@ import (
 
 	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/database/boltdb"
+	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/errors"
+	"golang.org/x/exp/maps"
 )
 
 type reportsFlags struct {
@@ -67,55 +69,6 @@ func (st *statsCmds) reports(ctx context.Context, values interface{}, args []str
 	return errs.Err()
 }
 
-type mergedStats struct {
-	Prefix   string `json:"prefix,omitempty"`
-	ID       uint32 `json:"id,omitempty"`
-	IDName   string `json:"name,omitempty"`
-	Bytes    int64  `json:"bytes"`
-	Storage  int64  `json:"storage,omitempty"`
-	Files    int64  `json:"files"`
-	Prefixes int64  `json:"prefixes"`
-}
-
-func merger[T comparable](n int, merged map[T]mergedStats, keys []int64, prefixes []T, setter func(mergedStats, int64) mergedStats) {
-	for i, prefix := range prefixes {
-		if n > 0 && i >= n {
-			break
-		}
-		merged[prefix] = setter(merged[prefix], keys[i])
-	}
-}
-
-func (h *heaps[T]) merge(n int) map[T]mergedStats {
-	merged := make(map[T]mergedStats)
-
-	b, bp := h.popAll(h.Bytes, n)
-	merger(n, merged, b, bp, func(m mergedStats, v int64) mergedStats {
-		m.Bytes = v
-		return m
-	})
-	if h.StorageBytes != nil {
-		sb, sbp := h.popAll(h.StorageBytes, n)
-		merger(n, merged, sb, sbp, func(m mergedStats, v int64) mergedStats {
-			m.Storage = v
-			return m
-		})
-	}
-	fb, fbp := h.popAll(h.Files, n)
-	merger(n, merged, fb, fbp, func(m mergedStats, v int64) mergedStats {
-		m.Files = v
-		return m
-	})
-
-	db, dbp := h.popAll(h.Prefixes, n)
-	merger(n, merged, db, dbp, func(m mergedStats, v int64) mergedStats {
-		m.Prefixes = v
-		return m
-	})
-
-	return merged
-}
-
 func reportFilename(reportDir string, when time.Time, tag, ext string) string {
 	dir := filepath.Join(reportDir, when.Format(time.RFC3339))
 	return filepath.Join(dir, "total", ext)
@@ -146,11 +99,11 @@ func (rf *reportFilenames) rootDir() string {
 }
 
 func (rf *reportFilenames) usersDir() string {
-	return filepath.Join(rf.root, rf.when.Format(time.RFC3339), "users"+rf.ext)
+	return filepath.Join(rf.root, rf.when.Format(time.RFC3339), "users")
 }
 
 func (rf *reportFilenames) groupsDir() string {
-	return filepath.Join(rf.root, rf.when.Format(time.RFC3339), "groups"+rf.ext)
+	return filepath.Join(rf.root, rf.when.Format(time.RFC3339), "groups")
 }
 
 func (rf *reportFilenames) summary(file string) string {
@@ -165,4 +118,58 @@ func (rf *reportFilenames) user(uid uint32) string {
 func (rf *reportFilenames) group(gid uint32) string {
 	un := globalUserManager.nameForGID(gid)
 	return filepath.Join(rf.groupsDir(), un+rf.ext)
+}
+
+func writeReportFiles(sdb *reports.AllStats,
+	filenames *reportFilenames,
+	prefixFormatter func(m map[string]reports.MergedStats) []byte,
+	idFormatter func(m map[uint32]reports.MergedStats, nameForID func(uint32) string) []byte,
+	topN int,
+) error {
+
+	merged := sdb.Prefix.Merge(topN)
+	if err := os.WriteFile(filenames.summary("prefixes"), prefixFormatter(merged), 0600); err != nil {
+		return err
+	}
+	maps.Clear(merged)
+	merged[sdb.Prefix.Prefix] = reports.MergedStats{
+		Prefix:   sdb.Prefix.Prefix,
+		Bytes:    sdb.Prefix.TotalBytes,
+		Storage:  sdb.Prefix.TotalStorageBytes,
+		Files:    sdb.Prefix.TotalFiles,
+		Prefixes: sdb.Prefix.TotalPrefixes,
+	}
+
+	if err := os.WriteFile(filenames.summary("totals"), prefixFormatter(merged), 0600); err != nil {
+		return err
+	}
+
+	for uid, us := range sdb.PerUser.ByPrefix {
+		merged := us.Merge(topN)
+		if err := os.WriteFile(filenames.user(uid), prefixFormatter(merged), 0600); err != nil {
+			return err
+		}
+	}
+
+	for gid, gs := range sdb.PerGroup.ByPrefix {
+		merged := gs.Merge(topN)
+		if err := os.WriteFile(filenames.group(gid), prefixFormatter(merged), 0600); err != nil {
+			return err
+		}
+	}
+
+	userMerged := sdb.ByUser.Merge(topN)
+	userdata := idFormatter(userMerged, globalUserManager.nameForUID)
+	if err := os.WriteFile(filenames.summary("user"), userdata, 0600); err != nil {
+		return err
+	}
+
+	groupMerged := sdb.ByGroup.Merge(topN)
+	groupdata := idFormatter(groupMerged, globalUserManager.nameForGID)
+	if err := os.WriteFile(filenames.summary("group"), groupdata, 0600); err != nil {
+		return err
+	}
+
+	return nil
+
 }
