@@ -329,3 +329,33 @@ func (w *walker) handleDeletedPrefixes(ctx context.Context, prefix string, curre
 	}
 	return ndeleted, errs.Err()
 }
+
+func getPrefixInfo(ctx context.Context, db database.DB, key string, pi *internal.PrefixInfo) (bool, error) {
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err()
+	default:
+	}
+	buf, err := db.Get(ctx, key)
+	if err != nil {
+		return false, err
+	}
+	if buf == nil {
+		return false, nil
+	}
+
+	return true, pi.UnmarshalBinary(buf)
+}
+
+func setPrefixInfo(ctx context.Context, db database.DB, key string, pi *internal.PrefixInfo) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+	buf, err := pi.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	return db.SetBatch(ctx, key, buf)
+}
