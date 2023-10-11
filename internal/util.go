@@ -7,16 +7,15 @@ package internal
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/cmd/idu/internal/database"
 	"cloudeng.io/cmd/idu/internal/database/boltdb"
 	"cloudeng.io/cmdutil/flags"
-	"golang.org/x/exp/slog"
 )
 
 type TimeRangeFlags struct {
@@ -40,39 +39,17 @@ func (tr *TimeRangeFlags) FromTo() (from, to time.Time, err error) {
 	return
 }
 
-type LogLevel int
-
-const (
-	LogProgress LogLevel = iota
-	LogError
-	LogPrefix
-	LogInfo
-)
-
-var Verbosity LogLevel = LogError
-
-func Log(ctx context.Context, logger *slog.Logger, level LogLevel, msg string, args ...interface{}) {
-	if level > Verbosity {
-		return
-	}
-	var pcs [1]uintptr
-	runtime.Callers(2, pcs[:]) // skip [Callers, infof]
-	r := slog.NewRecord(time.Now(), slog.LevelInfo, msg, 0)
-	r.Add(args...)
-	_ = logger.Handler().Handle(ctx, r)
-}
-
-func LookupPrefix(all config.T, prefix string) (config.Prefix, string, error) {
+func LookupPrefix(ctx context.Context, all config.T, prefix string) (context.Context, config.Prefix, error) {
 	if filepath.IsLocal(prefix) || len(prefix) == 0 {
 		if dir, err := os.Getwd(); err == nil {
 			prefix = filepath.Join(dir, prefix)
 		}
 	}
-	cfg, path, ok := all.ForPrefix(prefix)
+	cfg, _, ok := all.ForPrefix(prefix)
 	if !ok {
-		return cfg, "", fmt.Errorf("no configuration for %v", prefix)
+		return ctx, cfg, fmt.Errorf("no configuration for %v", prefix)
 	}
-	return cfg, path, nil
+	return ctx, cfg, nil
 }
 
 func OpenDatabase(ctx context.Context, cfg config.Prefix, opts ...boltdb.Option) (database.DB, error) {
@@ -108,14 +85,36 @@ func OpenDatabase(ctx context.Context, cfg config.Prefix, opts ...boltdb.Option)
 	}
 }
 
-func OpenPrefixAndDatabase(ctx context.Context, all config.T, prefix string, opts ...boltdb.Option) (config.Prefix, string, database.DB, error) {
-	cfg, path, err := LookupPrefix(all, prefix)
+func OpenPrefixAndDatabase(ctx context.Context, all config.T, prefix string, opts ...boltdb.Option) (context.Context, config.Prefix, database.DB, error) {
+	ctx, cfg, err := LookupPrefix(ctx, all, prefix)
 	if err != nil {
-		return config.Prefix{}, "", nil, err
+		return ctx, config.Prefix{}, nil, err
 	}
 	db, err := OpenDatabase(ctx, cfg, opts...)
 	if err != nil {
-		return config.Prefix{}, "", nil, fmt.Errorf("failed to open database for %v in %v: %v\n", cfg.Prefix, cfg.Database, err)
+		return ctx, config.Prefix{}, nil, fmt.Errorf("failed to open database for %v in %v: %v\n", cfg.Prefix, cfg.Database, err)
 	}
-	return cfg, path, db, nil
+	return ctx, cfg, db, nil
+}
+
+type prefixInfo struct {
+	name string
+	PrefixInfo
+}
+
+// PrefixInfoAsFSInfo returns a fs.FileInfo for the supplied PrefixInfo.
+func PrefixInfoAsFSInfo(pi PrefixInfo, name string) fs.FileInfo {
+	return &prefixInfo{PrefixInfo: pi, name: name}
+}
+
+func (pi *prefixInfo) Name() string {
+	return pi.name
+}
+
+func (pi *prefixInfo) IsDir() bool {
+	return pi.Mode().IsDir()
+}
+
+func (pi *prefixInfo) Sys() any {
+	return nil
 }

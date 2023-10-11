@@ -27,7 +27,7 @@ type PrefixInfo struct {
 	mode       fs.FileMode
 	modTime    time.Time
 	children   filewalk.EntryList
-	files      file.InfoList
+	files      file.InfoList // may include directories also.
 	userIDMap  idMaps
 	groupIDMap idMaps
 	finalized  bool
@@ -52,8 +52,16 @@ func (pi *PrefixInfo) AppendFiles(files file.InfoList) {
 	pi.files = append(pi.files, files...)
 }
 
+func (pi *PrefixInfo) AppendInfo(file file.Info) {
+	pi.files = append(pi.files, file)
+}
+
 func (pi *PrefixInfo) AppendEntries(entries filewalk.EntryList) {
 	pi.children = append(pi.children, entries...)
+}
+
+func (pi *PrefixInfo) AppendEntry(entry filewalk.Entry) {
+	pi.children = append(pi.children, entry)
 }
 
 func (pi PrefixInfo) Size() int64 {
@@ -285,13 +293,19 @@ func (pi *PrefixInfo) finalize() error {
 
 // ComputeStats computes all available statistics for this Prefix, including
 // using the supplied calculator to determine on-disk raw storage usage.
-func (pi *PrefixInfo) ComputeStats(calculator diskusage.Calculator) (userStats, groupStats StatsList, err error) {
+func (pi *PrefixInfo) ComputeStats(calculator diskusage.Calculator) (totals Stats, userStats, groupStats StatsList, err error) {
 	if !pi.finalized {
 		err = fmt.Errorf("prefix info not finalized")
 		return
 	}
 	userStats = pi.computeStatsForIDMapOrFiles(pi.userIDMap, pi.userID, calculator)
 	groupStats = pi.computeStatsForIDMapOrFiles(pi.groupIDMap, pi.groupID, calculator)
+	for _, us := range userStats {
+		totals.Bytes += us.Bytes
+		totals.Files += us.Files
+		totals.Prefixes += us.Prefixes
+		totals.StorageBytes += us.StorageBytes
+	}
 	return
 }
 
@@ -300,17 +314,26 @@ func (pi *PrefixInfo) computeStatsForIDMapOrFiles(idms idMaps, defaultID uint32,
 		var stats Stats
 		stats.ID = defaultID
 		for _, fi := range pi.files {
-			stats.Files++
-			stats.Bytes += fi.Size()
-			stats.StorageBytes += calculator.Calculate(fi.Size())
+			pi.updateStats(&stats, fi, calculator)
 		}
 		return []Stats{stats}
 	}
 	stats := make([]Stats, len(idms))
-	for i, idm := range pi.groupIDMap {
+	for i, idm := range idms {
 		stats[i] = pi.computeStatsForID(idm, calculator)
 	}
 	return stats
+}
+
+func (pi *PrefixInfo) updateStats(s *Stats, fi file.Info, calculator diskusage.Calculator) {
+	if fi.IsDir() {
+		s.Prefixes++
+		s.StorageBytes += fi.Size()
+	} else {
+		s.Files++
+		s.StorageBytes += calculator.Calculate(fi.Size())
+	}
+	s.Bytes += fi.Size()
 }
 
 func (pi *PrefixInfo) computeStatsForID(idm idMap, calculator diskusage.Calculator) Stats {
@@ -319,14 +342,12 @@ func (pi *PrefixInfo) computeStatsForID(idm idMap, calculator diskusage.Calculat
 	for sc.next() {
 		fi := pi.files[sc.pos()]
 		stats.ID = idm.ID
-		stats.Files++
-		stats.Bytes += fi.Size()
-		stats.StorageBytes += calculator.Calculate(fi.Size())
+		pi.updateStats(&stats, fi, calculator)
 	}
 	return stats
 }
 
-// IDSanner allows for iterating over files that belong to a particular user
+// IDScanner allows for iterating over files that belong to a particular user
 // or group.
 type IDSanner interface {
 	Next() bool

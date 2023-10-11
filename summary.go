@@ -4,6 +4,7 @@
 
 package main
 
+/*
 type summaryFlags struct {
 	TopN    int    `subcmd:"top,20,show the top prefixes by file count and disk usage"`
 	TSVTopN int    `subcmd:"tsv-top,200,'include the top prefixes by file count and disk usage in the tsv output, if any'"`

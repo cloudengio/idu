@@ -34,6 +34,10 @@ type layout struct {
 	Parameters yaml.Node `yaml:"parameters" cmd:"the layout parameters to use for this calculator"`
 }
 
+func (p *Prefix) Calculator() diskusage.Calculator {
+	return p.calculator
+}
+
 type T struct {
 	Prefixes []Prefix `yaml:"prefixes" cmd:"the prefixes to be analyzed"`
 }
@@ -85,6 +89,8 @@ func ParseConfig(buf []byte) (T, error) {
 		return T{}, err
 	}
 	for i, p := range cfg.Prefixes {
+		cfg.Prefixes[i].Prefix = os.ExpandEnv(p.Prefix)
+		cfg.Prefixes[i].Database = os.ExpandEnv(p.Database)
 		for _, e := range p.Exclusions {
 			re, err := regexp.Compile(e)
 			if err != nil {
@@ -134,7 +140,7 @@ type layoutConfig struct {
 }
 
 func bytesCalc(n yaml.Node) (diskusage.Calculator, error) {
-	return nil, nil
+	return diskusage.NewIdentity(), nil
 }
 
 func bytesDesc() string {
@@ -146,7 +152,6 @@ func blockCalc(n yaml.Node) (diskusage.Calculator, error) {
 	if err := n.Decode(&b); err != nil {
 		return nil, fmt.Errorf("failed parsing block layout parameters: %v", err)
 	}
-	fmt.Printf("B: block size %#v: %#v\n", n, b)
 	return diskusage.NewSimple(b.BlockSize), nil
 }
 

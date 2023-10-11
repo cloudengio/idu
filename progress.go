@@ -17,11 +17,24 @@ import (
 	"golang.org/x/text/message"
 )
 
+type summary struct {
+	Operation        string        `json:"operation"`
+	Command          string        `json:"command"`
+	Duration         time.Duration `json:"duration"`
+	PrefixesStarted  int64         `json:"prefixes_started"`
+	PrefixesFinished int64         `json:"prefixes_finished"`
+	SynchronousScans int64         `json:"synchronous_scans"`
+	NumStats         int64         `json:"num_stats"`
+	NumFiles         int64         `json:"num_files"`
+	NumUnchanged     int64         `json:"num_unchanged"`
+	NumErrors        int64         `json:"num_errors"`
+}
+
 type progressTracker struct {
 	numPrefixesStarted, numPrefixesFinished int64
 	numFiles, numUnchanged                  int64
 	numErrors                               int64
-	syncScans                               int64
+	numSyncScans                            int64
 	numStats                                int64
 	interval                                time.Duration
 	start                                   time.Time
@@ -41,24 +54,36 @@ func newProgressTracker(ctx context.Context, interval time.Duration) *progressTr
 	return pt
 }
 
-func (pt *progressTracker) startPrefix() {
+func (pt *progressTracker) summarize() summary {
+	return summary{
+		PrefixesStarted:  atomic.LoadInt64(&pt.numPrefixesStarted),
+		PrefixesFinished: atomic.LoadInt64(&pt.numPrefixesFinished),
+		SynchronousScans: atomic.LoadInt64(&pt.numSyncScans),
+		NumStats:         atomic.LoadInt64(&pt.numStats),
+		NumFiles:         atomic.LoadInt64(&pt.numFiles),
+		NumUnchanged:     atomic.LoadInt64(&pt.numUnchanged),
+		NumErrors:        atomic.LoadInt64(&pt.numErrors),
+	}
+}
+
+func (pt *progressTracker) incStartPrefix() {
 	atomic.AddInt64(&pt.numPrefixesStarted, 1)
 }
 
-func (pt *progressTracker) donePrefix(errors, files, stats int) {
+func (pt *progressTracker) incDonePrefix(errors, files, stats int) {
 	atomic.AddInt64(&pt.numPrefixesFinished, 1)
 	atomic.AddInt64(&pt.numErrors, int64(errors))
 	atomic.AddInt64(&pt.numFiles, int64(files))
 	atomic.AddInt64(&pt.numStats, int64(stats))
 }
 
-func (pt *progressTracker) unchanged() {
+func (pt *progressTracker) incUnchanged() {
 	atomic.AddInt64(&pt.numUnchanged, 1)
 }
 
-func (pt *progressTracker) walkerStats(syncScans int64) {
-	if syncScans > 0 {
-		atomic.StoreInt64(&pt.syncScans, syncScans)
+func (pt *progressTracker) setSyncScans(numSyncScans int64) {
+	if numSyncScans > 0 {
+		atomic.StoreInt64(&pt.numSyncScans, numSyncScans)
 	}
 }
 
@@ -81,7 +106,7 @@ func (pt *progressTracker) summary(ctx context.Context) {
 	ifmt.Printf("           files : % 15v\n", atomic.LoadInt64(&pt.numFiles))
 	ifmt.Printf("       unchanged : % 15v\n", atomic.LoadInt64(&pt.numUnchanged))
 	ifmt.Printf("          errors : % 15v\n", atomic.LoadInt64(&pt.numErrors))
-	ifmt.Printf("      sync scans : % 15v\n", atomic.LoadInt64(&pt.syncScans))
+	ifmt.Printf("      sync scans : % 15v\n", atomic.LoadInt64(&pt.numSyncScans))
 	ifmt.Printf("        stat ops : % 15v\n", atomic.LoadInt64(&pt.numStats))
 	ifmt.Printf("        run time : % 15v\n", time.Since(pt.start).Truncate(time.Second))
 	ifmt.Printf("      heap alloc : % 15.6fGiB\n", float64(pt.memstats.HeapAlloc)/(1024*1024*1024))
@@ -90,13 +115,13 @@ func (pt *progressTracker) summary(ctx context.Context) {
 	pt.log(ctx)
 }
 func (pt *progressTracker) log(ctx context.Context) {
-	internal.Log(ctx, globalLogger, internal.LogPrefix, "summary",
+	internal.Log(ctx, internal.LogProgress, "summary",
 		"prefixes started", atomic.LoadInt64(&pt.numPrefixesStarted),
 		"prefixes", atomic.LoadInt64(&pt.numPrefixesFinished),
 		"files", atomic.LoadInt64(&pt.numFiles),
 		"unchanged", atomic.LoadInt64(&pt.numUnchanged),
 		"errors", atomic.LoadInt64(&pt.numErrors),
-		"sync scans", atomic.LoadInt64(&pt.syncScans),
+		"sync scans", atomic.LoadInt64(&pt.numSyncScans),
 		"stat ops", atomic.LoadInt64(&pt.numStats),
 		"run time", time.Since(pt.start),
 		"heap alloc GiB", float64(pt.memstats.HeapAlloc)/(1024*1024*1024),
@@ -122,7 +147,7 @@ func (pt *progressTracker) display(ctx context.Context) {
 		cr = "\n"
 	}
 	lastReport := time.Now()
-	var lastPrefixes, lastStats int64
+	var lastPrefixes, lastStats, lastSyncScans int64
 
 	for {
 		select {
@@ -150,18 +175,23 @@ func (pt *progressTracker) display(ctx context.Context) {
 		statRate := (float64(current - lastStats)) / float64(since.Seconds())
 		lastStats = current
 
+		current = atomic.LoadInt64(&pt.numSyncScans)
+		syncRate := (float64(current - lastSyncScans)) / float64(since.Seconds())
+		lastSyncScans = current
+
 		lastReport = time.Now()
 
 		started, finished := atomic.LoadInt64(&pt.numPrefixesStarted), atomic.LoadInt64(&pt.numPrefixesFinished)
 
 		runningFor := time.Since(pt.start).Truncate(time.Second)
 
-		ifmt.Printf("% 8v(%3v) prefixes, % 8v files, % 9.0f (prefixes/s), % 9.0f (stats/second) % 8v unchanged, % 5v errors,% 8v, (%s) %s",
+		ifmt.Printf("% 8v(%3v) prefixes, % 8v files, % 6.0f (prefixes/s), % 6.0f (stats/second), % 6.0f(sync scans/s) % 8v unchanged, % 5v errors, % 8v, (%s) %s",
 			finished,
 			started-finished,
 			atomic.LoadInt64(&pt.numFiles),
 			prefixRate,
 			statRate,
+			syncRate,
 			atomic.LoadInt64(&pt.numUnchanged),
 			atomic.LoadInt64(&pt.numErrors),
 			runningFor,

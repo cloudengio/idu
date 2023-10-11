@@ -237,25 +237,28 @@ func TestErrors(t *testing.T) {
 	t3, _ := time.Parse(time.RFC3339, "2023-08-12T10:00:02-08:00")
 	times := []time.Time{t1, t2, t3}
 	for i, when := range times {
+		key := fmt.Sprintf("/%02v", i)
 		op := fmt.Sprintf("%02v", i)
-		if err := db.LogError(ctx, when, fmt.Sprintf("/%02v", i), []byte(op)); err != nil {
+		fmt.Printf("ADD: %v - %v\n", key, op)
+		if err := db.LogError(ctx, key, when, []byte(op)); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	match := func(i int, when time.Time, key string, detail []byte) {
+	match := func(i int, key string, when time.Time, detail []byte) {
 		if got, want := when, times[i]; !got.Equal(want) {
 			t.Errorf("got %v, want %v", got, want)
 		}
-		if got, want := detail, []byte(fmt.Sprintf("%02v", i)); !bytes.Equal(got, want) {
+		op := fmt.Sprintf("%02v", i)
+		if got, want := detail, []byte(op); !bytes.Equal(got, want) {
 			t.Errorf("got %v, want %v", got, want)
 		}
 	}
 
 	entries := 1
-	err = db.VisitErrorsWhen(ctx, t2.Add(-time.Second), time.Now(),
-		func(_ context.Context, when time.Time, key string, detail []byte) bool {
-			match(entries, when, key, detail)
+	err = db.VisitErrors(ctx, "/01",
+		func(_ context.Context, key string, when time.Time, detail []byte) bool {
+			match(entries, key, when, detail)
 			entries++
 			return true
 		})
@@ -263,21 +266,68 @@ func TestErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got, want := entries, 3; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func visitAllErrors(t *testing.T, ctx context.Context, db database.DB) []string {
+	keys := map[string]struct{}{}
+	err := db.VisitErrors(ctx, "",
+		func(_ context.Context, key string, when time.Time, detail []byte) bool {
+			keys[key] = struct{}{}
+			return true
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := []string{}
+	for key := range keys {
+		k = append(k, key)
+	}
+	sort.Strings(k)
+	return k
+}
+
+func TestErrorsDelete(t *testing.T) {
+	ctx := context.Background()
+	prefix := "/filesytem-prefix"
+	dbname := filepath.Join(t.TempDir(), "db")
+	db, err := boltdb.Open(dbname, prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now()
+	for i := 0; i < 100; i++ {
+		op := fmt.Sprintf("%02v", i)
+		prefix := fmt.Sprintf("/%v/%v", i/10, i%10)
+		if err := db.LogError(ctx, prefix, now, []byte(op)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	keys := visitAllErrors(t, ctx, db)
+	if got, want := len(keys), 100; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
-	entries = 1
-	err = db.VisitErrorsKey(ctx, "/01",
-		func(_ context.Context, when time.Time, key string, detail []byte) bool {
-			match(entries, when, key, detail)
-			entries++
-			return true
-		})
-	if err != nil {
+	if err := db.DeleteErrors(ctx, "/1/"); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := entries, 3; got != want {
+
+	keys = visitAllErrors(t, ctx, db)
+	if got, want := len(keys), 90; got != want {
 		t.Errorf("got %v, want %v", got, want)
+	}
+	n := 0
+	for _, p := range []int{0, 2, 3, 4, 5, 6, 7, 8, 9} {
+		for j := 0; j < 10; j++ {
+			k := fmt.Sprintf("/%v/%v", p, j)
+			if got, want := keys[n], k; got != want {
+				t.Errorf("got %v, want %v", got, want)
+			}
+			n++
+		}
 	}
 }
 
@@ -346,4 +396,55 @@ func TestDelete(t *testing.T) {
 	if err := db.Delete(ctx, "notthere"); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestStats(t *testing.T) {
+	ctx := context.Background()
+	prefix := "/filesytem-prefix"
+	dbname := filepath.Join(t.TempDir(), "db")
+	db, err := boltdb.Open(dbname, prefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t1, _ := time.Parse(time.RFC3339, "2023-08-10T10:00:02-08:00")
+	t2, _ := time.Parse(time.RFC3339, "2023-08-11T10:00:02-08:00")
+	times := []time.Time{t1, t2}
+	payloads := []string{"foo", "bar"}
+	for i, stats := range payloads {
+		if err := db.SaveStats(ctx, times[i], []byte(stats)); err != nil {
+			t.Errorf("got %v, want nil", err)
+		}
+	}
+
+	when, stats, err := db.LastStats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := string(stats), "bar"; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
+	if got, want := when, times[1]; !got.Equal(when) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
+	scanTimes := []time.Time{}
+	scanPayloads := []string{}
+	err = db.VisitStats(ctx, time.Time{}, time.Now(),
+		func(_ context.Context, when time.Time, detail []byte) bool {
+			scanPayloads = append(scanPayloads, string(detail))
+			scanTimes = append(scanTimes, when)
+			return true
+		})
+
+	if got, want := scanPayloads, payloads; !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
+	if got, want := scanTimes, times; !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
 }

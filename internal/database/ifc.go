@@ -37,10 +37,19 @@ type DB interface {
 	// Get retrieves the value associated with key.
 	Get(ctx context.Context, key string) ([]byte, error)
 
-	// Delete deletes the specified key/value entries.
+	// Delete deletes the specified entries.
 	Delete(ctx context.Context, keys ...string) error
 
+	// DeletePrefix deletes all keys that have the specified prefix.
 	DeletePrefix(ctx context.Context, prefix string) error
+
+	// DeleteErrors deletes all errors that have the specified prefix.
+	DeleteErrors(ctx context.Context, prefix string) error
+
+	SaveStats(ctx context.Context, when time.Time, value []byte) error
+	LastStats(ctx context.Context) (time.Time, []byte, error)
+	VisitStats(ctx context.Context, start, stop time.Time,
+		visitor func(ctx context.Context, when time.Time, value []byte) bool) error
 
 	// SetBatch is like Set but allows for batching of concurrent calls to
 	// SetBatch. It should only be used when called from multiple goroutines.
@@ -63,35 +72,16 @@ type DB interface {
 	VisitLogs(ctx context.Context, start, stop time.Time,
 		visitor func(ctx context.Context, begin, end time.Time, detail []byte) bool) error
 
-	// LogError records an error, errors are stored in two ways: by key and by
-	// when this function is called.
-	LogError(ctx context.Context, when time.Time, key string, detail []byte) error
+	// LogError records an error.
+	LogError(ctx context.Context, key string, when time.Time, detail []byte) error
 
-	// VisitErrorsWhen calls visitor for every error between start and stop. The
+	// VisitErrors calls visitor for every error starting at key. The
 	// visitor func should return false if it wants to stop the iteration over
 	// errors.
-	VisitErrorsWhen(ctx context.Context, start, stop time.Time,
-		visitor func(ctx context.Context, when time.Time, key string, detail []byte) bool) error
-
-	// VisitErrorsKey calls visitor for every error starting at key. The
-	// visitor func should return false if it wants to stop the iteration over
-	// errors.
-	VisitErrorsKey(ctx context.Context, key string, visitor func(ctx context.Context, when time.Time, key string, val []byte) bool) error
-
-	// SetUser records a user and the group ids for the groups that they belong.
-	SetUser(ctx context.Context, id uint32, user string, gids []uint32) error
-
-	// SetGroup records a group and its gid.
-	SetGroup(ctx context.Context, gid uint32, user string) error
-
-	// VisitUsers calls visitor for every user starting at user.
-	VisitUsers(ctx context.Context, user string, visitor func(ctx context.Context, id uint32, user string, gids []uint32) bool) error
-
-	// VisitGroups calls visitor for every group starting at group.
-	VisitGroups(ctx context.Context, group string, visitor func(ctx context.Context, gid uint32, group string) bool) error
+	VisitErrors(ctx context.Context, key string, visitor func(ctx context.Context, key string, when time.Time, val []byte) bool) error
 
 	// Clear clears all of the log or error entries.
-	Clear(ctx context.Context, logs, errors bool) error
+	Clear(ctx context.Context, logs, errors, stats bool) error
 
 	// Close closes the database.
 	Close(context.Context) error

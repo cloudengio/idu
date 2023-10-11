@@ -7,16 +7,15 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 
 	// G108
 	_ "net/http/pprof" //nolint:gosec
-	"path/filepath"
 	"runtime"
 	debugpkg "runtime/debug"
-	"time"
 
 	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/config"
@@ -25,7 +24,6 @@ import (
 	"cloudeng.io/cmdutil/profiling"
 	"cloudeng.io/cmdutil/subcmd"
 	"cloudeng.io/file/diskusage"
-	"golang.org/x/exp/slog"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 )
@@ -33,7 +31,6 @@ import (
 var (
 	globalFlags  GlobalFlags
 	globalConfig config.T
-	globalLogger *slog.Logger
 )
 
 var (
@@ -48,24 +45,56 @@ commands:
     summary: analyze the file system to build a database of file counts, disk usage etc
     arguments:
       - <prefix>
+
   - name: logs
-    summary: list the log of past operations in the database
+    summary: list the log of past operations stored in the database
     arguments:
       - <prefix>
+
   - name: errors
-    summary: list the errors in the database
+    summary: list the errors stored in the database
     arguments:
       - <prefix>
-  - name: summary
-    summary: summarize file count and disk usage
+
+  - name: find
+    summary: find files matching the specified criteria
     arguments:
-      - <prefix>
-  - name: user
-    summary: summarize file count and disk usage on a per user basis
-  - name: group
-    summary: summarize file count and disk usage on a per group basis
-  #- name: find
-  #  summary: find prefixes/files in statistics database
+     - <prefix>
+
+  - name: stats
+    summary: compute and display statistics from the database
+    commands:
+      - name: compute
+        summary: compute all statistics
+        arguments:
+          - <prefix>
+      - name: aggregate
+        summary: display aggregated/tatal stats
+        arguments:
+          - <prefix>
+      - name: user
+        summary: summarize file count and disk usage on a per user basis
+        arguments:
+          - <prefix>
+          - '[user]...'
+      - name: group
+        summary: summarize file count and disk usage on a per group basis
+        arguments:
+          - <prefix>
+          - '[group]...'
+      - name: list
+        summary: list the available stats
+        arguments:
+          - <prefix>
+      - name: reports
+        summary: generate reports in a variety of formats, including tsv, json and markdown
+        arguments:
+          - <prefix>
+      - name: erase
+        summary: erase the stats
+        arguments:
+          - <prefix>
+
   - name: ls
     summary: list the contents of the database
     arguments:
@@ -77,12 +106,10 @@ commands:
   - name: database
     summary: database management commands
     commands:
-    - name: stats
-      summary: display database stastistics
-    - name: erase
-      summary: erase the database
-    - name: compact
-      summary: compact the database
+    - name: locate
+      summary: display the location of the database
+      arguments:
+        - <prefix>
 `
 
 type GlobalFlags struct {
@@ -90,8 +117,9 @@ type GlobalFlags struct {
 	Human       bool                  `subcmd:"h,true,show sizes in human readable form"`
 	ConfigFile  string                `subcmd:"config,$HOME/.idu.yml,configuration file"`
 	Units       string                `subcmd:"units,decimal,display usage in decimal (KB) or binary (KiB) formats"`
-	Verbose     int                   `subcmd:"v,0,higher values show more debugging output"`
-	Log         string                `subcmd:"log,,'logfile to write to, if empty then stderr is used'"`
+	Verbose     int                   `subcmd:"v,0,lower values show more debugging output"`
+	LogDir      string                `subcmd:"log-dir,.,directory to write log files to"`
+	Stderr      bool                  `subcmd:"stderr,false,write log messages to stderr"`
 	HTTP        string                `subcmd:"http,,set to a port to enable http serving of /debug/vars and profiling"`
 	GCPercent   int                   `subcmd:"gcpercent,50,value to use for runtime/debug.SetGCPercent"`
 }
@@ -107,16 +135,23 @@ func cli() *subcmd.CommandSetYAML {
 	cmdSet.Set("errors").MustRunner(ls.errors, &errorFlags{})
 	cmdSet.Set("logs").MustRunner(ls.logs, &logFlags{})
 
-	cmdSet.Set("summary").MustRunner(nil, &summaryFlags{})
-	cmdSet.Set("user").MustRunner(nil, &userFlags{})
-	cmdSet.Set("group").MustRunner(nil, &groupFlags{})
-	//	cmdSet.Set("find").MustRunner(nil, &findFlags{})
+	statsCmd := &statsCmds{}
+	cmdSet.Set("stats", "compute").MustRunner(statsCmd.compute, &computeFlags{})
+	cmdSet.Set("stats", "aggregate").MustRunner(statsCmd.aggregate, &aggregateFlags{})
+	cmdSet.Set("stats", "user").MustRunner(statsCmd.user, &userFlags{})
+	cmdSet.Set("stats", "group").MustRunner(statsCmd.group, &groupFlags{})
+	cmdSet.Set("stats", "list").MustRunner(statsCmd.list, &listStatsFlags{})
+	cmdSet.Set("stats", "erase").MustRunner(statsCmd.erase, &eraseFlags{})
+	cmdSet.Set("stats", "reports").MustRunner(statsCmd.reports, &reportsFlags{})
+
+	findCmds := &findCmds{}
+	cmdSet.Set("find").MustRunner(findCmds.find, &findFlags{})
 
 	cmdSet.Set("config").MustRunner(configManager, &configFlags{})
-	// db := &database{}
-	//	cmdSet.Set("database", "stats").MustRunner(db.stats, &struct{}{})
-	//	cmdSet.Set("database", "erase").MustRunner(db.erase, &eraseFlags{})
-	//cmdSet.Set("database", "compact").MustRunner(db.compact, &compactFlags{})
+
+	db := &dbCmd{}
+	cmdSet.Set("database", "locate").MustRunner(db.locate, &locateFlags{})
+
 	globals := subcmd.GlobalFlagSet()
 	globals.MustRegisterFlagStruct(&globalFlags, nil, nil)
 	cmdSet.WithGlobalFlags(globals)
@@ -173,16 +208,8 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 		go http.Serve(ln, nil) //nolint:gosec
 	}
 
-	internal.Verbosity = internal.LogLevel(globalFlags.Verbose)
-	var logFile = os.Stderr
-	if globalFlags.Log != "" {
-		logFile, err = os.Create(globalFlags.Log)
-		if err != nil {
-			return err
-		}
-	}
-	globalLogger = slog.New(slog.NewJSONHandler(logFile, &slog.HandlerOptions{AddSource: true}))
-
+	internal.Verbosity = slog.Level(globalFlags.Verbose)
+	internal.LogDir = globalFlags.LogDir
 	ctx, cancel := context.WithCancel(ctx)
 	cmdutil.HandleSignals(cancel, os.Interrupt, os.Kill)
 	defer cancel()
@@ -193,21 +220,16 @@ func main() {
 	cli().MustDispatch(context.Background())
 }
 
-func debug(ctx context.Context, level int, format string, args ...interface{}) {
-	if level > globalFlags.Verbose {
-		return
-	}
-	_, file, line, _ := runtime.Caller(1)
-	fmt.Printf("%s: %s:% 4d: ", time.Now().Format(time.RFC3339), filepath.Base(file), line)
-	fmt.Printf(format, args...)
-}
-
 var printer = message.NewPrinter(language.English)
 
 func fmtSize(size int64) string {
 	if globalFlags.Human {
 		f, u := bytesPrinter(size)
-		return printer.Sprintf("%0.3f %s", f, u)
+		return printer.Sprintf("% 8.3f %s", f, u)
 	}
 	return printer.Sprintf("%v", size)
+}
+
+func fmtCount(count int64) string {
+	return printer.Sprintf("% 11v", count)
 }

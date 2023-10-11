@@ -146,23 +146,28 @@ func TestStats(t *testing.T) {
 	fl = append(fl,
 		file.NewInfo("0", 3, 0700, now, &syscall.Stat_t{Uid: uid, Gid: gid}),
 		file.NewInfo("1", 7, 0700, now, &syscall.Stat_t{Uid: uid, Gid: gid}),
+		file.NewInfo("2", 12, 0700|os.ModeDir, now, &syscall.Stat_t{Uid: uid, Gid: gid}),
 	)
 	pi.AppendFiles(fl)
 	if err := pi.Finalize(); err != nil {
 		t.Fatal(err)
 	}
-	us, gs, err := pi.ComputeStats(diskCalc{})
+	totals, us, gs, err := pi.ComputeStats(diskCalc{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if got, want := us, (internal.StatsList{{ID: uid, Files: 4, Bytes: 12, StorageBytes: 52}}); !reflect.DeepEqual(got, want) {
+	if got, want := us, (internal.StatsList{{ID: uid, Files: 4, Prefixes: 1, Bytes: 12 + 12, StorageBytes: 52 + 12}}); !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
 	if got, want := gs, (internal.StatsList{
-		{ID: 2, Files: 3, Bytes: 11, StorageBytes: 41},
-		{ID: 3, Files: 1, Bytes: 1, StorageBytes: 11}}); !reflect.DeepEqual(got, want) {
+		{ID: 2, Files: 3, Prefixes: 1, Bytes: 11 + 12, StorageBytes: 41 + 12},
+		{ID: 3, Files: 1, Prefixes: 0, Bytes: 1, StorageBytes: 11}}); !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
+	if got, want := totals, (internal.Stats{Files: 4, Prefixes: 1, Bytes: 12 + 12, StorageBytes: 52 + 12}); !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }

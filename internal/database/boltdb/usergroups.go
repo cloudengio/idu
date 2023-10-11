@@ -4,16 +4,7 @@
 
 package boltdb
 
-import (
-	"bytes"
-	"context"
-	"encoding/binary"
-	"encoding/gob"
-	"fmt"
-
-	bolt "go.etcd.io/bbolt"
-)
-
+/*
 type userInfo struct {
 	User string
 	GIDS []uint32
@@ -114,3 +105,4 @@ func (db *Database) VisitGroups(ctx context.Context, group string, visitor func(
 		return nil
 	})
 }
+*/

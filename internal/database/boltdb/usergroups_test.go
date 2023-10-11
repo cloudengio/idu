@@ -4,16 +4,7 @@
 
 package boltdb_test
 
-import (
-	"context"
-	"path/filepath"
-	"testing"
-
-	"cloudeng.io/cmd/idu/internal/database"
-	"cloudeng.io/cmd/idu/internal/database/boltdb"
-	"golang.org/x/exp/slices"
-)
-
+/*
 func createUsrGroupEntries(t *testing.T, ctx context.Context, db database.DB) {
 	if err := db.SetUser(ctx, 50, "u1", []uint32{32, 12}); err != nil {
 		t.Fatal(err)
@@ -95,3 +86,4 @@ func TestUserGroups(t *testing.T) {
 	testGroups(t, ctx, db)
 
 }
+*/

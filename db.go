@@ -4,61 +4,43 @@
 
 package main
 
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"cloudeng.io/cmd/idu/internal"
+)
+
 type dbCmd struct{}
 
-type eraseFlags struct {
-	ReallyDelete bool `subcmd:"really,false,must be set to erase the database"`
+type locateFlags struct {
+	Verbose bool `subcmd:"verbose,false,enable verbose output"`
 }
 
-/*
-func (db *database) compact(ctx context.Context, values interface{}, args []string) error {
-	return db.dbCompact(ctx, values, args)
-}
-
-func (db *database) erase(ctx context.Context, values interface{}, args []string) error {
-	flagValues := values.(*eraseFlags)
-	if !flagValues.ReallyDelete {
-		fmt.Printf("use --really to erase/delete the database\n")
-		return nil
-	}
-	dbCfg, ok := globalConfig.DatabaseFor(args[0])
-	if !ok {
-		return fmt.Errorf("no database found for %v", args[0])
-	}
-	fmt.Printf("deleting: %s\n", dbCfg.Description)
-	return dbCfg.Delete(ctx)
-}
-
-/*
-func dbRefreshStats(ctx context.Context, values interface{}, args []string) error {
-	db, err := globalDatabaseManager.DatabaseFor(ctx, args[0], internal.ResetStats())
+func (db *dbCmd) locate(ctx context.Context, values interface{}, args []string) error {
+	lf := values.(*locateFlags)
+	ctx, prefix, err := internal.LookupPrefix(ctx, globalConfig, args[0])
 	if err != nil {
 		return err
 	}
-	sc := db.NewScanner(args[0], 0, internal.ScanLimit(500))
-	i := 0
-	printer := message.NewPrinter(language.English)
-	for sc.Scan(ctx) {
-		prefix, info := sc.PrefixInfo()
-		layout := globalConfig.LayoutFor(prefix)
-		info.DiskUsage = 0
-		for _, file := range info.Files {
-			info.DiskUsage += layout.Calculator.Calculate(file.Size())
-		}
-		if err := db.Set(ctx, prefix, info); err != nil {
-			return fmt.Errorf("failed to set: %v: %v", prefix, err)
-		}
-		if i%1000 == 0 && i != 0 {
-			printer.Printf("processed: % 15v\r", i)
-		}
-		i++
+	if !lf.Verbose {
+		fmt.Printf("%v\n", prefix.Database)
+		return nil
 	}
-	if sc.Err() != nil {
-		return fmt.Errorf("scanner error: %v", sc.Err())
+	info, err := os.Stat(prefix.Database)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Printf("atabase for %v is at: %v\n", args[0], prefix.Database)
+			return nil
+		}
+		return err
 	}
-	return globalDatabaseManager.CloseAll(ctx)
+	fmt.Printf("database for %v is at: %v (%v)\n", args[0], prefix.Database, fmtSize(info.Size()))
+	return nil
 }
 
+/*
 
 func (db *database) printDBStats(prefix string, stats []internal.DatabaseStats) {
 	ifmt := message.NewPrinter(language.English)

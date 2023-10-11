@@ -9,6 +9,7 @@ import "encoding/binary"
 type Stats struct {
 	ID           uint32
 	Files        int64 // number of files
+	Prefixes     int64 // number of prefixes/directories
 	Bytes        int64 // total size of files
 	StorageBytes int64 // total size of files on disk
 }

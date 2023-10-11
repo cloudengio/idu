@@ -45,15 +45,14 @@ type Database struct {
 }
 
 var (
-	bucketPaths      = "__paths__"
-	bucketLog        = "__log__"
-	bucketErrorsWhen = "__errors_when__"
-	bucketErrorsKey  = "__errors_key__"
-	bucketStats      = "__stats__"
-	bucketUsers      = "__users__"
-	bucketGroups     = "__groups__"
+	bucketPaths  = "__paths__"
+	bucketLog    = "__log__"
+	bucketErrors = "__errors_"
+	bucketStats  = "__stats__"
+	bucketUsers  = "__users__"
+	bucketGroups = "__groups__"
 
-	nestedBuckets = []string{bucketPaths, bucketErrorsKey, bucketErrorsWhen, bucketStats, bucketUsers, bucketGroups, bucketLog}
+	nestedBuckets = []string{bucketPaths, bucketErrors, bucketStats, bucketUsers, bucketGroups, bucketLog}
 )
 
 func initBuckets(bdb *bolt.DB, prefix string) error {
@@ -127,22 +126,30 @@ func (db *Database) Bolt() *bolt.DB {
 	return db.bdb
 }
 
-func (db *Database) Set(_ context.Context, key string, info []byte) error {
+func (db *Database) set(_ context.Context, bucket, key string, info []byte) error {
 	return db.bdb.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte(db.prefix)).Bucket([]byte(bucketPaths)).Put([]byte(key), info)
+		return tx.Bucket([]byte(db.prefix)).Bucket([]byte(bucket)).Put([]byte(key), info)
 	})
 }
 
-func (db *Database) Get(_ context.Context, key string) ([]byte, error) {
+func (db *Database) get(_ context.Context, bucket, key string) ([]byte, error) {
 	var info []byte
 	err := db.bdb.View(func(tx *bolt.Tx) error {
-		pb := tx.Bucket([]byte(db.prefix)).Bucket([]byte(bucketPaths))
+		pb := tx.Bucket([]byte(db.prefix)).Bucket([]byte(bucket))
 		if v := pb.Get([]byte(key)); v != nil {
 			info = slices.Clone(v)
 		}
 		return nil
 	})
 	return info, err
+}
+
+func (db *Database) Set(ctx context.Context, key string, info []byte) error {
+	return db.set(ctx, bucketPaths, key, info)
+}
+
+func (db *Database) Get(ctx context.Context, key string) ([]byte, error) {
+	return db.get(ctx, bucketPaths, key)
 }
 
 func (db *Database) SetBatch(_ context.Context, key string, info []byte) error {
@@ -186,6 +193,72 @@ func (db *Database) DeletePrefix(_ context.Context, prefix string) error {
 	return tx.Commit()
 }
 
+func (db *Database) DeleteErrors(_ context.Context, prefix string) error {
+	tx, err := db.bdb.Begin(true)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	pb := tx.Bucket([]byte(db.prefix))
+	if pb == nil {
+		return fmt.Errorf("no bucket for prefix: %v", db.prefix)
+	}
+	errorsBucket := pb.Bucket([]byte(bucketErrors))
+
+	cursor := errorsBucket.Cursor()
+	k, _ := cursor.Seek([]byte(prefix))
+	for ; k != nil && bytes.HasPrefix(k, []byte(prefix)); k, _ = cursor.Next() {
+		errorsBucket.Delete(k)
+	}
+	return tx.Commit()
+}
+
+type statsPayload struct {
+	When    time.Time
+	Payload []byte
+}
+
+func (db *Database) SaveStats(ctx context.Context, when time.Time, value []byte) error {
+	pl := statsPayload{
+		When:    when,
+		Payload: value,
+	}
+	key := pl.When.Format(time.RFC3339)
+	buf := &bytes.Buffer{}
+	enc := gob.NewEncoder(buf)
+	if err := enc.Encode(pl); err != nil {
+		return err
+	}
+	return db.set(ctx, bucketStats, key, buf.Bytes())
+}
+
+func (db *Database) LastStats(ctx context.Context) (time.Time, []byte, error) {
+	_, v, err := db.getLast(ctx, bucketStats)
+	if err != nil {
+		return time.Time{}, nil, err
+	}
+	dec := gob.NewDecoder(bytes.NewReader(v))
+	var pl statsPayload
+	if err := dec.Decode(&pl); err != nil {
+		return time.Time{}, nil, err
+	}
+	return pl.When, pl.Payload, nil
+}
+
+func (db *Database) VisitStats(ctx context.Context, start, stop time.Time, visitor func(ctx context.Context, when time.Time, detail []byte) bool) error {
+	return db.scanTimeRange(ctx, bucketStats, start, stop, func(ctx context.Context, payload []byte) error {
+		dec := gob.NewDecoder(bytes.NewReader(payload))
+		var pl statsPayload
+		if err := dec.Decode(&pl); err != nil {
+			return err
+		}
+		if !visitor(ctx, pl.When, pl.Payload) {
+			return nil
+		}
+		return nil
+	})
+}
+
 type logPayload struct {
 	Start, Stop time.Time
 	Payload     []byte
@@ -225,23 +298,6 @@ func (db *Database) LogAndClose(ctx context.Context, start, stop time.Time, deta
 	return err
 }
 
-func (db *Database) LastLog(_ context.Context) (start, stop time.Time, detail []byte, err error) {
-	err = db.bdb.View(func(tx *bolt.Tx) error {
-		logs := tx.Bucket([]byte(db.prefix)).Bucket([]byte(bucketLog))
-		c := logs.Cursor()
-		_, v := c.Last()
-		dec := gob.NewDecoder(bytes.NewReader(v))
-		var pl logPayload
-		dec.Decode(&pl)
-		start = pl.Start
-		stop = pl.Stop
-		detail = make([]byte, len(pl.Payload))
-		copy(detail, pl.Payload)
-		return nil
-	})
-	return
-}
-
 func (db *Database) initScan(tx *bolt.Tx, bucket, start string) (cursor *bolt.Cursor, k, v []byte, err error) {
 	pb := tx.Bucket([]byte(db.prefix))
 	if pb == nil {
@@ -256,20 +312,31 @@ func (db *Database) initScan(tx *bolt.Tx, bucket, start string) (cursor *bolt.Cu
 	return
 }
 
-func (db *Database) VisitLogs(ctx context.Context, start, stop time.Time, visitor func(ctx context.Context, begin, end time.Time, detail []byte) bool) error {
+func (db *Database) getLast(_ context.Context, bucket string) (key, val []byte, err error) {
+	err = db.bdb.View(func(tx *bolt.Tx) error {
+		c := tx.Bucket([]byte(db.prefix)).Bucket([]byte(bucket)).Cursor()
+		k, v := c.Last()
+		key = make([]byte, len(k))
+		copy(key, k)
+		val = make([]byte, len(v))
+		copy(val, v)
+		return nil
+	})
+	return
+}
+
+func (db *Database) scanTimeRange(ctx context.Context, bucket string, start, stop time.Time, visitor func(ctx context.Context, payload []byte) error) error {
 	startKey := start.Format(time.RFC3339)
 	stopKey := []byte(stop.Format(time.RFC3339))
 	return db.bdb.View(func(tx *bolt.Tx) error {
-		cursor, k, v, err := db.initScan(tx, bucketLog, startKey)
+		cursor, k, v, err := db.initScan(tx, bucket, startKey)
 		if err != nil {
 			return err
 		}
 		for ; k != nil && bytes.Compare(k, stopKey) <= 0; k, v = cursor.Next() {
-			dec := gob.NewDecoder(bytes.NewReader(v))
-			var pl logPayload
-			dec.Decode(&pl)
-			if !visitor(ctx, pl.Start, pl.Stop, pl.Payload) {
-				return nil
+
+			if err := visitor(ctx, v); err != nil {
+				return err
 			}
 			select {
 			case <-ctx.Done():
@@ -281,13 +348,42 @@ func (db *Database) VisitLogs(ctx context.Context, start, stop time.Time, visito
 	})
 }
 
+func (db *Database) LastLog(ctx context.Context) (start, stop time.Time, detail []byte, err error) {
+	_, v, err := db.getLast(ctx, bucketLog)
+	if err != nil {
+		return
+	}
+	dec := gob.NewDecoder(bytes.NewReader(v))
+	var pl logPayload
+	if err := dec.Decode(&pl); err != nil {
+		return time.Time{}, time.Time{}, nil, err
+	}
+	start = pl.Start
+	stop = pl.Stop
+	detail = pl.Payload
+	return
+}
+
+func (db *Database) VisitLogs(ctx context.Context, start, stop time.Time, visitor func(ctx context.Context, begin, end time.Time, detail []byte) bool) error {
+	return db.scanTimeRange(ctx, bucketLog, start, stop, func(ctx context.Context, payload []byte) error {
+		dec := gob.NewDecoder(bytes.NewReader(payload))
+		var pl logPayload
+		if err := dec.Decode(&pl); err != nil {
+			return err
+		}
+		if !visitor(ctx, pl.Start, pl.Stop, pl.Payload) {
+			return nil
+		}
+		return nil
+	})
+}
+
 func (db *Database) Scan(ctx context.Context, path string, visitor func(ctx context.Context, key string, val []byte) bool) error {
 	return db.bdb.View(func(tx *bolt.Tx) error {
 		cursor, k, v, err := db.initScan(tx, bucketPaths, path)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("PS: %s\n", k)
 		for ; k != nil; k, v = cursor.Next() {
 			if !visitor(ctx, string(k), v) {
 				break
@@ -308,7 +404,7 @@ type errorPayload struct {
 	Payload []byte
 }
 
-func (db *Database) LogError(ctx context.Context, when time.Time, key string, detail []byte) error {
+func (db *Database) LogError(ctx context.Context, key string, when time.Time, detail []byte) error {
 	tx, err := db.bdb.Begin(true)
 	if err != nil {
 		return err
@@ -327,46 +423,16 @@ func (db *Database) LogError(ctx context.Context, when time.Time, key string, de
 	buf := &bytes.Buffer{}
 	enc := gob.NewEncoder(buf)
 	enc.Encode(pl)
-	timeKey := when.Format(time.RFC3339)
-	if err := pb.Bucket([]byte(bucketErrorsWhen)).Put([]byte(timeKey), buf.Bytes()); err != nil {
-		return err
-	}
-	if err := pb.Bucket([]byte(bucketErrorsKey)).Put([]byte(key), buf.Bytes()); err != nil {
+	if err := pb.Bucket([]byte(bucketErrors)).Put([]byte(key), buf.Bytes()); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func (db *Database) VisitErrorsWhen(ctx context.Context, start, stop time.Time,
-	visitor func(ctx context.Context, when time.Time, key string, detail []byte) bool) error {
-	startKey := start.Format(time.RFC3339)
-	stopKey := []byte(stop.Format(time.RFC3339))
+func (db *Database) VisitErrors(ctx context.Context, key string,
+	visitor func(ctx context.Context, key string, when time.Time, detail []byte) bool) error {
 	return db.bdb.View(func(tx *bolt.Tx) error {
-		cursor, k, v, err := db.initScan(tx, bucketErrorsWhen, startKey)
-		if err != nil {
-			return err
-		}
-		for ; k != nil && bytes.Compare(k, stopKey) <= 0; k, v = cursor.Next() {
-			dec := gob.NewDecoder(bytes.NewReader(v))
-			var pl errorPayload
-			dec.Decode(&pl)
-			if !visitor(ctx, pl.When, pl.Key, pl.Payload) {
-				return nil
-			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-		}
-		return nil
-	})
-}
-
-func (db *Database) VisitErrorsKey(ctx context.Context, key string,
-	visitor func(ctx context.Context, when time.Time, key string, detail []byte) bool) error {
-	return db.bdb.View(func(tx *bolt.Tx) error {
-		cursor, k, v, err := db.initScan(tx, bucketErrorsKey, key)
+		cursor, k, v, err := db.initScan(tx, bucketErrors, key)
 		if err != nil {
 			return err
 		}
@@ -374,7 +440,7 @@ func (db *Database) VisitErrorsKey(ctx context.Context, key string,
 			dec := gob.NewDecoder(bytes.NewReader(v))
 			var pl errorPayload
 			dec.Decode(&pl)
-			if !visitor(ctx, pl.When, pl.Key, pl.Payload) {
+			if !visitor(ctx, pl.Key, pl.When, pl.Payload) {
 				return nil
 			}
 			select {
@@ -395,7 +461,7 @@ func (db *Database) clearBucket(pb *bolt.Bucket, bucket string) error {
 	return err
 }
 
-func (db *Database) Clear(_ context.Context, logs, errors bool) error {
+func (db *Database) Clear(_ context.Context, logs, errors, stats bool) error {
 	tx, err := db.bdb.Begin(true)
 	if err != nil {
 		return err
@@ -414,10 +480,13 @@ func (db *Database) Clear(_ context.Context, logs, errors bool) error {
 	}
 
 	if errors {
-		if err := db.clearBucket(pb, bucketErrorsKey); err != nil {
+		if err := db.clearBucket(pb, bucketErrors); err != nil {
 			return err
 		}
-		if err := db.clearBucket(pb, bucketErrorsWhen); err != nil {
+	}
+
+	if stats {
+		if err := db.clearBucket(pb, bucketStats); err != nil {
 			return err
 		}
 	}
