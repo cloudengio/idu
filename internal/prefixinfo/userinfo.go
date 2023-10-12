@@ -12,7 +12,7 @@ type userinfo struct {
 	uid, gid uint32
 }
 
-func (pi *T) GetUserGroupFile(fi file.Info) (userID, groupID uint32) {
+func (pi *T) UserGroupInfo(fi file.Info) (userID, groupID uint32) {
 	if fi.Sys() == nil {
 		return pi.userID, pi.groupID
 	}

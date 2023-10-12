@@ -28,7 +28,7 @@ func TestUserInfo(t *testing.T) {
 
 	pi := T{userID: 1, groupID: 2}
 
-	uid, gid := pi.GetUserGroupFile(fi)
+	uid, gid := pi.UserGroupInfo(fi)
 
 	if got, want := int(uid), os.Getuid(); got != want {
 		t.Errorf("got %v, want %v", got, want)
@@ -39,7 +39,7 @@ func TestUserInfo(t *testing.T) {
 
 	pi.SetUserGroupFile(&fi, 600, 6)
 
-	uid, gid = pi.GetUserGroupFile(fi)
+	uid, gid = pi.UserGroupInfo(fi)
 	if got, want := uid, uint32(600); got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}

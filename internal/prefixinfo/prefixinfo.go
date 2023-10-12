@@ -198,7 +198,7 @@ func (pi *T) createIDMaps() {
 	prefixGroupMap := newIDMap(pi.groupID, len(pi.files))
 
 	for i, file := range pi.files {
-		uid, gid := pi.GetUserGroupFile(file)
+		uid, gid := pi.UserGroupInfo(file)
 		if pi.userID == uid {
 			prefixUserMap.set(i)
 		} else {
@@ -258,15 +258,21 @@ func (pi *T) validateIDMaps() error {
 }
 
 func (pi *T) finalizePerFileUserGroupInfo() {
-	if pi.userIDMap == nil && pi.groupIDMap == nil {
+	if len(pi.userIDMap) == 0 && len(pi.groupIDMap) == 0 {
 		// All files have the same info as the prefix.
 		for i := range pi.files {
 			(&pi.files[i]).SetSys(nil)
 		}
+		return
 	}
 	for i := range pi.files {
-		uid, _ := pi.userIDMap.idForPos(i)
-		gid, _ := pi.groupIDMap.idForPos(i)
+		uid, gid := pi.userID, pi.groupID
+		if len(pi.userIDMap) > 0 {
+			uid, _ = pi.userIDMap.idForPos(i)
+		}
+		if len(pi.groupIDMap) > 0 {
+			gid, _ = pi.groupIDMap.idForPos(i)
+		}
 		pi.SetUserGroupFile(&pi.files[i], uid, gid)
 	}
 }
@@ -324,9 +330,11 @@ func (pi *T) computeStatsForIDMapOrFiles(idms idMaps, defaultID uint32, calculat
 		}
 		return []Stats{stats}
 	}
-	stats := make([]Stats, len(idms))
-	for i, idm := range idms {
-		stats[i] = pi.computeStatsForID(idm, calculator)
+	stats := make([]Stats, 0, len(idms))
+	for _, idm := range idms {
+		if s, ok := pi.computeStatsForID(idm, calculator); ok {
+			stats = append(stats, s)
+		}
 	}
 	return stats
 }
@@ -342,15 +350,17 @@ func (pi *T) updateStats(s *Stats, fi file.Info, calculator diskusage.Calculator
 	}
 }
 
-func (pi *T) computeStatsForID(idm idMap, calculator diskusage.Calculator) Stats {
+func (pi *T) computeStatsForID(idm idMap, calculator diskusage.Calculator) (Stats, bool) {
 	var stats Stats
+	stats.ID = idm.ID
 	sc := newIdMapScanner(idm)
+	found := false
 	for sc.next() {
 		fi := pi.files[sc.pos()]
-		stats.ID = idm.ID
 		pi.updateStats(&stats, fi, calculator)
+		found = true
 	}
-	return stats
+	return stats, found
 }
 
 // IDScanner allows for iterating over files that belong to a particular user

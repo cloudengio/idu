@@ -99,69 +99,75 @@ func TestIDMaps(t *testing.T) {
 }
 
 func TestCreateIDMaps(t *testing.T) {
-	modtime := time.Now().Truncate(0)
-	var fl file.InfoList
-	fl = append(fl,
-		file.NewInfo("0", 1, 0700, modtime, &syscall.Stat_t{Uid: 1, Gid: 2}),
-		file.NewInfo("1", 2, 0700, modtime, &syscall.Stat_t{Uid: 1, Gid: 2}),
-		file.NewInfo("2", 4, 0700, modtime, &syscall.Stat_t{Uid: 1, Gid: 2}))
+	modTime := time.Now().Truncate(0)
 
-	info := file.NewInfo("dir", 1, 0700, modtime, &syscall.Stat_t{Uid: 1, Gid: 2})
-	pi, err := New(info)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pi.AppendInfoList(fl)
-	if err := pi.Finalize(); err != nil {
-		t.Fatal(err)
-	}
-	npi := BinaryRoundTrip(t, &pi)
+	var uid, gid uint32 = 100, 1
+	ug00, ug10, ug01, ug11, ugOther := TestdataIDCombinationsFiles(modTime, uid, gid)
 
-	if npi.userIDMap != nil || npi.groupIDMap != nil {
-		t.Errorf("expected idms to be nil: %v, %v", npi.userIDMap, npi.groupIDMap)
-	}
+	for i, tc := range []struct {
+		fi                   []file.Info
+		uidMapLen, gidMapLen int
+		uidPos, gidPos       []int
+		uidMap, gidMap       []uint32
+		uidFile, gidFile     []uint32
+	}{
+		{ug00, 0, 0, []int{-1, -1}, []int{-1, -1},
+			[]uint32{uid}, []uint32{gid},
+			[]uint32{uid, uid}, []uint32{gid, gid}},
+		{ug10, 2, 0, []int{0, 1}, []int{-1, -1},
+			[]uint32{uid, uid + 1}, []uint32{gid},
+			[]uint32{uid, uid + 1}, []uint32{gid, gid},
+		},
+		{ug01, 0, 2, []int{-1, -1}, []int{0, 1},
+			[]uint32{uid}, []uint32{gid, gid + 1},
+			[]uint32{uid, uid}, []uint32{gid, gid + 1}},
+		{ug11, 2, 2, []int{0, 1}, []int{0, 1},
+			[]uint32{uid, uid + 1}, []uint32{gid, gid + 1},
+			[]uint32{uid, uid + 1}, []uint32{gid, gid + 1}},
+		{ugOther, 2, 2, []int{1, 1}, []int{1, 1},
+			[]uint32{uid + 1, uid + 1}, []uint32{gid + 1, gid + 1},
+			[]uint32{uid + 1, uid + 1}, []uint32{gid + 1, gid + 1}},
+	} {
+		info := file.NewInfo("dir", 1, 0700, time.Now().Truncate(0), &syscall.Stat_t{Uid: uid, Gid: gid})
+		pi, err := New(info)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pi.AppendInfoList(tc.fi)
+		if err := pi.Finalize(); err != nil {
+			t.Fatal(err)
+		}
 
-	fl = append(fl,
-		file.NewInfo("1", 2, 0700, modtime, &syscall.Stat_t{Uid: 4, Gid: 2}),
-		file.NewInfo("2", 3, 0700, modtime, &syscall.Stat_t{Uid: 1, Gid: 2}),
-		file.NewInfo("3", 4, 0700, modtime, &syscall.Stat_t{Uid: 10, Gid: 11}))
+		npi := BinaryRoundTrip(t, &pi)
 
-	pi, err = New(info)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pi.AppendInfoList(fl)
-	if err := pi.Finalize(); err != nil {
-		t.Fatal(err)
-	}
-	if err := pi.Finalize(); err != nil {
-		t.Fatal(err)
-	}
+		if got, want := len(npi.userIDMap), tc.uidMapLen; got != want {
+			t.Errorf("%v: got %v, want %v", i, got, want)
+		}
 
-	npi = BinaryRoundTrip(t, &pi)
+		if got, want := len(npi.groupIDMap), tc.gidMapLen; got != want {
+			t.Errorf("%v: got %v, want %v", i, got, want)
+		}
 
-	if got, want := len(npi.userIDMap), 3; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
+		for j, u := range tc.uidMap {
+			if got, want := npi.userIDMap.idMapFor(u), tc.uidPos[j]; got != want {
+				t.Errorf("%v: id %v: got %v, want %v", i, u, got, want)
+			}
+		}
 
-	if got, want := len(npi.groupIDMap), 2; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
+		for j, g := range tc.gidMap {
+			if got, want := npi.groupIDMap.idMapFor(g), tc.gidPos[j]; got != want {
+				t.Errorf("%v: id %v: got %v, want %v", i, g, got, want)
+			}
+		}
 
-	if got, want := npi.userIDMap.idMapFor(1), 0; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-	if got, want := npi.userIDMap.idMapFor(4), 1; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-	if got, want := npi.userIDMap.idMapFor(10), 2; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-
-	if got, want := npi.groupIDMap.idMapFor(2), 0; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-	if got, want := npi.groupIDMap.idMapFor(11), 1; got != want {
-		t.Errorf("got %v, want %v", got, want)
+		for j, fi := range npi.FileInfo() {
+			u, g := npi.UserGroupInfo(fi)
+			if got, want := u, tc.uidFile[j]; got != want {
+				t.Errorf("%v: %v: got %v, want %v", i, j, got, want)
+			}
+			if got, want := g, tc.gidFile[j]; got != want {
+				t.Errorf("%v: %v: got %v, want %v", i, j, got, want)
+			}
+		}
 	}
 }
