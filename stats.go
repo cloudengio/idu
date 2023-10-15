@@ -62,15 +62,24 @@ func (st *statsCmds) list(ctx context.Context, values interface{}, args []string
 	}
 	defer db.Close(ctx)
 
-	from, to, err := lf.TimeRangeFlags.FromTo()
+	from, to, set, err := lf.TimeRangeFlags.FromTo()
 	if err != nil {
 		return err
 	}
-	return db.VisitStats(ctx, from, to,
-		func(_ context.Context, when time.Time, detail []byte) bool {
-			fmt.Printf("%v: size: %v\n", when, fmtSize(int64(len(detail))))
-			return true
-		})
+	if set {
+		return db.VisitStats(ctx, from, to,
+			func(_ context.Context, when time.Time, detail []byte) bool {
+				fmt.Printf("%v: size: %v\n", when, fmtSize(int64(len(detail))))
+				return true
+			})
+	}
+
+	when, detail, err := db.LastStats(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%v: size: %v\n", when, fmtSize(int64(len(detail))))
+	return nil
 }
 
 func (st *statsCmds) erase(ctx context.Context, values interface{}, args []string) error {
@@ -139,19 +148,10 @@ func (st *statsCmds) computeStats(ctx context.Context, db database.DB, prefix st
 			fmt.Fprintf(os.Stderr, "failed to unmarshal value for %v: %v\n", k, err)
 			return false
 		}
-		totals, us, gs, err := pi.ComputeStats(calc)
-		if err != nil {
+		if err := sdb.Update(k, pi, calc); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to compute stats for %v: %v\n", k, err)
 			return false
 		}
-		sdb.Prefix.Push(k,
-			totals.Bytes,
-			totals.StorageBytes,
-			totals.PrefixBytes,
-			totals.Files,
-			totals.Prefixes)
-		sdb.PushPerUserStats(k, us)
-		sdb.PushPerGroupStats(k, gs)
 		return true
 	})
 

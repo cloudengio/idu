@@ -66,7 +66,7 @@ func (l *lister) prefixes(ctx context.Context, values interface{}, args []string
 		}
 		fmt.Println(fs.FormatFileInfo(internal.PrefixInfoAsFSInfo(pi, k)))
 		if flagValues.ShowFiles {
-			for _, fi := range pi.Files() {
+			for _, fi := range pi.FileInfo() {
 				fmt.Println("    ", fs.FormatFileInfo(fi))
 			}
 		}
@@ -109,7 +109,7 @@ func (l *lister) logs(ctx context.Context, values interface{}, args []string) er
 		return db.Clear(ctx, false, true, false)
 	}
 
-	from, to, err := lf.TimeRangeFlags.FromTo()
+	from, to, _, err := lf.TimeRangeFlags.FromTo()
 	if err != nil {
 		return err
 	}

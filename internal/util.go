@@ -25,7 +25,11 @@ type TimeRangeFlags struct {
 	To    flags.Time    `subcmd:"to,,display entries ending at this time/date"`
 }
 
-func (tr *TimeRangeFlags) FromTo() (from, to time.Time, err error) {
+func (tr *TimeRangeFlags) FromTo() (from, to time.Time, set bool, err error) {
+	set = tr.Since != 0 || !from.IsZero() || !to.IsZero()
+	if !set {
+		return
+	}
 	to = time.Now()
 	if tr.Since > 0 {
 		from = to.Add(-tr.Since)

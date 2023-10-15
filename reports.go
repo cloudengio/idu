@@ -32,41 +32,54 @@ func (st *statsCmds) reports(ctx context.Context, values interface{}, args []str
 		return err
 	}
 	defer db.Close(ctx)
-	from, to, err := rf.TimeRangeFlags.FromTo()
+	from, to, set, err := rf.TimeRangeFlags.FromTo()
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(rf.ReportDir, 0700); err != nil {
 		return err
 	}
-	var errs errors.M
-	err = db.VisitStats(ctx, from, to,
-		func(_ context.Context, when time.Time, data []byte) bool {
-			if rf.TSV > 0 {
-				tr := &tsvReports{}
-				if err := tr.generateReports(ctx, rf, when, data); err != nil {
+	if set {
+		var errs errors.M
+		err = db.VisitStats(ctx, from, to,
+			func(_ context.Context, when time.Time, data []byte) bool {
+				if err := st.generateReports(ctx, rf, args[0], when, data); err != nil {
 					errs.Append(err)
 					return false
 				}
-			}
-			if rf.JSON > 0 {
-				jr := &jsonReports{}
-				if err := jr.generateReports(ctx, rf, when, data); err != nil {
-					errs.Append(err)
-					return false
-				}
-			}
-			if rf.Markdown > 0 {
-				mdr := &markdownReports{}
-				if err := mdr.generateReports(ctx, rf, when, data); err != nil {
-					errs.Append(err)
-					return false
-				}
-			}
-			return true
-		})
-	errs.Append(err)
-	return errs.Err()
+				return true
+			})
+		errs.Append(err)
+		return errs.Err()
+	}
+
+	when, data, err := db.LastStats(ctx)
+	if err != nil {
+		return err
+	}
+	return st.generateReports(ctx, rf, args[0], when, data)
+}
+
+func (st *statsCmds) generateReports(ctx context.Context, rf *reportsFlags, prefix string, when time.Time, data []byte) error {
+	if rf.TSV > 0 {
+		tr := &tsvReports{}
+		if err := tr.generateReports(ctx, rf, when, data); err != nil {
+			return err
+		}
+	}
+	if rf.JSON > 0 {
+		jr := &jsonReports{}
+		if err := jr.generateReports(ctx, rf, when, data); err != nil {
+			return err
+		}
+	}
+	if rf.Markdown > 0 {
+		mdr := &markdownReports{}
+		if err := mdr.generateReports(ctx, rf, prefix, when, data); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func reportFilename(reportDir string, when time.Time, tag, ext string) string {

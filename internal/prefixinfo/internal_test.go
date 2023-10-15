@@ -53,7 +53,7 @@ func BinaryRoundTrip(t *testing.T, pi *T) T {
 	return npi
 }
 
-// IDCombinations returns 4 sets of file.Info values with differing combinations
+// IDCombinations returns 5 sets of file.Info values with differing combinations
 // of uid and gid.
 // ug00 has uid, gid for both files
 // ug10 has uid+1, gid for the second file
