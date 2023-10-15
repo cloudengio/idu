@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -61,24 +62,44 @@ func (st *statsCmds) reports(ctx context.Context, values interface{}, args []str
 }
 
 func (st *statsCmds) generateReports(ctx context.Context, rf *reportsFlags, prefix string, when time.Time, data []byte) error {
+	if rf.TSV == 0 && rf.JSON == 0 && rf.Markdown == 0 {
+		return fmt.Errorf("no report requested, please specify one of --tsv, --json or --markdown")
+	}
+	var filenames *reportFilenames
+	var err error
 	if rf.TSV > 0 {
+		filenames, err = newReportFilenames(rf.ReportDir, when, ".tsv")
+		if err != nil {
+			return err
+		}
 		tr := &tsvReports{}
-		if err := tr.generateReports(ctx, rf, when, data); err != nil {
+		if err := tr.generateReports(ctx, rf, when, filenames, data); err != nil {
 			return err
 		}
 	}
 	if rf.JSON > 0 {
+		filenames, err = newReportFilenames(rf.ReportDir, when, ".json")
+		if err != nil {
+			return err
+		}
 		jr := &jsonReports{}
-		if err := jr.generateReports(ctx, rf, when, data); err != nil {
+		if err := jr.generateReports(ctx, rf, when, filenames, data); err != nil {
 			return err
 		}
 	}
 	if rf.Markdown > 0 {
+		filenames, err = newReportFilenames(rf.ReportDir, when, ".md")
+		if err != nil {
+			return err
+		}
 		mdr := &markdownReports{}
-		if err := mdr.generateReports(ctx, rf, prefix, when, data); err != nil {
+		if err := mdr.generateReports(ctx, rf, prefix, when, filenames, data); err != nil {
 			return err
 		}
 	}
+	src, dst := filenames.latest()
+	os.Remove(dst)
+	os.Symlink(src, dst)
 	return nil
 }
 
@@ -133,6 +154,10 @@ func (rf *reportFilenames) group(gid uint32) string {
 	return filepath.Join(rf.groupsDir(), un+rf.ext)
 }
 
+func (rf *reportFilenames) latest() (src, dst string) {
+	return rf.when.Format(time.RFC3339), filepath.Join(rf.root, "latest")
+}
+
 func writeReportFiles(sdb *reports.AllStats,
 	filenames *reportFilenames,
 	prefixFormatter func(m map[string]reports.MergedStats) []byte,
@@ -146,11 +171,12 @@ func writeReportFiles(sdb *reports.AllStats,
 	}
 	maps.Clear(merged)
 	merged[sdb.Prefix.Prefix] = reports.MergedStats{
-		Prefix:   sdb.Prefix.Prefix,
-		Bytes:    sdb.Prefix.TotalBytes,
-		Storage:  sdb.Prefix.TotalStorageBytes,
-		Files:    sdb.Prefix.TotalFiles,
-		Prefixes: sdb.Prefix.TotalPrefixes,
+		Prefix:      sdb.Prefix.Prefix,
+		Bytes:       sdb.Prefix.TotalBytes,
+		Storage:     sdb.Prefix.TotalStorageBytes,
+		Files:       sdb.Prefix.TotalFiles,
+		Prefixes:    sdb.Prefix.TotalPrefixes,
+		PrefixBytes: sdb.Prefix.TotalPrefixBytes,
 	}
 
 	if err := os.WriteFile(filenames.summary("totals"), prefixFormatter(merged), 0600); err != nil {

@@ -19,14 +19,10 @@ import (
 type tsvReports struct {
 }
 
-func (tr *tsvReports) generateReports(ctx context.Context, rf *reportsFlags, when time.Time, data []byte) error {
+func (tr *tsvReports) generateReports(ctx context.Context, rf *reportsFlags, when time.Time, filenames *reportFilenames, data []byte) error {
 	var sdb reports.AllStats
 	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&sdb); err != nil {
 		return fmt.Errorf("failed to decode stats: %v", err)
-	}
-	filenames, err := newReportFilenames(rf.ReportDir, when, ".tsv")
-	if err != nil {
-		return err
 	}
 	return writeReportFiles(&sdb, filenames, tr.formatMerged, tr.formatUserGroupMerged, rf.TSV)
 }
@@ -35,13 +31,14 @@ func (tr *tsvReports) formatMerged(merged map[string]reports.MergedStats) []byte
 	out := &bytes.Buffer{}
 	wr := csv.NewWriter(out)
 	wr.Comma = '\t'
-	wr.Write([]string{"prefix", "bytes", "storage bytes", "files", "directories"})
+	wr.Write([]string{"prefix", "bytes", "storage bytes", "files", "directories", "directories", "directory bytes"})
 	for k, v := range merged {
 		wr.Write([]string{k,
 			strconv.FormatInt(v.Bytes, 10),
 			strconv.FormatInt(v.Storage, 10),
 			strconv.FormatInt(v.Files, 10),
-			strconv.FormatInt(v.Prefixes, 10)})
+			strconv.FormatInt(v.Prefixes, 10),
+			strconv.FormatInt(v.PrefixBytes, 10)})
 	}
 	wr.Flush()
 	return out.Bytes()
@@ -51,7 +48,7 @@ func (tr *tsvReports) formatUserGroupMerged(merged map[uint32]reports.MergedStat
 	out := &bytes.Buffer{}
 	wr := csv.NewWriter(out)
 	wr.Comma = '\t'
-	wr.Write([]string{"id", "idname", "bytes", "storage bytes", "files", "directories"})
+	wr.Write([]string{"id", "idname", "bytes", "storage bytes", "files", "directories", "directory bytes"})
 	for k, v := range merged {
 		wr.Write([]string{
 			strconv.FormatUint(uint64(k), 10),
@@ -59,7 +56,9 @@ func (tr *tsvReports) formatUserGroupMerged(merged map[uint32]reports.MergedStat
 			strconv.FormatInt(v.Bytes, 10),
 			strconv.FormatInt(v.Storage, 10),
 			strconv.FormatInt(v.Files, 10),
-			strconv.FormatInt(v.Prefixes, 10)})
+			strconv.FormatInt(v.Prefixes, 10),
+			strconv.FormatInt(v.PrefixBytes, 10),
+		})
 	}
 	wr.Flush()
 	return out.Bytes()

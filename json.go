@@ -17,14 +17,10 @@ import (
 
 type jsonReports struct{}
 
-func (jr *jsonReports) generateReports(ctx context.Context, rf *reportsFlags, when time.Time, data []byte) error {
+func (jr *jsonReports) generateReports(ctx context.Context, rf *reportsFlags, when time.Time, filenames *reportFilenames, data []byte) error {
 	var sdb reports.AllStats
 	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&sdb); err != nil {
 		return fmt.Errorf("failed to decode stats: %v", err)
-	}
-	filenames, err := newReportFilenames(rf.ReportDir, when, ".json")
-	if err != nil {
-		return err
 	}
 	return writeReportFiles(&sdb, filenames, jr.formatMerged, jr.formatUserGroupMerged, rf.TSV)
 }

@@ -8,7 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/gob"
-	"fmt"
+	"os"
 	"text/template"
 	"time"
 
@@ -208,7 +208,7 @@ type mdPerIDHeap struct {
 type markdownReports struct {
 }
 
-func (md *markdownReports) generateReports(ctx context.Context, rf *reportsFlags, prefix string, when time.Time, data []byte) error {
+func (md *markdownReports) generateReports(ctx context.Context, rf *reportsFlags, prefix string, when time.Time, filenames *reportFilenames, data []byte) error {
 	var sdb reports.AllStats
 	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&sdb); err != nil {
 		return err
@@ -328,8 +328,5 @@ func (md *markdownReports) generateReports(ctx context.Context, rf *reportsFlags
 			return err
 		}
 	}
-
-	fmt.Printf("%v\n", out.String())
-	return nil
-
+	return os.WriteFile(filenames.summary("all"), out.Bytes(), 0666)
 }
