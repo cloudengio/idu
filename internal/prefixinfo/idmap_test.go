@@ -160,7 +160,7 @@ func TestCreateIDMaps(t *testing.T) {
 			}
 		}
 
-		for j, fi := range npi.FileInfo() {
+		for j, fi := range npi.InfoList() {
 			u, g := npi.UserGroupInfo(fi)
 			if got, want := u, tc.uidFile[j]; got != want {
 				t.Errorf("%v: %v: got %v, want %v", i, j, got, want)

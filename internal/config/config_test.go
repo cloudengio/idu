@@ -22,7 +22,8 @@ const simple = `
       size: 4096
 - prefix: /
   database: ./db-local
-  concurrency: 10
+  concurrent_scans: 2
+  concurrent_stats: 4
   exclusions:
     - /.DS_Store$"
     - ^/System/Volumes/
@@ -61,7 +62,11 @@ func TestSimple(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
-	if got, want := cfg.Prefixes[1].Concurrency == 10, true; got != want {
+	if got, want := cfg.Prefixes[1].ConcurrentScans == 2, true; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
+	if got, want := cfg.Prefixes[1].ConcurrentStats == 4, true; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 

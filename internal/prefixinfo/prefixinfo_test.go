@@ -6,7 +6,6 @@ package prefixinfo_test
 
 import (
 	"fmt"
-	"os"
 	"reflect"
 	"runtime"
 	"slices"
@@ -15,7 +14,6 @@ import (
 
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/file"
-	"cloudeng.io/file/filewalk"
 )
 
 func scanFilesByID(ids prefixinfo.IDSanner) []string {
@@ -72,7 +70,7 @@ func scanAndMatchGroups(t *testing.T, pi *prefixinfo.T, gid uint32, want []strin
 	}
 }
 
-func cmpFileInfoList(t *testing.T, npi prefixinfo.T, got, want file.InfoList) {
+func cmpInfoList(t *testing.T, npi prefixinfo.T, got, want file.InfoList) {
 	// Can't use reflect.DeepEqual because the SysInfo field is not
 	// encoded/decoded.
 	if got, want := len(got), len(want); got != want {
@@ -101,12 +99,6 @@ func TestBinaryEncoding(t *testing.T) {
 	modTime := time.Now().Truncate(0)
 	var uid, gid uint32 = 100, 2
 
-	var el filewalk.EntryList
-	el = append(el,
-		filewalk.Entry{Name: "0", Type: os.ModeDir},
-		filewalk.Entry{Name: "1", Type: os.ModeDir},
-	)
-
 	ug00, ug10, ug01, ug11, ugOther := prefixinfo.TestdataIDCombinationsFiles(modTime, uid, gid)
 
 	for _, tc := range []struct {
@@ -122,7 +114,6 @@ func TestBinaryEncoding(t *testing.T) {
 	} {
 		pi := prefixinfo.TestdataNewPrefixInfo(t, "dir", 1, 0700, modTime, uid, gid)
 		pi.AppendInfoList(tc.fi)
-		pi.AppendEntries(el)
 		if err := pi.Finalize(); err != nil {
 			t.Fatal(err)
 		}
@@ -150,11 +141,7 @@ func TestBinaryEncoding(t *testing.T) {
 				t.Errorf("got %v, want %v", got, want)
 			}
 
-			if got, want := npi.Entries(), pi.Entries(); !reflect.DeepEqual(got, want) {
-				t.Errorf("got %v, want %v", got, want)
-			}
-
-			cmpFileInfoList(t, npi, npi.FileInfo(), pi.FileInfo())
+			cmpInfoList(t, npi, npi.InfoList(), pi.InfoList())
 
 			scanAndMatchUsers(t, &pi, uid, tc.uids)
 
@@ -179,12 +166,6 @@ func (times2) String() string {
 func TestStats(t *testing.T) {
 	modTime := time.Now().Truncate(0)
 	var uid, gid uint32 = 100, 2
-
-	var el filewalk.EntryList
-	el = append(el,
-		filewalk.Entry{Name: "0", Type: os.ModeDir},
-		filewalk.Entry{Name: "1", Type: os.ModeDir},
-	)
 
 	ug00, ug10, ug01, ug11, ugOther := prefixinfo.TestdataIDCombinationsFiles(modTime, uid, gid)
 	ug00d, ug10d, ug01d, ug11d, ugOtherd := prefixinfo.TestdataIDCombinationsDirs(modTime, uid, gid)
@@ -219,7 +200,6 @@ func TestStats(t *testing.T) {
 		pi := prefixinfo.TestdataNewPrefixInfo(t, "dir", 1, 0700, modTime, uid, gid)
 		pi.AppendInfoList(tc.fi)
 		pi.AppendInfoList(tc.fd)
-		pi.AppendEntries(el)
 		if err := pi.Finalize(); err != nil {
 			t.Fatal(err)
 		}

@@ -41,7 +41,7 @@ var (
 )
 
 var commands = `name: idu
-summary: determine disk usage incrementally using a database
+summary: analyze disk usage using a database for incremental updates
 commands:
   - name: analyze
     summary: analyze the file system to build a database of file counts, disk usage etc
@@ -179,6 +179,9 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 		}
 	}
 	for _, profile := range globalFlags.ExitProfile.Profiles {
+		if !profiling.IsPredefined(profile.Name) {
+			fmt.Printf("warning profile %v defaults to CPU profiling since it is not one of the predefined profile types: %v", profile.Name, strings.Join(profiling.PredefinedProfiles(), ", "))
+		}
 		save, err := profiling.Start(profile.Name, profile.Filename)
 		if err != nil {
 			return err

@@ -54,9 +54,9 @@ func containsAnyOf(got string, expected ...string) error {
 func TestHelp(t *testing.T) {
 	out, _ := runIDU("help") // will return exit status 1 for help.
 	base := []string{
-		"idu: analyze file systems to create a database of per-file and aggregate size",
-		"errors - list the contents of the errors database",
-		"flag: help requested",
+		"analyze disk usage using a database for incremental updates",
+		"errors - list the errors stored in the database",
+		"config - describe the current configuration",
 	}
 	if err := containsAnyOf(out, base...); err != nil {
 		t.Fatal(err)
@@ -65,14 +65,14 @@ func TestHelp(t *testing.T) {
 	if err := containsAnyOf(out, base...); err != nil {
 		t.Fatal(err)
 	}
-	err := containsAnyOf(out, "[--config=$HOME/.idu.yml --exit-profile= --gcpercent=50 --h=true --http= --units=decimal --v=0]")
+	err := containsAnyOf(out, "[--config=$HOME/.idu.yml --gcpercent=50 --http= --log-dir=. --profile= --stderr=false --units=decimal --v=0]")
 	if err != nil {
 		t.Fatal(err)
 	}
 	out, _ = runIDU("help", "analyze") // will return exit status 1 for help.
 
 	err = containsAnyOf(out, "Usage of command analyze: analyze the file system to build a database of file counts, disk usage etc",
-		" -incremental")
+		"analyze [--newer=24h0m0s --use-db=false] <prefix>")
 	if err != nil {
 		t.Fatal(err)
 	}

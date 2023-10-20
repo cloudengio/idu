@@ -26,14 +26,17 @@ type T struct {
 	size       int64
 	mode       fs.FileMode
 	modTime    time.Time
-	children   filewalk.EntryList
-	files      file.InfoList // may include directories also.
+	children   filewalk.EntryList // no longer used
+	entries    file.InfoList      // files and prefixes only
 	userIDMap  idMaps
 	groupIDMap idMaps
 	finalized  bool
 }
 
-// New creates a new PrefixInfo for the supplied file.Info.
+// New creates a new PrefixInfo for the supplied file.Info. It will
+// determine the uid and gid from the supplied file.Info assuming that it
+// was created by a call to LStat or Stat rather than being obtained
+// from the database.
 func New(info file.Info) (T, error) {
 	uid, gid, ok := UserGroup(info)
 	if !ok {
@@ -48,20 +51,16 @@ func New(info file.Info) (T, error) {
 	}, nil
 }
 
-func (pi *T) AppendInfoList(files file.InfoList) {
-	pi.files = append(pi.files, files...)
+func (pi *T) SetInfoList(entries file.InfoList) {
+	pi.entries = entries
 }
 
-func (pi *T) AppendInfo(file file.Info) {
-	pi.files = append(pi.files, file)
+func (pi *T) AppendInfoList(entries file.InfoList) {
+	pi.entries = append(pi.entries, entries...)
 }
 
-func (pi *T) AppendEntries(entries filewalk.EntryList) {
-	pi.children = append(pi.children, entries...)
-}
-
-func (pi *T) AppendEntry(entry filewalk.Entry) {
-	pi.children = append(pi.children, entry)
+func (pi *T) AppendInfo(entry file.Info) {
+	pi.entries = append(pi.entries, entry)
 }
 
 func (pi T) Size() int64 {
@@ -80,15 +79,11 @@ func (pi T) UserGroup() (uid, gid uint32) {
 	return pi.userID, pi.groupID
 }
 
-// FileInfo returns the list of file.Info's available for this prefix.
+// Info returns the list of file.Info's available for this prefix.
 // NOTE that these may contain directories, ie. entries for which
 // IsDir is true.
-func (pi T) FileInfo() file.InfoList {
-	return pi.files
-}
-
-func (pi T) Entries() filewalk.EntryList {
-	return pi.children
+func (pi T) InfoList() file.InfoList {
+	return pi.entries
 }
 
 func (pi T) Unchanged(npi T) bool {
@@ -99,14 +94,36 @@ func (pi T) UnchangedInfo(info file.Info) bool {
 	return pi.modTime.Equal(info.ModTime()) && pi.mode == info.Mode()
 }
 
-func (pi *T) MarshalBinary() (data []byte, err error) {
+func (pi T) FilesOnly() file.InfoList {
+	fi := make(file.InfoList, 0, len(pi.entries))
+	for _, f := range pi.entries {
+		if !f.IsDir() {
+			fi = append(fi, f)
+		}
+	}
+	return fi
+}
+
+func (pi T) PrefixesOnly() file.InfoList {
+	fi := make(file.InfoList, 0, len(pi.entries))
+	for _, f := range pi.entries {
+		if f.IsDir() {
+			fi = append(fi, f)
+		}
+	}
+	return fi
+}
+
+func (pi *T) MarshalBinary() ([]byte, error) {
+	return pi.AppendBinary(make([]byte, 0, 100))
+}
+
+func (pi *T) AppendBinary(data []byte) ([]byte, error) {
 	if !pi.finalized {
 		return nil, fmt.Errorf("prefix info not finalized")
 	}
 
-	data = make([]byte, 0, 100)
-	data = append(data, 0x1) // version
-
+	data = append(data, 0x1)                              // version
 	data = binary.AppendVarint(data, pi.size)             // user id
 	data = binary.AppendUvarint(data, uint64(pi.userID))  // user id
 	data = binary.AppendUvarint(data, uint64(pi.groupID)) // groupd id
@@ -129,19 +146,17 @@ func (pi *T) MarshalBinary() (data []byte, err error) {
 		return nil, err
 	}
 
-	data, err = pi.children.AppendBinary(data) // children
-	if err != nil {
-		return nil, err
-	}
-	return pi.files.AppendBinary(data) // files
+	return pi.entries.AppendBinary(data) // files+prefixes
 }
 
 func (pi *T) UnmarshalBinary(data []byte) error {
 	if len(data) == 0 {
 		return fmt.Errorf("PrefixInfo: insufficient data")
 	}
-	if data[0] != 0x1 {
-		return fmt.Errorf("PrefixInfo: invalid version of binary encoding: got %x, want %x", data[0], 0x1)
+	version := data[0]
+
+	if version != 0x1 {
+		return fmt.Errorf("PrefixInfo: invalid version of binary encoding: got %x, want %x", data[0], 01)
 	}
 	var n int
 	data = data[1:]                  // version
@@ -173,12 +188,7 @@ func (pi *T) UnmarshalBinary(data []byte) error {
 	if err != nil {
 		return err
 	}
-
-	data, err = pi.children.DecodeBinary(data) // children
-	if err != nil {
-		return err
-	}
-	pi.files, _, err = file.DecodeBinaryInfoList(data) // files
+	pi.entries, _, err = file.DecodeBinaryInfoList(data) // files
 	if err != nil {
 		return err
 	}
@@ -194,21 +204,21 @@ func newIDMapIfNeeded(idms *idMaps, id uint32, n int) int {
 }
 
 func (pi *T) createIDMaps() {
-	prefixUserMap := newIDMap(pi.userID, len(pi.files))
-	prefixGroupMap := newIDMap(pi.groupID, len(pi.files))
+	prefixUserMap := newIDMap(pi.userID, len(pi.entries))
+	prefixGroupMap := newIDMap(pi.groupID, len(pi.entries))
 
-	for i, file := range pi.files {
+	for i, file := range pi.entries {
 		uid, gid := pi.UserGroupInfo(file)
 		if pi.userID == uid {
 			prefixUserMap.set(i)
 		} else {
-			mi := newIDMapIfNeeded(&pi.userIDMap, uid, len(pi.files))
+			mi := newIDMapIfNeeded(&pi.userIDMap, uid, len(pi.entries))
 			pi.userIDMap[mi].set(i)
 		}
 		if pi.groupID == gid {
 			prefixGroupMap.set(i)
 		} else {
-			mi := newIDMapIfNeeded(&pi.groupIDMap, gid, len(pi.files))
+			mi := newIDMapIfNeeded(&pi.groupIDMap, gid, len(pi.entries))
 			pi.groupIDMap[mi].set(i)
 		}
 	}
@@ -242,7 +252,7 @@ func (pi *T) validateIDMaps() error {
 	if err := pi.validateSingleIDMaps(pi.groupIDMap); err != nil {
 		return fmt.Errorf("group id maps: %v", err)
 	}
-	for i := range pi.files {
+	for i := range pi.entries {
 		if pi.userIDMap != nil {
 			if _, ok := pi.userIDMap.idForPos(i); !ok {
 				return fmt.Errorf("missing user id for file %v", i)
@@ -260,12 +270,12 @@ func (pi *T) validateIDMaps() error {
 func (pi *T) finalizePerFileUserGroupInfo() {
 	if len(pi.userIDMap) == 0 && len(pi.groupIDMap) == 0 {
 		// All files have the same info as the prefix.
-		for i := range pi.files {
-			(&pi.files[i]).SetSys(nil)
+		for i := range pi.entries {
+			(&pi.entries[i]).SetSys(nil)
 		}
 		return
 	}
-	for i := range pi.files {
+	for i := range pi.entries {
 		uid, gid := pi.userID, pi.groupID
 		if len(pi.userIDMap) > 0 {
 			uid, _ = pi.userIDMap.idForPos(i)
@@ -273,7 +283,7 @@ func (pi *T) finalizePerFileUserGroupInfo() {
 		if len(pi.groupIDMap) > 0 {
 			gid, _ = pi.groupIDMap.idForPos(i)
 		}
-		pi.SetUserGroupFile(&pi.files[i], uid, gid)
+		pi.SetUserGroupFile(&pi.entries[i], uid, gid)
 	}
 }
 
@@ -325,7 +335,7 @@ func (pi *T) computeStatsForIDMapOrFiles(idms idMaps, defaultID uint32, calculat
 	if len(idms) == 0 {
 		var stats Stats
 		stats.ID = defaultID
-		for _, fi := range pi.files {
+		for _, fi := range pi.entries {
 			pi.updateStats(&stats, fi, calculator)
 		}
 		return []Stats{stats}
@@ -356,12 +366,14 @@ func (pi *T) computeStatsForID(idm idMap, calculator diskusage.Calculator) (Stat
 	sc := newIdMapScanner(idm)
 	found := false
 	for sc.next() {
-		fi := pi.files[sc.pos()]
+		fi := pi.entries[sc.pos()]
 		pi.updateStats(&stats, fi, calculator)
 		found = true
 	}
 	return stats, found
 }
+
+// TODO(cnicolaou): get rid of this?
 
 // IDScanner allows for iterating over files that belong to a particular user
 // or group.
@@ -371,16 +383,16 @@ type IDSanner interface {
 }
 
 type nullScanner struct {
-	n     int
-	i     file.Info
-	files file.InfoList
+	n       int
+	i       file.Info
+	entries file.InfoList
 }
 
 func (s *nullScanner) Next() bool {
-	if s.n >= len(s.files) {
+	if s.n >= len(s.entries) {
 		return false
 	}
-	s.i = s.files[s.n]
+	s.i = s.entries[s.n]
 	s.n++
 	return true
 }
@@ -390,8 +402,8 @@ func (s *nullScanner) Info() file.Info {
 }
 
 type idmapScanner struct {
-	sc    *idMapScanner
-	files file.InfoList
+	sc      *idMapScanner
+	entries file.InfoList
 }
 
 func (s *idmapScanner) Next() bool {
@@ -399,7 +411,7 @@ func (s *idmapScanner) Next() bool {
 }
 
 func (s *idmapScanner) Info() file.Info {
-	return s.files[s.sc.pos()]
+	return s.entries[s.sc.pos()]
 }
 
 // UserIDScan returns an IDSanner for the supplied user id. It can
@@ -420,15 +432,15 @@ func (pi *T) newIDScan(id uint32, userID bool, idms idMaps) (IDSanner, error) {
 	idm := idms.idMapFor(id)
 	if idm < 0 {
 		if userID && id == pi.userID {
-			return &nullScanner{files: pi.files}, nil
+			return &nullScanner{entries: pi.entries}, nil
 		}
 		if !userID && id == pi.groupID {
-			return &nullScanner{files: pi.files}, nil
+			return &nullScanner{entries: pi.entries}, nil
 		}
 		if userID {
 			return nil, fmt.Errorf("no such user id: %v", id)
 		}
 		return nil, fmt.Errorf("no such group id: %v", id)
 	}
-	return &idmapScanner{sc: newIdMapScanner(idms[idm]), files: pi.files}, nil
+	return &idmapScanner{sc: newIdMapScanner(idms[idm]), entries: pi.entries}, nil
 }

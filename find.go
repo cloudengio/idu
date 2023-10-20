@@ -103,7 +103,7 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 			return true
 		}
 
-		for _, fi := range pi.FileInfo() {
+		for _, fi := range pi.InfoList() {
 			n := k + sep + fi.Name()
 			if or.match(n) {
 				fmt.Printf("%v\n", n)

@@ -116,8 +116,20 @@ func Open[T Options](location, prefix string, opts ...Option) (database.DB, erro
 	return db, nil
 }
 
+func (db *Database) canceled(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
+}
+
 // Close closes the database.
 func (db *Database) Close(ctx context.Context) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
 	return db.bdb.Close()
 }
 
@@ -126,13 +138,19 @@ func (db *Database) Bolt() *bolt.DB {
 	return db.bdb
 }
 
-func (db *Database) set(_ context.Context, bucket, key string, info []byte) error {
+func (db *Database) set(ctx context.Context, bucket, key string, info []byte) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
 	return db.bdb.Update(func(tx *bolt.Tx) error {
 		return tx.Bucket([]byte(db.prefix)).Bucket([]byte(bucket)).Put([]byte(key), info)
 	})
 }
 
-func (db *Database) get(_ context.Context, bucket, key string) ([]byte, error) {
+func (db *Database) get(ctx context.Context, bucket, key string) ([]byte, error) {
+	if err := db.canceled(ctx); err != nil {
+		return nil, err
+	}
 	var info []byte
 	err := db.bdb.View(func(tx *bolt.Tx) error {
 		pb := tx.Bucket([]byte(db.prefix)).Bucket([]byte(bucket))
@@ -152,13 +170,19 @@ func (db *Database) Get(ctx context.Context, key string) ([]byte, error) {
 	return db.get(ctx, bucketPaths, key)
 }
 
-func (db *Database) SetBatch(_ context.Context, key string, info []byte) error {
+func (db *Database) SetBatch(ctx context.Context, key string, info []byte) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
 	return db.bdb.Batch(func(tx *bolt.Tx) error {
 		return tx.Bucket([]byte(db.prefix)).Bucket([]byte(bucketPaths)).Put([]byte(key), info)
 	})
 }
 
-func (db *Database) Delete(_ context.Context, keys ...string) error {
+func (db *Database) Delete(ctx context.Context, keys ...string) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
 	return db.bdb.Update(func(tx *bolt.Tx) error {
 		pb := tx.Bucket([]byte(db.prefix))
 		if pb == nil {
@@ -174,7 +198,10 @@ func (db *Database) Delete(_ context.Context, keys ...string) error {
 	})
 }
 
-func (db *Database) DeletePrefix(_ context.Context, prefix string) error {
+func (db *Database) DeletePrefix(ctx context.Context, prefix string) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
 	tx, err := db.bdb.Begin(true)
 	if err != nil {
 		return err
@@ -265,6 +292,9 @@ type logPayload struct {
 }
 
 func (db *Database) LogAndClose(ctx context.Context, start, stop time.Time, detail []byte) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
 	tx, err := db.bdb.Begin(true)
 	if err != nil {
 		return err
@@ -405,28 +435,23 @@ type errorPayload struct {
 }
 
 func (db *Database) LogError(ctx context.Context, key string, when time.Time, detail []byte) error {
-	tx, err := db.bdb.Begin(true)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	pb := tx.Bucket([]byte(db.prefix))
-	if pb == nil {
-		return fmt.Errorf("no bucket for prefix: %v", db.prefix)
-	}
-	pl := errorPayload{
-		When:    when,
-		Key:     key,
-		Payload: detail,
-	}
-	buf := &bytes.Buffer{}
-	enc := gob.NewEncoder(buf)
-	enc.Encode(pl)
-	if err := pb.Bucket([]byte(bucketErrors)).Put([]byte(key), buf.Bytes()); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return db.bdb.Batch(func(tx *bolt.Tx) error {
+		pb := tx.Bucket([]byte(db.prefix))
+		if pb == nil {
+			return fmt.Errorf("no bucket for prefix: %v", db.prefix)
+		}
+		pl := errorPayload{
+			When:    when,
+			Key:     key,
+			Payload: detail,
+		}
+		buf := &bytes.Buffer{}
+		enc := gob.NewEncoder(buf)
+		if err := enc.Encode(pl); err != nil {
+			return err
+		}
+		return pb.Bucket([]byte(bucketErrors)).Put([]byte(key), buf.Bytes())
+	})
 }
 
 func (db *Database) VisitErrors(ctx context.Context, key string,

@@ -65,14 +65,12 @@ func (l *lister) prefixes(ctx context.Context, values interface{}, args []string
 			return false
 		}
 		fmt.Println(fs.FormatFileInfo(internal.PrefixInfoAsFSInfo(pi, k)))
-		if flagValues.ShowFiles {
-			for _, fi := range pi.FileInfo() {
+		for _, fi := range pi.InfoList() {
+			if flagValues.ShowFiles && !fi.IsDir() {
 				fmt.Println("    ", fs.FormatFileInfo(fi))
 			}
-		}
-		if flagValues.ShowDirs {
-			for _, e := range pi.Entries() {
-				fmt.Printf("    / %v %v\n", e.Name, e.Type)
+			if flagValues.ShowDirs && fi.IsDir() {
+				fmt.Println("    ", fs.FormatFileInfo(fi))
 			}
 		}
 		return true

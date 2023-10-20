@@ -21,5 +21,9 @@ require (
 require (
 	cloudeng.io/sys v0.0.0-20230921004931-53b96e0659c8 // indirect
 	cloudeng.io/text v0.0.11 // indirect
+	github.com/google/uuid v1.3.0 // indirect
 	golang.org/x/sys v0.12.0 // indirect
+	v.io v0.2.0 // indirect
+	v.io/x/lib v0.1.14 // indirect
+	v.io/x/ref/lib/flags/sitedefaults v0.1.1 // indirect
 )

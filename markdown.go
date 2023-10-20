@@ -23,7 +23,7 @@ func tpl(name string) *template.Template {
 	})
 }
 
-var mdTOC = template.Must(tpl("toc").Parse(`
+const mdTOC = `
 # Filesystem Usage Reports for {{.Prefix}}
 
 ## Contents
@@ -33,9 +33,9 @@ var mdTOC = template.Must(tpl("toc").Parse(`
 * [Top {{.TopN}} users](#top-Users)
 * [Top {{.TopN}} groups](#top-Groups)
 
-`))
+`
 
-var mdTotals = template.Must(tpl("totals").Parse(`
+const mdTotals = `
 # <a id=totals></a> Totals for {{.Prefix}} as of {{.When}}
 
 | Metric | Value |
@@ -46,9 +46,9 @@ var mdTotals = template.Must(tpl("totals").Parse(`
 | Prefixes | {{fmtCount .Heaps.TotalPrefixes}} |
 | Prefix Bytes | {{fmtBytes .Heaps.TotalPrefixBytes}} |
 
-`))
+`
 
-var mdPrefixes = template.Must(tpl("prefixes").Parse(`
+const mdPrefixes = `
 # <a id=top-prefixes></a> Top {{.TopN}} prefixes for {{.Prefix}}
 
 ### Top {{.TopN}} prefixes by bytes used
@@ -83,7 +83,7 @@ var mdPrefixes = template.Must(tpl("prefixes").Parse(`
 {{range .PrefixBytes}}| {{fmtBytes .K}} |  {{.V}} |
 {{end}}
 
-`))
+`
 
 const mdListUsersAndGroups = `
 # Per User Reports - click on a link below
@@ -92,12 +92,6 @@ const mdListUsersAndGroups = `
 # Per Group Reports - click on a link below
 {{range $idx, $g := .Groups}}{{if $idx}}, {{end}}[{{fmtGID .}}](#group-{{.}}){{end}}  
 `
-
-var mdLists = template.Must(tpl("userGroupLists").Funcs(
-	template.FuncMap{
-		"fmtUID": globalUserManager.nameForUID,
-		"fmtGID": globalUserManager.nameForGID,
-	}).Parse(mdListUsersAndGroups))
 
 const mdByUsersGroupsTemplate = `
 # <a id=top-{{.UserOrGroup}}></a> Top {{.TopN}} {{.UserOrGroup}} for {{.Prefix}}
@@ -134,9 +128,6 @@ const mdByUsersGroupsTemplate = `
 {{range .PrefixBytes}}| {{fmtBytes .K}} | {{fmtID .V}} |
 {{end}}
 `
-
-var mdByUsers = template.Must(tpl("users").Funcs(template.FuncMap{"fmtID": globalUserManager.nameForUID}).Parse(mdByUsersGroupsTemplate))
-var mdByGroups = template.Must(tpl("groups").Funcs(template.FuncMap{"fmtID": globalUserManager.nameForUID}).Parse(mdByUsersGroupsTemplate))
 
 const mdPerUsersGroupsTemplate = `
 # <a id=per-{{.UserOrGroup}}></a> Usage per {{.UserOrGroup}} for {{.Prefix}}
@@ -180,13 +171,6 @@ const mdPerUsersGroupsTemplate = `
 {{end}}
 `
 
-var mdPerUsers = template.Must(tpl("users").Funcs(
-	template.FuncMap{"fmtID": globalUserManager.nameForUID}).
-	Parse(mdPerUsersGroupsTemplate))
-var mdPerGroups = template.Must(tpl("users").Funcs(
-	template.FuncMap{"fmtID": globalUserManager.nameForGID}).
-	Parse(mdPerUsersGroupsTemplate))
-
 type mdHeap[T comparable] struct {
 	TopN         int
 	Prefix       string
@@ -206,9 +190,43 @@ type mdPerIDHeap struct {
 }
 
 type markdownReports struct {
+	created   bool
+	toc       *template.Template
+	lists     *template.Template
+	totals    *template.Template
+	prefixes  *template.Template
+	byUsers   *template.Template
+	byGroups  *template.Template
+	perUsers  *template.Template
+	perGroups *template.Template
+}
+
+func (md *markdownReports) initTemplates() {
+	if md.created {
+		return
+	}
+	md.toc = template.Must(tpl("toc").Parse(mdTOC))
+	md.totals = template.Must(tpl("totals").Parse(mdTotals))
+	md.prefixes = template.Must(tpl("prefixes").Parse(mdPrefixes))
+	md.lists = template.Must(tpl("userGroupLists").Funcs(
+		template.FuncMap{
+			"fmtUID": globalUserManager.nameForUID,
+			"fmtGID": globalUserManager.nameForGID,
+		}).Parse(mdListUsersAndGroups))
+
+	md.byUsers = template.Must(tpl("users").Funcs(template.FuncMap{"fmtID": globalUserManager.nameForUID}).Parse(mdByUsersGroupsTemplate))
+	md.byGroups = template.Must(tpl("groups").Funcs(template.FuncMap{"fmtID": globalUserManager.nameForUID}).Parse(mdByUsersGroupsTemplate))
+	md.perUsers = template.Must(tpl("users").Funcs(
+		template.FuncMap{"fmtID": globalUserManager.nameForUID}).
+		Parse(mdPerUsersGroupsTemplate))
+	md.perGroups = template.Must(tpl("users").Funcs(
+		template.FuncMap{"fmtID": globalUserManager.nameForGID}).
+		Parse(mdPerUsersGroupsTemplate))
+	md.created = true
 }
 
 func (md *markdownReports) generateReports(ctx context.Context, rf *reportsFlags, prefix string, when time.Time, filenames *reportFilenames, data []byte) error {
+	md.initTemplates()
 	var sdb reports.AllStats
 	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&sdb); err != nil {
 		return err
@@ -217,7 +235,7 @@ func (md *markdownReports) generateReports(ctx context.Context, rf *reportsFlags
 
 	// TOC & user/group links
 
-	if err := mdTOC.Execute(out, struct {
+	if err := md.toc.Execute(out, struct {
 		Prefix string
 		TopN   int
 		When   string
@@ -230,7 +248,7 @@ func (md *markdownReports) generateReports(ctx context.Context, rf *reportsFlags
 	}
 
 	uids, gids := maps.Keys(sdb.PerUser.ByPrefix), maps.Keys(sdb.PerGroup.ByPrefix)
-	if err := mdLists.Execute(out, struct {
+	if err := md.lists.Execute(out, struct {
 		Users, Groups []uint32
 	}{
 		Users:  uids,
@@ -240,7 +258,7 @@ func (md *markdownReports) generateReports(ctx context.Context, rf *reportsFlags
 	}
 
 	// Totals.
-	if err := mdTotals.Execute(out, struct {
+	if err := md.totals.Execute(out, struct {
 		Prefix string
 		Heaps  *reports.Heaps[string]
 		When   string
@@ -263,7 +281,7 @@ func (md *markdownReports) generateReports(ctx context.Context, rf *reportsFlags
 		PrefixBytes:  reports.ZipN(sdb.Prefix.PrefixBytes, rf.Markdown),
 	}
 
-	if err := mdPrefixes.Execute(out, byPrefix); err != nil {
+	if err := md.prefixes.Execute(out, byPrefix); err != nil {
 		return err
 	}
 
@@ -279,7 +297,7 @@ func (md *markdownReports) generateReports(ctx context.Context, rf *reportsFlags
 		PrefixBytes:  reports.ZipN(sdb.ByUser.PrefixBytes, rf.Markdown),
 	}
 
-	if err := mdByUsers.Execute(out, byUsers); err != nil {
+	if err := md.byUsers.Execute(out, byUsers); err != nil {
 		return err
 	}
 
@@ -294,7 +312,7 @@ func (md *markdownReports) generateReports(ctx context.Context, rf *reportsFlags
 		PrefixBytes:  reports.ZipN(sdb.ByGroup.PrefixBytes, rf.Markdown),
 	}
 
-	if err := mdByGroups.Execute(out, byGroups); err != nil {
+	if err := md.byGroups.Execute(out, byGroups); err != nil {
 		return err
 	}
 
@@ -303,8 +321,8 @@ func (md *markdownReports) generateReports(ctx context.Context, rf *reportsFlags
 		tpl   *template.Template
 		data  map[uint32]*reports.Heaps[string]
 	}{
-		{"user", mdPerUsers, sdb.PerUser.ByPrefix},
-		{"group", mdPerGroups, sdb.PerGroup.ByPrefix},
+		{"user", md.perUsers, sdb.PerUser.ByPrefix},
+		{"group", md.perGroups, sdb.PerGroup.ByPrefix},
 	} {
 		perUsers := mdPerIDHeap{
 			TopN:        rf.Markdown,
