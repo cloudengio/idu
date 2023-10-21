@@ -100,7 +100,6 @@ func scanDB(t *testing.T, ctx context.Context, db database.DB, lfs filewalk.FS, 
 			}
 			if got, want := p.Size(), info.Size(); got != want {
 				t.Errorf("%v: got %v, want %v", path, got, want)
-				t.FailNow()
 			}
 			if got, want := p.ModTime(), info.ModTime(); !got.Equal(want) {
 				t.Errorf("%v: got %v, want %v", path, got, want)
@@ -223,13 +222,18 @@ func compareSummary(t *testing.T, got anaylzeSummary,
 func TestAnalyze(t *testing.T) {
 	ctx := context.Background()
 	tmpDir, cfgFile, arg0, tt := setupAnalyze(t)
-	fmt.Printf("tmpDir: %v\n", tmpDir)
 
 	scannable := slices.Clone(tt.base())
 	sort.Strings(scannable)
 	scannable = removeExclusions(scannable)
 
-	//	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if t.Failed() {
+			t.Logf("tmpDir: %v\n", tmpDir)
+			return
+		}
+		os.RemoveAll(tmpDir)
+	}()
 
 	cfg, err := config.ReadConfig(cfgFile)
 	if err != nil {

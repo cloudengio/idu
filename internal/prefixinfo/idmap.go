@@ -5,6 +5,7 @@
 package prefixinfo
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math/bits"
@@ -22,17 +23,20 @@ func (idm idMap) String() string {
 	return fmt.Sprintf("% 3d:%064b", idm.ID, idm.Pos)
 }
 
-func (idm idMap) appendBinary(data []byte) ([]byte, error) {
+func (idm idMap) appendBinary(buf *bytes.Buffer) {
+	var storage [16]byte
+	data := storage[:0]
 	data = binary.AppendUvarint(data, uint64(idm.ID))
 	data = binary.AppendUvarint(data, uint64(len(idm.Pos)))
+	buf.Write(data)
 	for _, p := range idm.Pos {
-		data = binary.AppendUvarint(data, p)
+		n := binary.PutUvarint(storage[:], p)
+		buf.Write(storage[:n])
 	}
-	return data, nil
+	return
 }
 
 func (idm *idMap) decodeBinary(data []byte) ([]byte, error) {
-	var n int
 	uid, n := binary.Uvarint(data)
 	data = data[n:]
 	idm.ID = uint32(uid)
@@ -62,12 +66,14 @@ func (idms idMaps) String() string {
 	return out.String()
 }
 
-func (idms idMaps) appendBinary(data []byte) ([]byte, error) {
-	data = binary.AppendUvarint(data, uint64(len(idms)))
+func (idms idMaps) appendBinary(buf *bytes.Buffer) {
+	var storage [5]byte
+	n := binary.PutUvarint(storage[:], uint64(len(idms)))
+	buf.Write(storage[:n])
 	for _, idm := range idms {
-		data, _ = idm.appendBinary(data)
+		idm.appendBinary(buf)
 	}
-	return data, nil
+	return
 }
 
 func (idms *idMaps) decodeBinary(data []byte) ([]byte, error) {

@@ -142,7 +142,7 @@ func (pt *progressTracker) summary(ctx context.Context) {
 	ifmt.Printf("            errors : % 15v\n", atomic.LoadInt64(&pt.numErrors))
 	ifmt.Printf("        sync scans : % 15v\n", atomic.LoadInt64(&pt.numSyncScans))
 	ifmt.Printf("          stat ops : % 15v\n", atomic.LoadInt64(&pt.numStats))
-	ifmt.Printf("   total stat time : % v\n", time.Duration(atomic.LoadInt64(&pt.statsTotalTime)))
+	ifmt.Printf("   total stat time : % 15v\n", time.Duration(atomic.LoadInt64(&pt.statsTotalTime)))
 	ifmt.Printf(" mean stat latency : % 15v\n", time.Duration(pt.meanStatLatency()))
 	ifmt.Printf("          run time : % 15v\n", time.Since(pt.start).Truncate(time.Second))
 	ifmt.Printf("        heap alloc : % 15.6fGiB\n", float64(pt.memstats.HeapAlloc)/(1024*1024*1024))

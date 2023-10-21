@@ -70,6 +70,10 @@ func TestSimple(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
+	if got, want := cfg.Prefixes[1].ConcurrentStatsThreshold == config.DefaultConcurrentStatsThreshold, true; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
 }
 
 func TestPrefixMatch(t *testing.T) {

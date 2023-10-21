@@ -95,7 +95,6 @@ func cmpInfoList(t *testing.T, npi prefixinfo.T, got, want file.InfoList) {
 }
 
 func TestBinaryEncoding(t *testing.T) {
-
 	modTime := time.Now().Truncate(0)
 	var uid, gid uint32 = 100, 2
 

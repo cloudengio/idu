@@ -5,6 +5,7 @@
 package prefixinfo
 
 import (
+	"bytes"
 	"reflect"
 	"syscall"
 	"testing"
@@ -83,13 +84,10 @@ func TestIDMaps(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
-	buf := make([]byte, 0, 100)
-	buf, err := idms.appendBinary(buf)
-	if err != nil {
-		t.Fatal(err)
-	}
+	var buf bytes.Buffer
+	idms.appendBinary(&buf)
 	var idms2 idMaps
-	if _, err := idms2.decodeBinary(buf); err != nil {
+	if _, err := idms2.decodeBinary(buf.Bytes()); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := idms2, idms; !reflect.DeepEqual(got, want) {

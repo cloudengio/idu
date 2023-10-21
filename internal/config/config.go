@@ -17,14 +17,15 @@ import (
 )
 
 type Prefix struct {
-	Prefix          string   `yaml:"prefix" cmd:"the prefix to be analyzed"`
-	Database        string   `yaml:"database" cmd:"the location of the database to use for this prefix"`
-	Separator       string   `yaml:"separator" cmd:"filename separator to use, defaults to /"`
-	ConcurrentScans int      `yaml:"concurrent_scans" cmd:"maximum number of concurrent scan operations, defaults to 20"`
-	ConcurrentStats int      `yaml:"concurrent_stats" cmd:"maximum number of concurrent stat operations, defaults to 50"`
-	ScanSize        int      `yaml:"items" cmd:"maximum number of items to fetch from the filesystem in a single operation, defaults to 1000"`
-	Exclusions      []string `yaml:"exclusions" cmd:"prefixes and files matching these regular expressions will be ignored when building a dataase"`
-	Layout          layout   `yaml:"layout" cmd:"the filesystem layout to use for calculating raw bytes used"`
+	Prefix                   string   `yaml:"prefix" cmd:"the prefix to be analyzed"`
+	Database                 string   `yaml:"database" cmd:"the location of the database to use for this prefix"`
+	Separator                string   `yaml:"separator" cmd:"filename separator to use, defaults to /"`
+	ConcurrentScans          int      `yaml:"concurrent_scans" cmd:"maximum number of concurrent scan operations, defaults to 20"`
+	ConcurrentStats          int      `yaml:"concurrent_stats" cmd:"maximum number of concurrent stat operations, defaults to 50"`
+	ConcurrentStatsThreshold int      `yaml:"concurrent_stats_threshold" cmd:"minimum number of files before stats are performed concurrently, defaults to 10"`
+	ScanSize                 int      `yaml:"items" cmd:"maximum number of items to fetch from the filesystem in a single operation, defaults to 1000"`
+	Exclusions               []string `yaml:"exclusions" cmd:"prefixes and files matching these regular expressions will be ignored when building a dataase"`
+	Layout                   layout   `yaml:"layout" cmd:"the filesystem layout to use for calculating raw bytes used"`
 
 	regexps    []*regexp.Regexp
 	calculator diskusage.Calculator
@@ -84,9 +85,10 @@ func (p *Prefix) StorageBytes(n int64) int64 {
 }
 
 var (
-	DefaultConcurrentScans = 20
-	DefaultConcurrentStats = 50
-	DefaultScanSize        = 1000
+	DefaultConcurrentScans          = 20
+	DefaultConcurrentStats          = 50
+	DefaultConcurrentStatsThreshold = 10
+	DefaultScanSize                 = 1000
 )
 
 // ParseConfig will parse a yaml config from the supplied byte slice.
@@ -115,6 +117,9 @@ func ParseConfig(buf []byte) (T, error) {
 		}
 		if p.ConcurrentStats == 0 {
 			cfg.Prefixes[i].ConcurrentStats = DefaultConcurrentStats
+		}
+		if p.ConcurrentStatsThreshold == 0 {
+			cfg.Prefixes[i].ConcurrentStatsThreshold = DefaultConcurrentStatsThreshold
 		}
 		if p.ScanSize == 0 {
 			cfg.Prefixes[i].ScanSize = DefaultScanSize

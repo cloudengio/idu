@@ -26,7 +26,7 @@ type TimeRangeFlags struct {
 }
 
 func (tr *TimeRangeFlags) FromTo() (from, to time.Time, set bool, err error) {
-	set = tr.Since != 0 || !from.IsZero() || !to.IsZero()
+	set = tr.Since != 0 || !tr.From.IsDefault() || !tr.To.IsDefault()
 	if !set {
 		return
 	}

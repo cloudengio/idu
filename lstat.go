@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -66,7 +65,7 @@ func (lsi *lstatIssuer) lstat(ctx context.Context, state *prefixState, prefix, f
 }
 
 func (lsi *lstatIssuer) lstatContents(ctx context.Context, state *prefixState, prefix string, contents []filewalk.Entry) (file.InfoList, error) {
-	if len(contents) < 10 {
+	if len(contents) < lsi.cfg.ConcurrentStatsThreshold {
 		return lsi.syncIssue(ctx, state, prefix, contents)
 	}
 	return lsi.asyncIssue(ctx, state, prefix, contents, lsi.w.cfg.ConcurrentStats)
@@ -94,13 +93,15 @@ func (lsi *lstatIssuer) syncIssue(ctx context.Context, state *prefixState, prefi
 func (lsi *lstatIssuer) asyncIssue(ctx context.Context, state *prefixState, prefix string, contents []filewalk.Entry, concurrency int) (file.InfoList, error) {
 	g := &errgroup.T{}
 	g = errgroup.WithConcurrency(g, min(concurrency, len(contents)))
+	// The channel must be deep enough to hold all of the items that
+	// can be returned.
 	ch := make(chan syncsort.Item[lstatResult], len(contents))
 	seq := syncsort.NewSequencer(ctx, ch)
 	for _, entry := range contents {
 		name := entry.Name
 		item := seq.NextItem(lstatResult{})
+		filename := lsi.fs.Join(prefix, name)
 		g.Go(func() error {
-			filename := filepath.Join(prefix, name)
 			info, err := lsi.lstat(ctx, state, prefix, filename)
 			item.V = lstatResult{info, err}
 			ch <- item

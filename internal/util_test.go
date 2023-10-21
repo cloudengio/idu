@@ -27,9 +27,12 @@ func TestTimeRange(t *testing.T) {
 		if err := fs.Parse(args); err != nil {
 			t.Fatal(err)
 		}
-		from, to, err := trf.FromTo()
+		from, to, set, err := trf.FromTo()
 		if err != nil {
 			t.Fatal(err)
+		}
+		if !set {
+			t.Fatal("expected set to be true")
 		}
 		return from, to
 	}

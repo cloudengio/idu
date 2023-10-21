@@ -5,6 +5,7 @@
 package prefixinfo
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io/fs"
@@ -115,14 +116,21 @@ func (pi T) PrefixesOnly() file.InfoList {
 }
 
 func (pi *T) MarshalBinary() ([]byte, error) {
-	return pi.AppendBinary(make([]byte, 0, 100))
+	var buf bytes.Buffer
+	buf.Grow(1000)
+	if err := pi.AppendBinary(&buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
-func (pi *T) AppendBinary(data []byte) ([]byte, error) {
+func (pi *T) AppendBinary(buf *bytes.Buffer) error {
 	if !pi.finalized {
-		return nil, fmt.Errorf("prefix info not finalized")
+		return fmt.Errorf("prefix info not finalized")
 	}
 
+	var storage [128]byte
+	data := storage[:0]
 	data = append(data, 0x1)                              // version
 	data = binary.AppendVarint(data, pi.size)             // user id
 	data = binary.AppendUvarint(data, uint64(pi.userID))  // user id
@@ -131,22 +139,19 @@ func (pi *T) AppendBinary(data []byte) ([]byte, error) {
 	data = binary.LittleEndian.AppendUint32(data, uint32(pi.mode)) // filemode
 	out, err := pi.modTime.MarshalBinary()                         // modtime
 	if err != nil {
-		return nil, err
+		return err
 	}
 	data = binary.AppendVarint(data, int64(len(out)))
 	data = append(data, out...)
+	buf.Write(data)
 
-	data, err = pi.userIDMap.appendBinary(data) // user id map
-	if err != nil {
-		return nil, err
+	pi.userIDMap.appendBinary(buf)  // user id map
+	pi.groupIDMap.appendBinary(buf) // group id map
+
+	if err := pi.entries.AppendBinary(buf); err != nil { // files+prefixes
+		return err
 	}
-
-	data, err = pi.groupIDMap.appendBinary(data) // group id map
-	if err != nil {
-		return nil, err
-	}
-
-	return pi.entries.AppendBinary(data) // files+prefixes
+	return err
 }
 
 func (pi *T) UnmarshalBinary(data []byte) error {

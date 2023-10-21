@@ -16,7 +16,6 @@ import (
 
 	"cloudeng.io/cmd/idu/internal/database"
 	bolt "go.etcd.io/bbolt"
-	"golang.org/x/exp/slices"
 )
 
 // Option represents a specific option accepted by Open.
@@ -94,7 +93,7 @@ func Open[T Options](location, prefix string, opts ...Option) (database.DB, erro
 		mode = 0400
 		bopts.ReadOnly = true
 	}
-	bopts.NoFreelistSync = true
+	bopts.NoFreelistSync = false
 	bopts.FreelistType = bolt.FreelistMapType
 	var bdb *bolt.DB
 	var err error
@@ -147,19 +146,19 @@ func (db *Database) set(ctx context.Context, bucket, key string, info []byte) er
 	})
 }
 
-func (db *Database) get(ctx context.Context, bucket, key string) ([]byte, error) {
+func (db *Database) get(ctx context.Context, bucket, key string, buf *bytes.Buffer) error {
 	if err := db.canceled(ctx); err != nil {
-		return nil, err
+		return err
 	}
-	var info []byte
 	err := db.bdb.View(func(tx *bolt.Tx) error {
 		pb := tx.Bucket([]byte(db.prefix)).Bucket([]byte(bucket))
 		if v := pb.Get([]byte(key)); v != nil {
-			info = slices.Clone(v)
+			buf.Grow(len(v))
+			buf.Write(v)
 		}
 		return nil
 	})
-	return info, err
+	return err
 }
 
 func (db *Database) Set(ctx context.Context, key string, info []byte) error {
@@ -167,15 +166,29 @@ func (db *Database) Set(ctx context.Context, key string, info []byte) error {
 }
 
 func (db *Database) Get(ctx context.Context, key string) ([]byte, error) {
-	return db.get(ctx, bucketPaths, key)
+	var buf bytes.Buffer
+	err := db.get(ctx, bucketPaths, key, &buf)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
-func (db *Database) SetBatch(ctx context.Context, key string, info []byte) error {
+func (db *Database) GetBuf(ctx context.Context, key string, buf *bytes.Buffer) error {
+	err := db.get(ctx, bucketPaths, key, buf)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (db *Database) SetBatch(ctx context.Context, key string, buf []byte) error {
 	if err := db.canceled(ctx); err != nil {
 		return err
 	}
 	return db.bdb.Batch(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte(db.prefix)).Bucket([]byte(bucketPaths)).Put([]byte(key), info)
+		err := tx.Bucket([]byte(db.prefix)).Bucket([]byte(bucketPaths)).Put([]byte(key), buf)
+		return err
 	})
 }
 

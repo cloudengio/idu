@@ -5,6 +5,7 @@
 package database
 
 import (
+	"bytes"
 	"context"
 	"time"
 )
@@ -37,6 +38,10 @@ type DB interface {
 	// Get retrieves the value associated with key.
 	Get(ctx context.Context, key string) ([]byte, error)
 
+	// GeGetBuft retrieves the value associated with key storing
+	// its contents in the supplied bytes.Buffer.
+	GetBuf(ctx context.Context, key string, buf *bytes.Buffer) error
+
 	// Delete deletes the specified entries.
 	Delete(ctx context.Context, keys ...string) error
 
@@ -53,7 +58,7 @@ type DB interface {
 
 	// SetBatch is like Set but allows for batching of concurrent calls to
 	// SetBatch. It should only be used when called from multiple goroutines.
-	SetBatch(ctx context.Context, key string, value []byte) error
+	SetBatch(ctx context.Context, key string, buf []byte) error
 
 	// Scan can be used to iterate over all keys in the database.
 	Scan(ctx context.Context, key string, visitor func(ctx context.Context, key string, val []byte) bool) error

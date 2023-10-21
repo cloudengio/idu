@@ -5,11 +5,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"cloudeng.io/cmd/idu/internal"
@@ -212,7 +214,7 @@ func (w *walker) Prefix(ctx context.Context, state *prefixState, prefix string, 
 	state.start = time.Now()
 	stop, state.parentUnchanged, retErr = w.handlePrefix(ctx, state, prefix, info, err)
 	if retErr != nil {
-		w.dbLog(ctx, prefix, []byte(err.Error()))
+		w.dbLog(ctx, prefix, []byte(retErr.Error()))
 		return true, nil, retErr
 	}
 	state.info = info
@@ -337,15 +339,17 @@ func getPrefixInfo(ctx context.Context, db database.DB, key string, pi *prefixin
 		return false, ctx.Err()
 	default:
 	}
-	buf, err := db.Get(ctx, key)
-	if err != nil {
+	buf := bufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bufPool.Put(buf)
+	if err := db.GetBuf(ctx, key, buf); err != nil {
 		return false, err
 	}
-	if buf == nil {
+	if len(buf.Bytes()) == 0 {
+		// Key does not exist or is a bucket, which should never happen here.
 		return false, nil
 	}
-
-	return true, pi.UnmarshalBinary(buf)
+	return true, pi.UnmarshalBinary(buf.Bytes())
 }
 
 func setPrefixInfo(ctx context.Context, db database.DB, key string, pi *prefixinfo.T) error {
@@ -354,11 +358,20 @@ func setPrefixInfo(ctx context.Context, db database.DB, key string, pi *prefixin
 		return ctx.Err()
 	default:
 	}
-	var storage [1024 * 1024]byte
-	buf := storage[:]
-	buf, err := pi.AppendBinary(buf)
-	if err != nil {
+	buf := bufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bufPool.Put(buf)
+	if err := pi.AppendBinary(buf); err != nil {
 		return err
 	}
-	return db.SetBatch(ctx, key, buf)
+	return db.SetBatch(ctx, key, buf.Bytes())
+}
+
+var bufPool = sync.Pool{
+	New: func() any {
+		// The Pool's New function should generally only return pointer
+		// types, since a pointer can be put into the return interface
+		// value without an allocation:
+		return new(bytes.Buffer)
+	},
 }
