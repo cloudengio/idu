@@ -19,21 +19,21 @@ type Stats struct {
 
 type StatsList []Stats
 
-func (s *Stats) AppendBinary(data []byte) ([]byte, error) {
+func (s *Stats) AppendBinary(data []byte) []byte {
 	data = binary.AppendUvarint(data, uint64(s.ID))
 	data = binary.AppendVarint(data, s.Files)
 	data = binary.AppendVarint(data, s.Bytes)
 	data = binary.AppendVarint(data, s.StorageBytes)
 	data = binary.AppendVarint(data, s.PrefixBytes)
 	data = binary.AppendVarint(data, s.Prefixes)
-	return data, nil
+	return data
 }
 
 func (s *Stats) MarshalBinary() (data []byte, err error) {
-	return s.AppendBinary(make([]byte, 0, 100))
+	return s.AppendBinary(make([]byte, 0, 100)), nil
 }
 
-func (s *Stats) DecodeBinary(data []byte) ([]byte, error) {
+func (s *Stats) DecodeBinary(data []byte) []byte {
 	var n int
 	id, n := binary.Uvarint(data)
 	data = data[n:]
@@ -47,38 +47,38 @@ func (s *Stats) DecodeBinary(data []byte) ([]byte, error) {
 	s.PrefixBytes, n = binary.Varint(data)
 	data = data[n:]
 	s.Prefixes, n = binary.Varint(data)
-	return data[n:], nil
+	return data[n:]
 }
 
 func (s *Stats) UnmarshalBinary(data []byte) error {
-	_, err := s.DecodeBinary(data)
-	return err
+	s.DecodeBinary(data)
+	return nil
 }
 
-func (sl StatsList) AppendBinary(data []byte) ([]byte, error) {
+func (sl StatsList) AppendBinary(data []byte) []byte {
 	data = binary.AppendUvarint(data, uint64(len(sl)))
 	for _, p := range sl {
-		data, _ = p.AppendBinary(data)
+		data = p.AppendBinary(data)
 	}
-	return data, nil
+	return data
 }
 
 func (sl StatsList) MarshalBinary() (data []byte, err error) {
-	return sl.AppendBinary(make([]byte, 0, 100))
+	return sl.AppendBinary(make([]byte, 0, 100)), nil
 }
 
-func (sl *StatsList) DecodeBinary(data []byte) ([]byte, error) {
+func (sl *StatsList) DecodeBinary(data []byte) []byte {
 	var n int
 	l, n := binary.Uvarint(data)
 	data = data[n:]
 	*sl = make([]Stats, l)
 	for i := range *sl {
-		data, _ = (*sl)[i].DecodeBinary(data)
+		data = (*sl)[i].DecodeBinary(data)
 	}
-	return data, nil
+	return data
 }
 
 func (sl *StatsList) UnmarshalBinary(data []byte) error {
-	_, err := sl.DecodeBinary(data)
-	return err
+	sl.DecodeBinary(data)
+	return nil
 }

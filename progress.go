@@ -9,6 +9,7 @@ import (
 	"expvar"
 	"os"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -35,6 +36,7 @@ type anaylzeSummary struct {
 }
 
 type progressTracker struct {
+	sync.Mutex
 	numPrefixesStarted, numPrefixesFinished int64
 	numFiles                                int64
 	numParentUnchanged                      int64
@@ -42,7 +44,7 @@ type progressTracker struct {
 	numErrors                               int64
 	numSyncScans                            int64
 	numDeleted                              int64
-	numStats                                int64
+	numStatsStarted, numStatsFinished       int64
 	statsTotalTime                          int64
 	interval                                time.Duration
 	start                                   time.Time
@@ -65,8 +67,10 @@ func newProgressTracker(ctx context.Context, interval time.Duration, display boo
 }
 
 func (pt *progressTracker) meanStatLatency() int64 {
+	pt.Lock()
+	defer pt.Unlock()
 	sum := atomic.LoadInt64(&pt.statsTotalTime)
-	count := atomic.LoadInt64(&pt.numStats)
+	count := atomic.LoadInt64(&pt.numStatsFinished)
 	if count > 0 {
 		return sum / count
 	}
@@ -77,7 +81,7 @@ func (pt *progressTracker) summarize() anaylzeSummary {
 		PrefixesStarted:   atomic.LoadInt64(&pt.numPrefixesStarted),
 		PrefixesFinished:  atomic.LoadInt64(&pt.numPrefixesFinished),
 		SynchronousScans:  atomic.LoadInt64(&pt.numSyncScans),
-		FSStats:           atomic.LoadInt64(&pt.numStats),
+		FSStats:           atomic.LoadInt64(&pt.numStatsFinished),
 		FSStatsTotal:      atomic.LoadInt64(&pt.statsTotalTime),
 		FSStatMeanLatency: pt.meanStatLatency(),
 		Files:             atomic.LoadInt64(&pt.numFiles),
@@ -88,9 +92,13 @@ func (pt *progressTracker) summarize() anaylzeSummary {
 	}
 }
 
-func (pt *progressTracker) updateStatLatency(start time.Time) {
+func (pt *progressTracker) statStarted() {
+	atomic.AddInt64(&pt.numStatsStarted, 1)
+}
+
+func (pt *progressTracker) statFinished(start time.Time) {
 	took := time.Since(start)
-	atomic.AddInt64(&pt.numStats, 1)
+	atomic.AddInt64(&pt.numStatsFinished, 1)
 	atomic.AddInt64(&pt.statsTotalTime, int64(took))
 }
 
@@ -141,7 +149,7 @@ func (pt *progressTracker) summary(ctx context.Context) {
 	ifmt.Printf("           deleted : % 15v\n", atomic.LoadInt64(&pt.numDeleted))
 	ifmt.Printf("            errors : % 15v\n", atomic.LoadInt64(&pt.numErrors))
 	ifmt.Printf("        sync scans : % 15v\n", atomic.LoadInt64(&pt.numSyncScans))
-	ifmt.Printf("          stat ops : % 15v\n", atomic.LoadInt64(&pt.numStats))
+	ifmt.Printf("          stat ops : % 15v\n", atomic.LoadInt64(&pt.numStatsFinished))
 	ifmt.Printf("   total stat time : % 15v\n", time.Duration(atomic.LoadInt64(&pt.statsTotalTime)))
 	ifmt.Printf(" mean stat latency : % 15v\n", time.Duration(pt.meanStatLatency()))
 	ifmt.Printf("          run time : % 15v\n", time.Since(pt.start).Truncate(time.Second))
@@ -156,15 +164,16 @@ func (pt *progressTracker) log(ctx context.Context) {
 		"prefixes", atomic.LoadInt64(&pt.numPrefixesFinished),
 		"deleted", atomic.LoadInt64(&pt.numDeleted),
 		"files", atomic.LoadInt64(&pt.numFiles),
-		"parent unchanged", atomic.LoadInt64(&pt.numParentUnchanged),
-		"children unchanged", atomic.LoadInt64(&pt.numChildrenUnchanged),
+		"parent_unchanged", atomic.LoadInt64(&pt.numParentUnchanged),
+		"children_unchanged", atomic.LoadInt64(&pt.numChildrenUnchanged),
 		"errors", atomic.LoadInt64(&pt.numErrors),
-		"sync scans", atomic.LoadInt64(&pt.numSyncScans),
-		"stat ops", atomic.LoadInt64(&pt.numStats),
-		"run time", time.Since(pt.start),
-		"heap alloc GiB", float64(pt.memstats.HeapAlloc)/(1024*1024*1024),
-		"max heap alloc GiB", float64(pt.memstats.HeapSys)/(1024*1024*1024),
-		"max process RSS GiB", pt.sysMemstats.MaxRSSGiB())
+		"sync_scans", atomic.LoadInt64(&pt.numSyncScans),
+		"stat_ops", atomic.LoadInt64(&pt.numStatsFinished),
+		"num_goroutines", runtime.NumGoroutine(),
+		"run_time", time.Since(pt.start),
+		"heap_alloc_GiB", float64(pt.memstats.HeapAlloc)/(1024*1024*1024),
+		"max_heap_alloc_GiB", float64(pt.memstats.HeapSys)/(1024*1024*1024),
+		"max_process_RSS_GiB", pt.sysMemstats.MaxRSSGiB())
 }
 
 func isInteractive() bool {
@@ -209,7 +218,7 @@ func (pt *progressTracker) display(ctx context.Context) {
 		prefixRate := (float64(current - lastPrefixes)) / float64(since.Seconds())
 		lastPrefixes = current
 
-		current = atomic.LoadInt64(&pt.numStats)
+		current = atomic.LoadInt64(&pt.numStatsFinished)
 		statRate := (float64(current - lastStats)) / float64(since.Seconds())
 		lastStats = current
 		var statLatency time.Duration
@@ -227,13 +236,14 @@ func (pt *progressTracker) display(ctx context.Context) {
 
 		runningFor := time.Since(pt.start).Truncate(time.Second)
 
-		ifmt.Printf("% 8v(%3v) prefixes, % 8v files, % 6.0f (prefixes/s), % 6.0f (stats/second), %v (latency), % 6.0f (sync scans/s), % 8v unchanged, % 5v errors, % 8v, (%s) %s",
+		ifmt.Printf("% 8v(%3v) prefixes, % 8v files, % 6.0f (prefixes/s), % 6.0f (stats/second), %v (latency), % 6v (scans outstanding), % 6.0f (sync scans/s), % 8v unchanged, % 5v errors, % 8v, (%s) %s",
 			finished,
 			started-finished,
 			atomic.LoadInt64(&pt.numFiles),
 			prefixRate,
 			statRate,
 			statLatency,
+			atomic.LoadInt64(&pt.numSyncScans)-atomic.LoadInt64(&pt.numStatsFinished),
 			syncRate,
 			atomic.LoadInt64(&pt.numChildrenUnchanged),
 			atomic.LoadInt64(&pt.numErrors),

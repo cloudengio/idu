@@ -39,6 +39,9 @@ func (alz *analyzeCmd) analyze(ctx context.Context, values interface{}, args []s
 }
 
 func (alz *analyzeCmd) analyzeFS(ctx context.Context, fs filewalk.FS, af *analyzeFlags, args []string) error {
+	if err := useMaxProcs(ctx); err != nil {
+		internal.Log(ctx, internal.LogError, "failed to set max procs", "error", err)
+	}
 	start := time.Now()
 	ctx, cfg, err := internal.LookupPrefix(ctx, globalConfig, args[0])
 	if err != nil {
@@ -82,7 +85,7 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fs filewalk.FS, af *analyz
 	errs := errors.M{}
 	errs.Append(walker.Walk(ctx, args[0]))
 	errs.Append(alz.summarizeAndLog(ctx, db, pt, start))
-	return errs.Err()
+	return errs.Squash(context.Canceled)
 }
 
 func cl() string {

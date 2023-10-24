@@ -239,6 +239,8 @@ func TestAnalyze(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	internal.LogDir = filepath.Join(tmpDir, "logs")
+	os.MkdirAll(internal.LogDir, 0700)
 	globalConfig = cfg
 
 	fs := localfs.New()

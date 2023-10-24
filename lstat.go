@@ -27,6 +27,8 @@ type lstatIssuer struct {
 	statsMu sync.Mutex
 	min     time.Duration
 	max     time.Duration
+
+	limitCh chan struct{}
 }
 
 type lstatResult struct {
@@ -34,29 +36,30 @@ type lstatResult struct {
 	err  error
 }
 
-func newLStatIssuer(w *walker, cfg config.Prefix, fs filewalk.FS) *lstatIssuer {
-	return &lstatIssuer{
-		cfg: cfg,
-		fs:  fs,
-		w:   w,
-		pt:  w.pt,
+func initLimiter(cfg config.Prefix) chan struct{} {
+	ch := make(chan struct{}, cfg.ConcurrentStats)
+	for i := 0; i < cap(ch); i++ {
+		ch <- struct{}{}
 	}
+	return ch
 }
 
-func (lsi *lstatIssuer) updateLatencyStats(start time.Time) {
-	lsi.pt.updateStatLatency(start)
-	lsi.statsMu.Lock()
-	defer lsi.statsMu.Unlock()
-	took := time.Since(start)
-	lsi.min = min(lsi.min, took)
-	lsi.max = max(lsi.max, took)
-
+func newLStatIssuer(w *walker, cfg config.Prefix, fs filewalk.FS) *lstatIssuer {
+	lsi := &lstatIssuer{
+		cfg:     cfg,
+		fs:      fs,
+		w:       w,
+		pt:      w.pt,
+		limitCh: initLimiter(cfg),
+	}
+	return lsi
 }
 
 func (lsi *lstatIssuer) lstat(ctx context.Context, state *prefixState, prefix, filename string) (file.Info, error) {
 	start := time.Now()
+	lsi.pt.statStarted()
 	info, err := lsi.fs.LStat(ctx, filename)
-	lsi.updateLatencyStats(start)
+	lsi.pt.statFinished(start)
 	if err != nil {
 		internal.Log(ctx, internal.LogError, "stat error", "prefix", lsi.cfg.Prefix, "file", filename, "error", err)
 		lsi.w.dbLog(ctx, filename, []byte(err.Error()))
@@ -68,7 +71,7 @@ func (lsi *lstatIssuer) lstatContents(ctx context.Context, state *prefixState, p
 	if len(contents) < lsi.cfg.ConcurrentStatsThreshold {
 		return lsi.syncIssue(ctx, state, prefix, contents)
 	}
-	return lsi.asyncIssue(ctx, state, prefix, contents, lsi.w.cfg.ConcurrentStats)
+	return lsi.asyncIssue(ctx, state, prefix, contents)
 }
 
 func (lsi *lstatIssuer) syncIssue(ctx context.Context, state *prefixState, prefix string, contents []filewalk.Entry) (file.InfoList, error) {
@@ -90,10 +93,25 @@ func (lsi *lstatIssuer) syncIssue(ctx context.Context, state *prefixState, prefi
 	return children, nil
 }
 
-func (lsi *lstatIssuer) asyncIssue(ctx context.Context, state *prefixState, prefix string, contents []filewalk.Entry, concurrency int) (file.InfoList, error) {
+func (lsi *lstatIssuer) waitOnLimiter(ctx context.Context) error {
+	select {
+	case <-lsi.limitCh:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return nil
+}
+
+func (lsi *lstatIssuer) releaseLimiter() {
+	lsi.limitCh <- struct{}{}
+}
+
+func (lsi *lstatIssuer) asyncIssue(ctx context.Context, state *prefixState, prefix string, contents []filewalk.Entry) (file.InfoList, error) {
+	concurrency := min(lsi.w.cfg.ConcurrentStats, len(contents))
+
 	g := &errgroup.T{}
-	g = errgroup.WithConcurrency(g, min(concurrency, len(contents)))
-	// The channel must be deep enough to hold all of the items that
+	g = errgroup.WithConcurrency(g, concurrency)
+	// The channel must be large enough to hold all of the items that
 	// can be returned.
 	ch := make(chan syncsort.Item[lstatResult], len(contents))
 	seq := syncsort.NewSequencer(ctx, ch)
@@ -101,10 +119,14 @@ func (lsi *lstatIssuer) asyncIssue(ctx context.Context, state *prefixState, pref
 		name := entry.Name
 		item := seq.NextItem(lstatResult{})
 		filename := lsi.fs.Join(prefix, name)
+		if err := lsi.waitOnLimiter(ctx); err != nil {
+			return file.InfoList{}, err
+		}
 		g.Go(func() error {
 			info, err := lsi.lstat(ctx, state, prefix, filename)
 			item.V = lstatResult{info, err}
 			ch <- item
+			lsi.releaseLimiter()
 			return nil
 		})
 	}
