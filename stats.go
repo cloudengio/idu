@@ -17,7 +17,6 @@ import (
 	"cloudeng.io/algo/container/heap"
 	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/database"
-	"cloudeng.io/cmd/idu/internal/database/boltdb"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/file/diskusage"
@@ -56,7 +55,7 @@ type eraseFlags struct {
 
 func (st *statsCmds) list(ctx context.Context, values interface{}, args []string) error {
 	lf := values.(*listStatsFlags)
-	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], boltdb.ReadOnly())
+	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
 	if err != nil {
 		return err
 	}
@@ -87,7 +86,7 @@ func (st *statsCmds) erase(ctx context.Context, values interface{}, args []strin
 	if !ef.Force {
 		return fmt.Errorf("use --force to erase all stats")
 	}
-	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0])
+	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], false)
 	if err != nil {
 		return err
 	}
@@ -98,7 +97,7 @@ func (st *statsCmds) erase(ctx context.Context, values interface{}, args []strin
 func (st *statsCmds) compute(ctx context.Context, values interface{}, args []string) error {
 	cf := values.(*computeFlags)
 
-	ctx, cfg, rdb, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], boltdb.ReadOnly())
+	ctx, cfg, rdb, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
 	if err != nil {
 		return err
 	}
@@ -125,7 +124,7 @@ func (st *statsCmds) compute(ctx context.Context, values interface{}, args []str
 	if err := gob.NewEncoder(buf).Encode(sdb); err != nil {
 		return err
 	}
-	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, cfg.Prefix)
+	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, cfg.Prefix, false)
 	if err != nil {
 		return err
 	}
@@ -160,7 +159,7 @@ func (st *statsCmds) computeStats(ctx context.Context, db database.DB, prefix st
 }
 
 func (st *statsCmds) getOrComputeStats(ctx context.Context, prefix string, n int) (time.Time, *reports.AllStats, error) {
-	ctx, cfg, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, prefix, boltdb.ReadOnly())
+	ctx, cfg, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, prefix, true)
 	if err != nil {
 		return time.Time{}, nil, err
 	}

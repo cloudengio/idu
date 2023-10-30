@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/cmd/idu/internal/database/boltdb"
 	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/errors"
 	"golang.org/x/exp/maps"
@@ -28,7 +27,7 @@ type reportsFlags struct {
 
 func (st *statsCmds) reports(ctx context.Context, values interface{}, args []string) error {
 	rf := values.(*reportsFlags)
-	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], boltdb.ReadOnly())
+	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
 	if err != nil {
 		return err
 	}

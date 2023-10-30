@@ -13,8 +13,6 @@ import (
 	"time"
 
 	"cloudeng.io/cmd/idu/internal/config"
-	"cloudeng.io/cmd/idu/internal/database"
-	"cloudeng.io/cmd/idu/internal/database/boltdb"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmdutil/flags"
 )
@@ -27,10 +25,10 @@ type TimeRangeFlags struct {
 
 func (tr *TimeRangeFlags) FromTo() (from, to time.Time, set bool, err error) {
 	set = tr.Since != 0 || !tr.From.IsDefault() || !tr.To.IsDefault()
+	to = time.Now()
 	if !set {
 		return
 	}
-	to = time.Now()
 	if tr.Since > 0 {
 		from = to.Add(-tr.Since)
 		return
@@ -55,51 +53,6 @@ func LookupPrefix(ctx context.Context, all config.T, prefix string) (context.Con
 		return ctx, cfg, fmt.Errorf("no configuration for %v", prefix)
 	}
 	return ctx, cfg, nil
-}
-
-func OpenDatabase(ctx context.Context, cfg config.Prefix, opts ...boltdb.Option) (database.DB, error) {
-	doneCh := make(chan struct {
-		db  database.DB
-		err error
-	}, 1)
-
-	go func() {
-		withTimeout := []boltdb.Option{boltdb.WithTimeout(10 * time.Second)}
-		db, err := boltdb.Open(cfg.Database, cfg.Prefix, append(withTimeout, opts...)...)
-		doneCh <- struct {
-			db  database.DB
-			err error
-		}{db, err}
-
-	}()
-	start := time.Now()
-	delayed := false
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case res := <-doneCh:
-			if delayed {
-				fmt.Println()
-			}
-			return res.db, res.err
-		case <-time.After(time.Second):
-			fmt.Printf("waiting for database to open: %v: %s\t\t\r", cfg.Database, time.Since(start).Truncate(time.Second))
-			delayed = true
-		}
-	}
-}
-
-func OpenPrefixAndDatabase(ctx context.Context, all config.T, prefix string, opts ...boltdb.Option) (context.Context, config.Prefix, database.DB, error) {
-	ctx, cfg, err := LookupPrefix(ctx, all, prefix)
-	if err != nil {
-		return ctx, config.Prefix{}, nil, err
-	}
-	db, err := OpenDatabase(ctx, cfg, opts...)
-	if err != nil {
-		return ctx, config.Prefix{}, nil, fmt.Errorf("failed to open database for %v in %v: %v\n", cfg.Prefix, cfg.Database, err)
-	}
-	return ctx, cfg, db, nil
 }
 
 type prefixInfo struct {

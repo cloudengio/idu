@@ -14,7 +14,6 @@ import (
 
 	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/config"
-	"cloudeng.io/cmd/idu/internal/database/boltdb"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 )
 
@@ -50,7 +49,7 @@ func (l *lister) prefixes(ctx context.Context, values interface{}, args []string
 		flagValues.ShowDirs = false
 		flagValues.Summary = true
 	}
-	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], boltdb.ReadOnly())
+	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
 	if err != nil {
 		return err
 	}
@@ -79,7 +78,7 @@ func (l *lister) prefixes(ctx context.Context, values interface{}, args []string
 
 func (l *lister) errors(ctx context.Context, values interface{}, args []string) error {
 	ef := values.(*errorFlags)
-	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], boltdb.ReadOnly())
+	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
 	if err != nil {
 		return err
 	}
@@ -97,7 +96,7 @@ func (l *lister) errors(ctx context.Context, values interface{}, args []string) 
 
 func (l *lister) logs(ctx context.Context, values interface{}, args []string) error {
 	lf := values.(*logFlags)
-	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], boltdb.ReadOnly())
+	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
 	if err != nil {
 		return err
 	}
@@ -111,6 +110,7 @@ func (l *lister) logs(ctx context.Context, values interface{}, args []string) er
 	if err != nil {
 		return err
 	}
+	fmt.Printf("FROM: %v TO: %v\n", from, to)
 	return db.VisitLogs(ctx, from, to,
 		func(_ context.Context, begin, end time.Time, detail []byte) bool {
 			fmt.Printf("%v...%v: %v: %s\n", begin, end, end.Sub(begin), detail)

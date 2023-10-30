@@ -13,7 +13,6 @@ import (
 
 	"cloudeng.io/algo/container/heap"
 	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/cmd/idu/internal/database/boltdb"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmdutil/flags"
 )
@@ -56,7 +55,7 @@ func (or orRegexp) match(p string) bool {
 
 func (fc *findCmds) find(ctx context.Context, values interface{}, args []string) error {
 	ff := values.(*findFlags)
-	ctx, cfg, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], boltdb.ReadOnly())
+	ctx, cfg, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
 	if err != nil {
 		return err
 	}

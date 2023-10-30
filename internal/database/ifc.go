@@ -63,10 +63,9 @@ type DB interface {
 	// Scan can be used to iterate over all keys in the database.
 	Scan(ctx context.Context, key string, visitor func(ctx context.Context, key string, val []byte) bool) error
 
-	// LogAndClose should be used to record the start and stop time for
-	// a given operation and associated details/description. The database
-	// will be closed once the log entry has been committeed.
-	LogAndClose(ctx context.Context, start, stop time.Time, detail []byte) error
+	// Log should be used to record the start and stop time for
+	// a given operation and associated details/description.
+	Log(ctx context.Context, start, stop time.Time, detail []byte) error
 
 	// LastLog returns the most recently recorded log entry.
 	LastLog(ctx context.Context) (start, stop time.Time, detail []byte, err error)

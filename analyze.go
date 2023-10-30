@@ -5,18 +5,16 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
-	"sync"
 	"time"
 
 	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/config"
-	"cloudeng.io/cmd/idu/internal/database"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/errors"
 	"cloudeng.io/file"
@@ -25,9 +23,11 @@ import (
 )
 
 type analyzeFlags struct {
-	UseDB    bool          `subcmd:"use-db,true,database backed scan that avoids stating files in unchanged directories"`
-	Progress bool          `subcmd:"progress,true,show progress"`
-	Newer    time.Duration `subcmd:"newer,24h,only scans directories and files that have changed since the specified duration"`
+	UseDB      bool          `subcmd:"use-db,true,database backed scan that avoids stating files in unchanged directories"`
+	InPlace    bool          `subcmd:"in-place,true,update the database in place"`
+	Progress   bool          `subcmd:"progress,true,show progress"`
+	MaxThreads int           `subcmd:"set-max-threads,0,'if non-zero, use as the argument for debug.SetMaxThreads'"`
+	Newer      time.Duration `subcmd:"newer,24h,only scans directories and files that have changed since the specified duration"`
 }
 
 type analyzeCmd struct{}
@@ -42,20 +42,27 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fs filewalk.FS, af *analyz
 	if err := useMaxProcs(ctx); err != nil {
 		internal.Log(ctx, internal.LogError, "failed to set max procs", "error", err)
 	}
+	if af.MaxThreads > 0 {
+		debug.SetMaxThreads(af.MaxThreads)
+		internal.Log(ctx, internal.LogProgress, "set max threads", "max-threads", af.MaxThreads)
+	}
 	start := time.Now()
 	ctx, cfg, err := internal.LookupPrefix(ctx, globalConfig, args[0])
 	if err != nil {
 		return err
 	}
-	var db database.DB
+	var sdb internal.ScanDB
 	if af.UseDB {
-		db, err = internal.OpenDatabase(ctx, cfg)
+		sdb, err = internal.NewScanDB(ctx, cfg, af.InPlace)
 		if err != nil {
 			return err
 		}
-		if err := db.DeleteErrors(ctx, args[0]); err != nil {
+		if err := sdb.DeleteErrors(ctx, args[0]); err != nil {
 			return err
 		}
+		defer func() {
+			sdb.Close(ctx)
+		}()
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -65,7 +72,7 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fs filewalk.FS, af *analyz
 
 	w := &walker{
 		cfg:   cfg,
-		db:    db,
+		db:    sdb,
 		fs:    fs,
 		pt:    pt,
 		usedb: af.UseDB,
@@ -84,7 +91,7 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fs filewalk.FS, af *analyz
 
 	errs := errors.M{}
 	errs.Append(walker.Walk(ctx, args[0]))
-	errs.Append(alz.summarizeAndLog(ctx, db, pt, start))
+	errs.Append(alz.summarizeAndLog(ctx, sdb, pt, start))
 	return errs.Squash(context.Canceled)
 }
 
@@ -101,9 +108,9 @@ func cl() string {
 	return strings.TrimSpace(out.String())
 }
 
-func (alz *analyzeCmd) summarizeAndLog(ctx context.Context, db database.DB, pt *progressTracker, start time.Time) error {
+func (alz *analyzeCmd) summarizeAndLog(ctx context.Context, sdb internal.ScanDB, pt *progressTracker, start time.Time) error {
 	defer pt.summary(ctx)
-	if db == nil {
+	if sdb == nil {
 		return nil
 	}
 	s := pt.summarize()
@@ -114,15 +121,15 @@ func (alz *analyzeCmd) summarizeAndLog(ctx context.Context, db database.DB, pt *
 	if err != nil {
 		return err
 	}
-	if db == nil {
+	if sdb == nil {
 		return nil
 	}
-	return db.LogAndClose(ctx, start, time.Now(), buf)
+	return sdb.LogAndClose(ctx, start, time.Now(), buf)
 }
 
 type walker struct {
 	cfg   config.Prefix
-	db    database.DB
+	db    internal.ScanDB
 	fs    filewalk.FS
 	pt    *progressTracker
 	lsi   *lstatIssuer
@@ -151,7 +158,8 @@ func (w *walker) status(ctx context.Context, ch <-chan filewalk.Status) {
 		case s := <-ch:
 			w.pt.setSyncScans(s.SynchronousScans)
 			if len(s.SlowPrefix) > 0 {
-				internal.Log(ctx, internal.LogPrefix, "slow scan", "prefix", w.cfg.Prefix, "path", s.SlowPrefix, "duration", s.ScanDuration)
+				internal.Log(ctx, internal.LogProgress, "slow scan", "prefix", w.cfg.Prefix, "path", s.SlowPrefix, "duration", s.ScanDuration)
+				w.dbLog(ctx, s.SlowPrefix, []byte(fmt.Sprintf("slow scan: %v", s.ScanDuration)))
 			}
 		}
 	}
@@ -195,7 +203,7 @@ func (w *walker) handlePrefix(ctx context.Context, state *prefixState, prefix st
 	}
 
 	if w.usedb {
-		ok, err := getPrefixInfo(ctx, w.db, prefix, &state.existing)
+		ok, err := w.db.GetPrefixInfo(ctx, prefix, &state.existing)
 		if !ok || err != nil {
 			return false, false, err
 		}
@@ -264,7 +272,11 @@ func (w *walker) Contents(ctx context.Context, state *prefixState, prefix string
 	return children, err
 }
 
-func (w *walker) Done(ctx context.Context, state *prefixState, prefix string) error {
+func (w *walker) Done(ctx context.Context, state *prefixState, prefix string, err error) error {
+	if err != nil {
+		internal.Log(ctx, internal.LogPrefix, "prefix done with error", "prefix", w.cfg.Prefix, "path", prefix, "error", err)
+		w.dbLog(ctx, prefix, []byte(err.Error()))
+	}
 
 	if err := state.current.Finalize(); err != nil {
 		internal.Log(ctx, internal.LogPrefix, "prefix done", "prefix", w.cfg.Prefix, "path", prefix, "error", err)
@@ -281,13 +293,13 @@ func (w *walker) Done(ctx context.Context, state *prefixState, prefix string) er
 		return nil
 	}
 
-	n, err := w.handleDeletedOrChangedPrefixes(ctx, prefix, state.parentUnchanged, state.current, state.existing)
+	n, unchanged, err := w.handleDeletedOrChangedPrefixes(ctx, prefix, state.parentUnchanged, state.current, state.existing)
 	state.ndeleted += n
 	if err != nil {
 		return err
 	}
 
-	if err := setPrefixInfo(ctx, w.db, prefix, &state.current); err != nil {
+	if err := w.db.SetPrefixInfo(ctx, prefix, unchanged, &state.current); err != nil {
 		internal.Log(ctx, internal.LogPrefix, "prefix done", "prefix", w.cfg.Prefix, "path", prefix, "error", err)
 		return err
 	}
@@ -295,7 +307,7 @@ func (w *walker) Done(ctx context.Context, state *prefixState, prefix string) er
 	return nil
 }
 
-func (w *walker) handleDeletedOrChangedPrefixes(ctx context.Context, prefix string, parentUnchanged bool, current, previous prefixinfo.T) (int, error) {
+func (w *walker) handleDeletedOrChangedPrefixes(ctx context.Context, prefix string, parentUnchanged bool, current, previous prefixinfo.T) (int, bool, error) {
 	var deleted []string
 	cm := map[string]file.Info{}
 	for _, cur := range current.InfoList() {
@@ -320,11 +332,15 @@ func (w *walker) handleDeletedOrChangedPrefixes(ctx context.Context, prefix stri
 			}
 		}
 	}
+
 	if childrenUnchanged {
 		w.pt.incChildrenUnchanged()
+		return 0, true, nil
 	}
+
 	var errs errors.M
 	ndeleted := 0
+
 	for _, d := range deleted {
 		p := w.fs.Join(prefix, d)
 		if err := w.db.DeletePrefix(ctx, p); err != nil {
@@ -333,48 +349,6 @@ func (w *walker) handleDeletedOrChangedPrefixes(ctx context.Context, prefix stri
 		}
 		ndeleted++
 	}
-	return ndeleted, errs.Err()
-}
 
-func getPrefixInfo(ctx context.Context, db database.DB, key string, pi *prefixinfo.T) (bool, error) {
-	select {
-	case <-ctx.Done():
-		return false, ctx.Err()
-	default:
-	}
-	buf := bufPool.Get().(*bytes.Buffer)
-	buf.Reset()
-	defer bufPool.Put(buf)
-	if err := db.GetBuf(ctx, key, buf); err != nil {
-		return false, err
-	}
-	if len(buf.Bytes()) == 0 {
-		// Key does not exist or is a bucket, which should never happen here.
-		return false, nil
-	}
-	return true, pi.UnmarshalBinary(buf.Bytes())
-}
-
-func setPrefixInfo(ctx context.Context, db database.DB, key string, pi *prefixinfo.T) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-	buf := bufPool.Get().(*bytes.Buffer)
-	buf.Reset()
-	defer bufPool.Put(buf)
-	if err := pi.AppendBinary(buf); err != nil {
-		return err
-	}
-	return db.SetBatch(ctx, key, buf.Bytes())
-}
-
-var bufPool = sync.Pool{
-	New: func() any {
-		// The Pool's New function should generally only return pointer
-		// types, since a pointer can be put into the return interface
-		// value without an allocation:
-		return new(bytes.Buffer)
-	},
+	return ndeleted, false, errs.Err()
 }

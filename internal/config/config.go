@@ -22,7 +22,7 @@ type Prefix struct {
 	Separator                string   `yaml:"separator" cmd:"filename separator to use, defaults to /"`
 	ConcurrentScans          int      `yaml:"concurrent_scans" cmd:"maximum number of concurrent scan operations, defaults to 20"`
 	ConcurrentStats          int      `yaml:"concurrent_stats" cmd:"maximum number of concurrent stat operations, defaults to 50"`
-	ConcurrentStatsThreshold int      `yaml:"concurrent_stats_threshold" cmd:"minimum number of files before stats are performed concurrently, defaults to 10"`
+	ConcurrentStatsThreshold int      `yaml:"concurrent_stats_threshold" cmd:"minimum number of files before stats are performed concurrently, defaults to 10, set to 1 to disable synchornous stats"`
 	ScanSize                 int      `yaml:"scan_size" cmd:"maximum number of items to fetch from the filesystem in a single operation, defaults to 1000"`
 	Exclusions               []string `yaml:"exclusions" cmd:"prefixes and files matching these regular expressions will be ignored when building a dataase"`
 	Layout                   layout   `yaml:"layout" cmd:"the filesystem layout to use for calculating raw bytes used"`

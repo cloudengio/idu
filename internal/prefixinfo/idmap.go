@@ -33,7 +33,6 @@ func (idm idMap) appendBinary(buf *bytes.Buffer) {
 		n := binary.PutUvarint(storage[:], p)
 		buf.Write(storage[:n])
 	}
-	return
 }
 
 func (idm *idMap) decodeBinary(data []byte) ([]byte, error) {
@@ -73,7 +72,6 @@ func (idms idMaps) appendBinary(buf *bytes.Buffer) {
 	for _, idm := range idms {
 		idm.appendBinary(buf)
 	}
-	return
 }
 
 func (idms *idMaps) decodeBinary(data []byte) ([]byte, error) {

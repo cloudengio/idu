@@ -20,7 +20,6 @@ import (
 	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/cmd/idu/internal/database"
-	"cloudeng.io/cmd/idu/internal/database/boltdb"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/file/filewalk"
 	"cloudeng.io/file/filewalk/localfs"
@@ -135,7 +134,7 @@ func scanErrors(t *testing.T, ctx context.Context, db database.DB, fs filewalk.F
 }
 
 func getLastLog(t *testing.T, ctx context.Context, cfg config.T, arg0 string) (start, stop time.Time, s anaylzeSummary) {
-	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, cfg, arg0, boltdb.ReadOnly())
+	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, cfg, arg0, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +151,7 @@ func getLastLog(t *testing.T, ctx context.Context, cfg config.T, arg0 string) (s
 }
 
 func verifyDB(t *testing.T, ctx context.Context, cfg config.T, fs filewalk.FS, arg0 string, scannable []string) ([]string, anaylzeSummary) {
-	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, cfg, arg0, boltdb.ReadOnly())
+	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, cfg, arg0, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,6 +220,12 @@ func compareSummary(t *testing.T, got anaylzeSummary,
 
 func TestAnalyze(t *testing.T) {
 	ctx := context.Background()
+	testAnalyze(ctx, t, true)
+	testAnalyze(ctx, t, false)
+
+}
+
+func testAnalyze(ctx context.Context, t *testing.T, inplace bool) {
 	tmpDir, cfgFile, arg0, tt := setupAnalyze(t)
 
 	scannable := slices.Clone(tt.base())
@@ -245,7 +250,11 @@ func TestAnalyze(t *testing.T) {
 
 	fs := localfs.New()
 	alz := &analyzeCmd{}
-	af := analyzeFlags{UseDB: true, Progress: false}
+	af := analyzeFlags{
+		UseDB:    true,
+		Progress: false,
+		InPlace:  inplace,
+	}
 	if err := alz.analyzeFS(ctx, fs, &af, []string{arg0}); err != nil {
 		t.Fatal(err)
 	}

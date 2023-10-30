@@ -7,14 +7,13 @@ package boltdb
 import (
 	"bytes"
 	"context"
-	"encoding/gob"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
 
 	"cloudeng.io/cmd/idu/internal/database"
+	"cloudeng.io/cmd/idu/internal/database/types"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -39,7 +38,6 @@ type Options struct {
 type Database struct {
 	database.Options[Options]
 	filename string
-	prefix   string
 	bdb      *bolt.DB
 }
 
@@ -48,20 +46,14 @@ var (
 	bucketLog    = "__log__"
 	bucketErrors = "__errors_"
 	bucketStats  = "__stats__"
-	bucketUsers  = "__users__"
-	bucketGroups = "__groups__"
 
-	nestedBuckets = []string{bucketPaths, bucketErrors, bucketStats, bucketUsers, bucketGroups, bucketLog}
+	nestedBuckets = []string{bucketPaths, bucketErrors, bucketStats, bucketLog}
 )
 
-func initBuckets(bdb *bolt.DB, prefix string) error {
+func initBuckets(bdb *bolt.DB) error {
 	bdb.Update(func(tx *bolt.Tx) error {
-		bucket, err := tx.CreateBucketIfNotExists([]byte(prefix))
-		if err != nil {
-			return err
-		}
 		for _, nested := range nestedBuckets {
-			if _, err = bucket.CreateBucketIfNotExists([]byte(nested)); err != nil {
+			if _, err := tx.CreateBucketIfNotExists([]byte(nested)); err != nil {
 				return err
 			}
 		}
@@ -72,14 +64,13 @@ func initBuckets(bdb *bolt.DB, prefix string) error {
 
 // Open opens the specified database. If the database does not exist it will
 // be created.
-func Open[T Options](location, prefix string, opts ...Option) (database.DB, error) {
+func Open[T Options](location string, opts ...Option) (database.DB, error) {
 	dir := filepath.Dir(location)
 	if len(dir) > 0 && dir != "." {
 		os.MkdirAll(dir, 0700)
 	}
 	db := &Database{
 		filename: location,
-		prefix:   prefix,
 	}
 	for _, fn := range opts {
 		fn(&db.Options)
@@ -107,7 +98,7 @@ func Open[T Options](location, prefix string, opts ...Option) (database.DB, erro
 	}
 
 	if !db.ReadOnly {
-		if err := initBuckets(bdb, prefix); err != nil {
+		if err := initBuckets(bdb); err != nil {
 			return nil, err
 		}
 	}
@@ -142,7 +133,7 @@ func (db *Database) set(ctx context.Context, bucket, key string, info []byte) er
 		return err
 	}
 	return db.bdb.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte(db.prefix)).Bucket([]byte(bucket)).Put([]byte(key), info)
+		return tx.Bucket([]byte(bucket)).Put([]byte(key), info)
 	})
 }
 
@@ -151,7 +142,7 @@ func (db *Database) get(ctx context.Context, bucket, key string, buf *bytes.Buff
 		return err
 	}
 	err := db.bdb.View(func(tx *bolt.Tx) error {
-		pb := tx.Bucket([]byte(db.prefix)).Bucket([]byte(bucket))
+		pb := tx.Bucket([]byte(bucket))
 		if v := pb.Get([]byte(key)); v != nil {
 			buf.Grow(len(v))
 			buf.Write(v)
@@ -187,7 +178,7 @@ func (db *Database) SetBatch(ctx context.Context, key string, buf []byte) error 
 		return err
 	}
 	return db.bdb.Batch(func(tx *bolt.Tx) error {
-		err := tx.Bucket([]byte(db.prefix)).Bucket([]byte(bucketPaths)).Put([]byte(key), buf)
+		err := tx.Bucket([]byte(bucketPaths)).Put([]byte(key), buf)
 		return err
 	})
 }
@@ -197,11 +188,7 @@ func (db *Database) Delete(ctx context.Context, keys ...string) error {
 		return err
 	}
 	return db.bdb.Update(func(tx *bolt.Tx) error {
-		pb := tx.Bucket([]byte(db.prefix))
-		if pb == nil {
-			return fmt.Errorf("no bucket for prefix: %v", db.prefix)
-		}
-		paths := pb.Bucket([]byte(bucketPaths))
+		paths := tx.Bucket([]byte(bucketPaths))
 		for _, key := range keys {
 			if err := paths.Delete([]byte(key)); err != nil {
 				return err
@@ -220,11 +207,7 @@ func (db *Database) DeletePrefix(ctx context.Context, prefix string) error {
 		return err
 	}
 	defer tx.Rollback()
-	pb := tx.Bucket([]byte(db.prefix))
-	if pb == nil {
-		return fmt.Errorf("no bucket for prefix: %v", db.prefix)
-	}
-	paths := pb.Bucket([]byte(bucketPaths))
+	paths := tx.Bucket([]byte(bucketPaths))
 	cursor := paths.Cursor()
 	k, _ := cursor.Seek([]byte(prefix))
 	for ; k != nil && bytes.HasPrefix(k, []byte(prefix)); k, _ = cursor.Next() {
@@ -239,11 +222,7 @@ func (db *Database) DeleteErrors(_ context.Context, prefix string) error {
 		return err
 	}
 	defer tx.Rollback()
-	pb := tx.Bucket([]byte(db.prefix))
-	if pb == nil {
-		return fmt.Errorf("no bucket for prefix: %v", db.prefix)
-	}
-	errorsBucket := pb.Bucket([]byte(bucketErrors))
+	errorsBucket := tx.Bucket([]byte(bucketErrors))
 
 	cursor := errorsBucket.Cursor()
 	k, _ := cursor.Seek([]byte(prefix))
@@ -253,22 +232,16 @@ func (db *Database) DeleteErrors(_ context.Context, prefix string) error {
 	return tx.Commit()
 }
 
-type statsPayload struct {
-	When    time.Time
-	Payload []byte
-}
-
 func (db *Database) SaveStats(ctx context.Context, when time.Time, value []byte) error {
-	pl := statsPayload{
+	pl := types.StatsPayload{
 		When:    when,
 		Payload: value,
 	}
-	key := pl.When.Format(time.RFC3339)
-	buf := &bytes.Buffer{}
-	enc := gob.NewEncoder(buf)
-	if err := enc.Encode(pl); err != nil {
+	var buf bytes.Buffer
+	if err := types.Encode(&buf, pl); err != nil {
 		return err
 	}
+	key := when.Format(time.RFC3339)
 	return db.set(ctx, bucketStats, key, buf.Bytes())
 }
 
@@ -277,19 +250,17 @@ func (db *Database) LastStats(ctx context.Context) (time.Time, []byte, error) {
 	if err != nil {
 		return time.Time{}, nil, err
 	}
-	dec := gob.NewDecoder(bytes.NewReader(v))
-	var pl statsPayload
-	if err := dec.Decode(&pl); err != nil {
+	var pl types.StatsPayload
+	if err := types.Decode(v, &pl); err != nil {
 		return time.Time{}, nil, err
 	}
 	return pl.When, pl.Payload, nil
 }
 
 func (db *Database) VisitStats(ctx context.Context, start, stop time.Time, visitor func(ctx context.Context, when time.Time, detail []byte) bool) error {
-	return db.scanTimeRange(ctx, bucketStats, start, stop, func(ctx context.Context, payload []byte) error {
-		dec := gob.NewDecoder(bytes.NewReader(payload))
-		var pl statsPayload
-		if err := dec.Decode(&pl); err != nil {
+	return db.scanTimeRange(ctx, bucketStats, start, stop, func(ctx context.Context, v []byte) error {
+		var pl types.StatsPayload
+		if err := types.Decode(v, &pl); err != nil {
 			return err
 		}
 		if !visitor(ctx, pl.When, pl.Payload) {
@@ -299,12 +270,7 @@ func (db *Database) VisitStats(ctx context.Context, start, stop time.Time, visit
 	})
 }
 
-type logPayload struct {
-	Start, Stop time.Time
-	Payload     []byte
-}
-
-func (db *Database) LogAndClose(ctx context.Context, start, stop time.Time, detail []byte) error {
+func (db *Database) Log(ctx context.Context, start, stop time.Time, detail []byte) error {
 	if err := db.canceled(ctx); err != nil {
 		return err
 	}
@@ -313,40 +279,27 @@ func (db *Database) LogAndClose(ctx context.Context, start, stop time.Time, deta
 		return err
 	}
 	defer tx.Rollback()
-	pb := tx.Bucket([]byte(db.prefix))
-	if pb == nil {
-		return fmt.Errorf("no bucket for prefix: %v", db.prefix)
-	}
-	logs := pb.Bucket([]byte(bucketLog))
+	logs := tx.Bucket([]byte(bucketLog))
 
-	pl := logPayload{
+	pl := types.LogPayload{
 		Start:   start,
 		Stop:    stop,
 		Payload: detail,
 	}
 
-	buf := &bytes.Buffer{}
-	enc := gob.NewEncoder(buf)
-	enc.Encode(pl)
-
+	var buf bytes.Buffer
+	if err := types.Encode(&buf, pl); err != nil {
+		return err
+	}
 	key := start.Format(time.RFC3339)
 	if err := logs.Put([]byte(key), buf.Bytes()); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	err = db.bdb.Close()
-	db.bdb = nil
-	return err
+	return tx.Commit()
 }
 
 func (db *Database) initScan(tx *bolt.Tx, bucket, start string) (cursor *bolt.Cursor, k, v []byte, err error) {
-	pb := tx.Bucket([]byte(db.prefix))
-	if pb == nil {
-		return nil, nil, nil, fmt.Errorf("no bucket for prefix: %v", db.prefix)
-	}
-	cursor = pb.Bucket([]byte(bucket)).Cursor()
+	cursor = tx.Bucket([]byte(bucket)).Cursor()
 	if len(start) == 0 {
 		k, v = cursor.First()
 	} else {
@@ -355,9 +308,29 @@ func (db *Database) initScan(tx *bolt.Tx, bucket, start string) (cursor *bolt.Cu
 	return
 }
 
+func (db *Database) Scan(ctx context.Context, path string, visitor func(ctx context.Context, key string, val []byte) bool) error {
+	return db.bdb.View(func(tx *bolt.Tx) error {
+		cursor, k, v, err := db.initScan(tx, bucketPaths, path)
+		if err != nil {
+			return err
+		}
+		for ; k != nil; k, v = cursor.Next() {
+			if !visitor(ctx, string(k), v) {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+		}
+		return nil
+	})
+}
+
 func (db *Database) getLast(_ context.Context, bucket string) (key, val []byte, err error) {
 	err = db.bdb.View(func(tx *bolt.Tx) error {
-		c := tx.Bucket([]byte(db.prefix)).Bucket([]byte(bucket)).Cursor()
+		c := tx.Bucket([]byte(bucket)).Cursor()
 		k, v := c.Last()
 		key = make([]byte, len(k))
 		copy(key, k)
@@ -396,9 +369,8 @@ func (db *Database) LastLog(ctx context.Context) (start, stop time.Time, detail 
 	if err != nil {
 		return
 	}
-	dec := gob.NewDecoder(bytes.NewReader(v))
-	var pl logPayload
-	if err := dec.Decode(&pl); err != nil {
+	var pl types.LogPayload
+	if err := types.Decode(v, &pl); err != nil {
 		return time.Time{}, time.Time{}, nil, err
 	}
 	start = pl.Start
@@ -409,9 +381,8 @@ func (db *Database) LastLog(ctx context.Context) (start, stop time.Time, detail 
 
 func (db *Database) VisitLogs(ctx context.Context, start, stop time.Time, visitor func(ctx context.Context, begin, end time.Time, detail []byte) bool) error {
 	return db.scanTimeRange(ctx, bucketLog, start, stop, func(ctx context.Context, payload []byte) error {
-		dec := gob.NewDecoder(bytes.NewReader(payload))
-		var pl logPayload
-		if err := dec.Decode(&pl); err != nil {
+		var pl types.LogPayload
+		if err := types.Decode(payload, &pl); err != nil {
 			return err
 		}
 		if !visitor(ctx, pl.Start, pl.Stop, pl.Payload) {
@@ -421,49 +392,18 @@ func (db *Database) VisitLogs(ctx context.Context, start, stop time.Time, visito
 	})
 }
 
-func (db *Database) Scan(ctx context.Context, path string, visitor func(ctx context.Context, key string, val []byte) bool) error {
-	return db.bdb.View(func(tx *bolt.Tx) error {
-		cursor, k, v, err := db.initScan(tx, bucketPaths, path)
-		if err != nil {
-			return err
-		}
-		for ; k != nil; k, v = cursor.Next() {
-			if !visitor(ctx, string(k), v) {
-				break
-			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-		}
-		return nil
-	})
-}
-
-type errorPayload struct {
-	When    time.Time
-	Key     string
-	Payload []byte
-}
-
 func (db *Database) LogError(ctx context.Context, key string, when time.Time, detail []byte) error {
+	pl := types.ErrorPayload{
+		When:    when,
+		Key:     key,
+		Payload: detail,
+	}
+	var buf bytes.Buffer
+	if err := types.Encode(&buf, pl); err != nil {
+		return err
+	}
 	return db.bdb.Batch(func(tx *bolt.Tx) error {
-		pb := tx.Bucket([]byte(db.prefix))
-		if pb == nil {
-			return fmt.Errorf("no bucket for prefix: %v", db.prefix)
-		}
-		pl := errorPayload{
-			When:    when,
-			Key:     key,
-			Payload: detail,
-		}
-		buf := &bytes.Buffer{}
-		enc := gob.NewEncoder(buf)
-		if err := enc.Encode(pl); err != nil {
-			return err
-		}
-		return pb.Bucket([]byte(bucketErrors)).Put([]byte(key), buf.Bytes())
+		return tx.Bucket([]byte(bucketErrors)).Put([]byte(key), buf.Bytes())
 	})
 }
 
@@ -475,9 +415,10 @@ func (db *Database) VisitErrors(ctx context.Context, key string,
 			return err
 		}
 		for ; k != nil; k, v = cursor.Next() {
-			dec := gob.NewDecoder(bytes.NewReader(v))
-			var pl errorPayload
-			dec.Decode(&pl)
+			var pl types.ErrorPayload
+			if err := types.Decode(v, &pl); err != nil {
+				return err
+			}
 			if !visitor(ctx, pl.Key, pl.When, pl.Payload) {
 				return nil
 			}
@@ -491,11 +432,11 @@ func (db *Database) VisitErrors(ctx context.Context, key string,
 	})
 }
 
-func (db *Database) clearBucket(pb *bolt.Bucket, bucket string) error {
-	if err := pb.DeleteBucket([]byte(bucket)); err != nil {
+func (db *Database) clearBucket(tx *bolt.Tx, bucket string) error {
+	if err := tx.DeleteBucket([]byte(bucket)); err != nil {
 		return err
 	}
-	_, err := pb.CreateBucket([]byte(bucket))
+	_, err := tx.CreateBucket([]byte(bucket))
 	return err
 }
 
@@ -506,25 +447,20 @@ func (db *Database) Clear(_ context.Context, logs, errors, stats bool) error {
 	}
 	defer tx.Rollback()
 
-	pb := tx.Bucket([]byte(db.prefix))
-	if pb == nil {
-		return fmt.Errorf("no bucket for prefix: %v", db.prefix)
-	}
-
 	if logs {
-		if err := db.clearBucket(pb, bucketLog); err != nil {
+		if err := db.clearBucket(tx, bucketLog); err != nil {
 			return err
 		}
 	}
 
 	if errors {
-		if err := db.clearBucket(pb, bucketErrors); err != nil {
+		if err := db.clearBucket(tx, bucketErrors); err != nil {
 			return err
 		}
 	}
 
 	if stats {
-		if err := db.clearBucket(pb, bucketStats); err != nil {
+		if err := db.clearBucket(tx, bucketStats); err != nil {
 			return err
 		}
 	}
