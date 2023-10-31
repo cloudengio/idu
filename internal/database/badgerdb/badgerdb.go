@@ -8,12 +8,14 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"strings"
 	"time"
 
 	"cloudeng.io/cmd/idu/internal/database"
 	"cloudeng.io/cmd/idu/internal/database/types"
 	"cloudeng.io/errors"
 	"github.com/dgraph-io/badger/v4"
+	"github.com/dgraph-io/ristretto/z"
 )
 
 // Option represents a specific option accepted by Open.
@@ -38,7 +40,6 @@ type Options struct {
 type Database struct {
 	database.Options[Options]
 	location string
-	prefix   string
 	bdb      *badger.DB
 	batch    *writeBatch
 }
@@ -48,6 +49,22 @@ var (
 	errorPrefix = "__errors_"
 	statsPrefix = "__stats__"
 )
+
+func isBucket(key []byte) bool {
+	if key[0] != '_' || key[1] != '_' {
+		return false
+	}
+	if bytes.HasPrefix(key, []byte(logPrefix)) {
+		return true
+	}
+	if bytes.HasPrefix(key, []byte(errorPrefix)) {
+		return true
+	}
+	if bytes.HasPrefix(key, []byte(statsPrefix)) {
+		return true
+	}
+	return false
+}
 
 func keyForBucket(prefix, key string) []byte {
 	return []byte(prefix + key)
@@ -175,7 +192,9 @@ func (db *Database) deletePrefix(ctx context.Context, prefix []byte) error {
 	defer tx.Discard()
 	it := tx.NewIterator(badger.DefaultIteratorOptions)
 	for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-		tx.Delete(it.Item().Key())
+		if err := tx.Delete(it.Item().KeyCopy(nil)); err != nil {
+			return err
+		}
 	}
 	it.Close()
 	return tx.Commit()
@@ -208,6 +227,11 @@ func (db *Database) scanFrom(ctx context.Context, prefix []byte, visitor func(ct
 				}
 				return err
 			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 		}
 		return nil
 	})
@@ -234,6 +258,11 @@ func (db *Database) scanTimeRange(ctx context.Context, bucket string, start, sto
 				}
 				return err
 			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 		}
 		return nil
 	})
@@ -241,11 +270,42 @@ func (db *Database) scanTimeRange(ctx context.Context, bucket string, start, sto
 
 func (db *Database) Scan(ctx context.Context, path string, visitor func(ctx context.Context, key string, val []byte) bool) error {
 	return db.scanFrom(ctx, []byte(path), func(ctx context.Context, key string, val []byte) error {
+		if isBucket([]byte(key)) {
+			return nil
+		}
 		if !visitor(ctx, key, val) {
 			return errScanDone
 		}
 		return nil
 	})
+}
+
+func (db *Database) Stream(ctx context.Context, path string, visitor func(ctx context.Context, key string, val []byte)) error {
+	stream := db.bdb.NewStream()
+	stream.Prefix = []byte(path)
+	stream.ChooseKey = func(item *badger.Item) bool {
+		return !isBucket(item.Key())
+	}
+	stream.KeyToList = nil
+	stream.Send = func(buf *z.Buffer) error {
+		list, err := badger.BufferToKVList(buf)
+		if err != nil {
+			return err
+		}
+		for _, kv := range list.Kv {
+			if kv.StreamDone {
+				return nil
+			}
+			visitor(ctx, string(kv.Key), kv.Value)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		return nil
+	}
+	return stream.Orchestrate(ctx)
 }
 
 func (db *Database) LogError(ctx context.Context, key string, when time.Time, detail []byte) error {
@@ -265,7 +325,10 @@ func (db *Database) LogError(ctx context.Context, key string, when time.Time, de
 func (db *Database) VisitErrors(ctx context.Context, key string,
 	visitor func(ctx context.Context, key string, when time.Time, detail []byte) bool) error {
 	dbkey := keyForBucket(errorPrefix, key)
-	return db.scanFrom(ctx, []byte(dbkey), func(ctx context.Context, key string, val []byte) error {
+	return db.scanFrom(ctx, dbkey, func(ctx context.Context, key string, val []byte) error {
+		if !strings.HasPrefix(key, errorPrefix) {
+			return errScanDone
+		}
 		var pl types.ErrorPayload
 		if err := types.Decode(val, &pl); err != nil {
 			return err
@@ -286,7 +349,7 @@ func (db *Database) lastKey(prefix string) (string, error) {
 		it := txn.NewIterator(opts)
 		defer it.Close()
 		var l []byte
-		for it.Rewind(); it.ValidForPrefix(p); it.Next() {
+		for it.Seek(p); it.ValidForPrefix(p); it.Next() {
 			l = it.Item().Key()
 		}
 		lastKey = make([]byte, len(l))
@@ -334,6 +397,9 @@ func (db *Database) LastLog(ctx context.Context) (start, stop time.Time, detail 
 
 func (db *Database) VisitLogs(ctx context.Context, start, stop time.Time, visitor func(ctx context.Context, begin, end time.Time, detail []byte) bool) error {
 	return db.scanTimeRange(ctx, logPrefix, start, stop, func(ctx context.Context, key string, val []byte) error {
+		if !strings.HasPrefix(key, logPrefix) {
+			return errScanDone
+		}
 		var pl types.LogPayload
 		if err := types.Decode(val, &pl); err != nil {
 			return err
@@ -376,6 +442,9 @@ func (db *Database) LastStats(ctx context.Context) (time.Time, []byte, error) {
 
 func (db *Database) VisitStats(ctx context.Context, start, stop time.Time, visitor func(ctx context.Context, when time.Time, detail []byte) bool) error {
 	return db.scanTimeRange(ctx, statsPrefix, start, stop, func(ctx context.Context, key string, val []byte) error {
+		if !strings.HasPrefix(key, statsPrefix) {
+			return errScanDone
+		}
 		var pl types.StatsPayload
 		if err := types.Decode(val, &pl); err != nil {
 			return err

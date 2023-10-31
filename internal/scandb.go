@@ -8,7 +8,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -17,9 +17,30 @@ import (
 	"cloudeng.io/cmd/idu/internal/database/badgerdb"
 	"cloudeng.io/cmd/idu/internal/database/boltdb"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
-	"cloudeng.io/errors"
 	"github.com/dgraph-io/badger/v4"
 )
+
+type badgerLogger struct{}
+
+func (l *badgerLogger) Errorf(f string, a ...interface{}) {
+	m := fmt.Sprintf(f, a...)
+	Log(context.Background(), LogError, "badger", "msg", m)
+}
+
+func (l *badgerLogger) Warningf(f string, a ...interface{}) {
+	m := fmt.Sprintf(f, a...)
+	Log(context.Background(), slog.LevelWarn, "badger", "msg", m)
+}
+
+func (l *badgerLogger) Infof(f string, a ...interface{}) {
+	m := fmt.Sprintf(f, a...)
+	Log(context.Background(), slog.LevelInfo, "badger", "msg", m)
+}
+
+func (l *badgerLogger) Debugf(f string, a ...interface{}) {
+	m := fmt.Sprintf(f, a...)
+	Log(context.Background(), slog.LevelWarn, "badger", "msg", m)
+}
 
 func boltdbOptions(readonly bool, opts ...boltdb.Option) []boltdb.Option {
 	if readonly {
@@ -43,6 +64,7 @@ func badgerdbOptions(readonly bool, opts ...badgerdb.Option) []badgerdb.Option {
 func openBadgerDB(ctx context.Context, cfg config.Prefix, readonly bool) (database.DB, error) {
 	opts := badgerdbOptions(readonly)
 	bopts := badger.DefaultOptions(cfg.Database)
+	bopts = bopts.WithLogger(&badgerLogger{})
 	opts = append(opts, badgerdb.WithBadgerOptions(bopts))
 	return badgerdb.Open(cfg.Database, opts...)
 }
@@ -109,121 +131,45 @@ type ScanDB interface {
 	Close(ctx context.Context) error
 }
 
-type WriteOnlyDB struct {
+type scanDB struct {
 	from, to string
-	rddb     database.DB
-	wrdb     database.DB
-	inplace  bool
+	db       database.DB
 }
 
-func NewScanDB(ctx context.Context, cfg config.Prefix, inplace bool) (ScanDB, error) {
-	if inplace {
-		db, err := OpenDatabase(ctx, cfg, false)
-		if err != nil {
-			return nil, err
-		}
-		return &WriteOnlyDB{
-			inplace: true,
-			wrdb:    db,
-		}, nil
-	}
+func NewScanDB(ctx context.Context, cfg config.Prefix) (ScanDB, error) {
 
-	var rddb database.DB
-	_, err := os.Stat(cfg.Database)
-	if err != nil {
-		// Create an empty read-only database when none exists.
-		if !os.IsNotExist(err) {
-			return nil, err
-		}
-		db, err := OpenDatabase(ctx, cfg, false)
-		if err != nil {
-			return nil, err
-		}
-		if err := db.Close(ctx); err != nil {
-			return nil, err
-		}
-	}
-
-	rddb, err = OpenDatabase(ctx, cfg, true)
+	db, err := OpenDatabase(ctx, cfg, false)
 	if err != nil {
 		return nil, err
 	}
-
-	wrCfg := cfg
-	wrCfg.Database = cfg.Database + ".new"
-	from, to := cfg.Database, wrCfg.Database
-	wrdb, err := OpenDatabase(ctx, wrCfg, false)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := copyMetadata(ctx, cfg.Prefix, rddb, wrdb); err != nil {
-		return nil, fmt.Errorf("failed copying metadata to new database: %v", err)
-	}
-	return &WriteOnlyDB{
-		inplace: false,
-		from:    from,
-		to:      to,
-		rddb:    rddb,
-		wrdb:    wrdb,
+	return &scanDB{
+		db: db,
 	}, nil
 }
 
-func copyMetadata(ctx context.Context, prefix string, from, to database.DB) error {
-	errs := &errors.M{}
-	from.VisitErrors(ctx, prefix,
-		func(_ context.Context, key string, when time.Time, detail []byte) bool {
-			err := to.LogError(ctx, key, when, detail)
-			errs.Append(err)
-			return true
-		})
-
-	from.VisitLogs(ctx, time.Time{}, time.Now(), func(ctx context.Context, begin, end time.Time, detail []byte) bool {
-		err := to.Log(ctx, begin, end, detail)
-		errs.Append(err)
-		return true
-	})
-
-	from.VisitStats(ctx, time.Time{}, time.Now(),
-		func(ctx context.Context, when time.Time, detail []byte) bool {
-			err := to.SaveStats(ctx, when, detail)
-			errs.Append(err)
-			return true
-		})
-
-	return errs.Err()
+func (sdb *scanDB) LogError(ctx context.Context, key string, when time.Time, detail []byte) error {
+	return sdb.db.LogError(ctx, key, when, detail)
 }
 
-func (wro *WriteOnlyDB) LogError(ctx context.Context, key string, when time.Time, detail []byte) error {
-	return wro.wrdb.LogError(ctx, key, when, detail)
-}
-
-func (wro *WriteOnlyDB) LogAndClose(ctx context.Context, start, stop time.Time, detail []byte) error {
-	if err := wro.wrdb.Log(ctx, start, stop, detail); err != nil {
+func (sdb *scanDB) LogAndClose(ctx context.Context, start, stop time.Time, detail []byte) error {
+	if err := sdb.db.Log(ctx, start, stop, detail); err != nil {
 		return err
 	}
-	if err := wro.wrdb.Close(ctx); err != nil {
+	if err := sdb.db.Close(ctx); err != nil {
 		return err
 	}
-	if wro.inplace {
-		return nil
-	}
-	if err := wro.rddb.Close(ctx); err != nil {
-		return err
-	}
-	os.Rename(wro.from, wro.from+".bak")
-	return os.Rename(wro.to, wro.from)
+	return nil
 }
 
-func (wro *WriteOnlyDB) DeletePrefix(ctx context.Context, prefix string) error {
-	return wro.wrdb.DeletePrefix(ctx, prefix)
+func (sdb *scanDB) DeletePrefix(ctx context.Context, prefix string) error {
+	return sdb.db.DeletePrefix(ctx, prefix)
 }
 
-func (wro *WriteOnlyDB) DeleteErrors(ctx context.Context, prefix string) error {
-	return wro.wrdb.DeleteErrors(ctx, prefix)
+func (sdb *scanDB) DeleteErrors(ctx context.Context, prefix string) error {
+	return sdb.db.DeleteErrors(ctx, prefix)
 }
 
-func (wro *WriteOnlyDB) GetPrefixInfo(ctx context.Context, key string, pi *prefixinfo.T) (bool, error) {
+func (sdb *scanDB) GetPrefixInfo(ctx context.Context, key string, pi *prefixinfo.T) (bool, error) {
 	select {
 	case <-ctx.Done():
 		return false, ctx.Err()
@@ -232,12 +178,7 @@ func (wro *WriteOnlyDB) GetPrefixInfo(ctx context.Context, key string, pi *prefi
 	buf := bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer bufPool.Put(buf)
-
-	db := wro.rddb
-	if wro.inplace {
-		db = wro.wrdb
-	}
-	if err := db.GetBuf(ctx, key, buf); err != nil {
+	if err := sdb.db.GetBuf(ctx, key, buf); err != nil {
 		return false, err
 	}
 	if len(buf.Bytes()) == 0 {
@@ -247,8 +188,8 @@ func (wro *WriteOnlyDB) GetPrefixInfo(ctx context.Context, key string, pi *prefi
 	return true, pi.UnmarshalBinary(buf.Bytes())
 }
 
-func (wro *WriteOnlyDB) SetPrefixInfo(ctx context.Context, key string, unchanged bool, pi *prefixinfo.T) error {
-	if wro.inplace && unchanged {
+func (sdb *scanDB) SetPrefixInfo(ctx context.Context, key string, unchanged bool, pi *prefixinfo.T) error {
+	if unchanged {
 		return nil
 	}
 
@@ -263,11 +204,11 @@ func (wro *WriteOnlyDB) SetPrefixInfo(ctx context.Context, key string, unchanged
 	if err := pi.AppendBinary(buf); err != nil {
 		return err
 	}
-	return wro.wrdb.SetBatch(ctx, key, buf.Bytes())
+	return sdb.db.SetBatch(ctx, key, buf.Bytes())
 }
 
-func (wro *WriteOnlyDB) Close(ctx context.Context) error {
-	return wro.wrdb.Close(ctx)
+func (sdb *scanDB) Close(ctx context.Context) error {
+	return sdb.db.Close(ctx)
 }
 
 var bufPool = sync.Pool{

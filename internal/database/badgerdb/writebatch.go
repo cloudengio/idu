@@ -33,7 +33,3 @@ func (wb *writeBatch) set(key, value []byte) error {
 func (wb *writeBatch) flush() error {
 	return wb.batch.Flush()
 }
-
-func (wb *writeBatch) cancel() {
-	wb.batch.Cancel()
-}

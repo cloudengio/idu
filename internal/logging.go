@@ -87,7 +87,6 @@ func logName(t time.Time) (name, link string) {
 
 func createNamedLogfile(dir string, t time.Time) (f *os.File, fname string, err error) {
 	name, link := logName(t)
-	var lastErr error
 	fname = filepath.Join(dir, name)
 	f, err = os.Create(fname)
 	if err == nil {
@@ -96,7 +95,7 @@ func createNamedLogfile(dir string, t time.Time) (f *os.File, fname string, err 
 		os.Symlink(name, symlink) // ignore err
 		return f, fname, nil
 	}
-	return nil, fname, fmt.Errorf("log: cannot create log: %v", lastErr)
+	return nil, fname, fmt.Errorf("log: cannot create log: %v", err)
 }
 
 func newLogger(f *os.File) *slog.Logger {

@@ -327,6 +327,24 @@ func (db *Database) Scan(ctx context.Context, path string, visitor func(ctx cont
 		return nil
 	})
 }
+func (db *Database) Stream(ctx context.Context, prefix string, visitor func(ctx context.Context, key string, val []byte)) error {
+	p := []byte(prefix)
+	return db.bdb.View(func(tx *bolt.Tx) error {
+		cursor, k, v, err := db.initScan(tx, bucketPaths, prefix)
+		if err != nil {
+			return err
+		}
+		for ; k != nil && bytes.HasPrefix(k, p); k, v = cursor.Next() {
+			visitor(ctx, string(k), v)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+		}
+		return nil
+	})
+}
 
 func (db *Database) getLast(_ context.Context, bucket string) (key, val []byte, err error) {
 	err = db.bdb.View(func(tx *bolt.Tx) error {

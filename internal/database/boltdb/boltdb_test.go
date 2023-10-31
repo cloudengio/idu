@@ -34,10 +34,7 @@ func listBuckets(db database.DB) ([]string, error) {
 }
 
 func bucketsForPrefix() []string {
-	b := []string{}
-	for _, nb := range boltdb.NestedBuckets() {
-		b = append(b, nb)
-	}
+	b := append([]string{}, boltdb.NestedBuckets()...)
 	sort.Strings(b)
 	return b
 }

@@ -20,9 +20,9 @@ import (
 type reportsFlags struct {
 	internal.TimeRangeFlags
 	ReportDir string `subcmd:"report-dir,reports,directory to write reports to"`
-	TSV       int    `subcmd:"tsv,0,'generate tsv reports with the requested number of entries, 0 for none'"`
-	Markdown  int    `subcmd:"markdown,0,'generate markdown reports with the requested number of entries, 0 for none'"`
-	JSON      int    `subcmd:"json,0,'generate json reports with the requested number of entries, 0 for none'"`
+	TSV       int    `subcmd:"tsv,100,'generate tsv reports with the requested number of entries, 0 for none'"`
+	Markdown  int    `subcmd:"markdown,20,'generate markdown reports with the requested number of entries, 0 for none'"`
+	JSON      int    `subcmd:"json,100,'generate json reports with the requested number of entries, 0 for none'"`
 }
 
 func (st *statsCmds) reports(ctx context.Context, values interface{}, args []string) error {

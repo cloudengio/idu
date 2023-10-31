@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -31,6 +32,7 @@ type lsFlags struct {
 type logFlags struct {
 	internal.TimeRangeFlags
 	Erase bool `subcmd:"erase,false,erase the logs rather than displaying them"`
+	JSON  bool `subcmd:"json,true,display logs in json format"`
 }
 
 type errorFlags struct {
@@ -53,27 +55,35 @@ func (l *lister) prefixes(ctx context.Context, values interface{}, args []string
 	if err != nil {
 		return err
 	}
-
-	return db.Scan(ctx, args[0], func(_ context.Context, k string, v []byte) bool {
-		if !strings.HasPrefix(k, args[0]) {
-			return false
-		}
-		var pi prefixinfo.T
-		if err := pi.UnmarshalBinary(v); err != nil {
-			fmt.Fprintf(os.Stderr, "failed to unmarshal value for %v: %v\n", k, err)
-			return false
-		}
-		fmt.Println(fs.FormatFileInfo(internal.PrefixInfoAsFSInfo(pi, k)))
-		for _, fi := range pi.InfoList() {
-			if flagValues.ShowFiles && !fi.IsDir() {
-				fmt.Println("    ", fs.FormatFileInfo(fi))
+	if len(args) == 1 {
+		args = append(args, args[0])
+	}
+	for _, prefix := range args[1:] {
+		err := db.Scan(ctx, prefix, func(_ context.Context, k string, v []byte) bool {
+			if !strings.HasPrefix(k, prefix) {
+				return false
 			}
-			if flagValues.ShowDirs && fi.IsDir() {
-				fmt.Println("    ", fs.FormatFileInfo(fi))
+			var pi prefixinfo.T
+			if err := pi.UnmarshalBinary(v); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to unmarshal value for %v: %v\n", k, err)
+				return false
 			}
+			fmt.Println(fs.FormatFileInfo(internal.PrefixInfoAsFSInfo(pi, k)))
+			for _, fi := range pi.InfoList() {
+				if flagValues.ShowFiles && !fi.IsDir() {
+					fmt.Println("    ", fs.FormatFileInfo(fi))
+				}
+				if flagValues.ShowDirs && fi.IsDir() {
+					fmt.Println("    ", fs.FormatFileInfo(fi))
+				}
+			}
+			return true
+		})
+		if err != nil {
+			return err
 		}
-		return true
-	})
+	}
+	return nil
 }
 
 func (l *lister) errors(ctx context.Context, values interface{}, args []string) error {
@@ -110,10 +120,21 @@ func (l *lister) logs(ctx context.Context, values interface{}, args []string) er
 	if err != nil {
 		return err
 	}
-	fmt.Printf("FROM: %v TO: %v\n", from, to)
+
 	return db.VisitLogs(ctx, from, to,
 		func(_ context.Context, begin, end time.Time, detail []byte) bool {
-			fmt.Printf("%v...%v: %v: %s\n", begin, end, end.Sub(begin), detail)
+			if !lf.JSON {
+				fmt.Printf("%v...%v: %v: %s\n", begin, end, end.Sub(begin), detail)
+				return true
+			}
+			var summary anaylzeSummary
+			if err := json.Unmarshal(detail, &summary); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to unmarshal log %v entry: %v\n", begin, err)
+				return true
+			}
+			out, _ := json.Marshal(summary)
+			fmt.Println(string(out))
 			return true
+
 		})
 }

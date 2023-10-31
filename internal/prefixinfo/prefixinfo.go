@@ -13,7 +13,6 @@ import (
 
 	"cloudeng.io/file"
 	"cloudeng.io/file/diskusage"
-	"cloudeng.io/file/filewalk"
 )
 
 // T represents the information for a prefix, ie. a directory.
@@ -27,8 +26,7 @@ type T struct {
 	size       int64
 	mode       fs.FileMode
 	modTime    time.Time
-	children   filewalk.EntryList // no longer used
-	entries    file.InfoList      // files and prefixes only
+	entries    file.InfoList // files and prefixes only
 	userIDMap  idMaps
 	groupIDMap idMaps
 	finalized  bool

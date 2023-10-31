@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"time"
 
 	"cloudeng.io/algo/container/heap"
@@ -109,7 +108,7 @@ func (st *statsCmds) compute(ctx context.Context, values interface{}, args []str
 	_, when, _, err := rdb.LastLog(ctx)
 	if err != nil {
 		rdb.Close(ctx)
-		return err
+		return fmt.Errorf("error readling latest log entry: %v", err)
 	}
 
 	sdb, err := st.computeStats(ctx, rdb, cfg.Prefix, cfg.Calculator(), cf.ComputeN)
@@ -137,23 +136,24 @@ func (st *statsCmds) computeStats(ctx context.Context, db database.DB, prefix st
 
 	hasStorabeBytes := calc.String() != "identity"
 	sdb := reports.NewAllStats(prefix, hasStorabeBytes, topN)
-
-	err := db.Scan(ctx, prefix, func(_ context.Context, k string, v []byte) bool {
-		if !strings.HasPrefix(k, prefix) {
-			return false
-		}
+	n := 0
+	err := db.Stream(ctx, prefix, func(_ context.Context, k string, v []byte) {
 		var pi prefixinfo.T
 		if err := pi.UnmarshalBinary(v); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to unmarshal value for %v: %v\n", k, err)
-			return false
+			return
 		}
 		if err := sdb.Update(k, pi, calc); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to compute stats for %v: %v\n", k, err)
-			return false
+			return
 		}
-		return true
+		if n != 0 && n%1000 == 0 {
+			fmt.Printf("processed % 10v entries\n", fmtCount(int64(n)))
+		}
+		n++
+		return
 	})
-
+	fmt.Printf("processed % 10v entries\n", fmtCount(int64(n)))
 	sdb.Finalize()
 	return sdb, err
 }

@@ -101,6 +101,7 @@ commands:
     summary: list the contents of the database
     arguments:
        - <prefix>
+       - '[prefixes]...'
 
   - name: config
     summary: describe the current configuration
@@ -119,11 +120,11 @@ type GlobalFlags struct {
 	ConfigFile  string                `subcmd:"config,$HOME/.idu.yml,configuration file"`
 	Units       string                `subcmd:"units,decimal,display usage in decimal (KB) or binary (KiB) formats"`
 	Verbose     int                   `subcmd:"v,0,lower values show more debugging output"`
-	LogDir      string                `subcmd:"log-dir,.,directory to write log files to"`
+	LogDir      string                `subcmd:"log-dir,./logs,directory to write log files to"`
 	Stderr      bool                  `subcmd:"stderr,false,write log messages to stderr"`
 	HTTP        string                `subcmd:"http,,set to a port to enable http serving of /debug/vars and profiling"`
 	GCPercent   int                   `subcmd:"gcpercent,50,value to use for runtime/debug.SetGCPercent"`
-	UseBadgerDB bool                  `subcmd:"use-badger-db,false,use badgerdb instead of boltdb"`
+	UseBadgerDB bool                  `subcmd:"use-badger-db,true,use badgerdb instead of boltdb"`
 	UseBoltDB   bool                  `subcmd:"use-bolt-db,false,use boltdb instead of badgerdb"`
 }
 

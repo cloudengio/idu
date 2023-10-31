@@ -60,8 +60,13 @@ type DB interface {
 	// SetBatch. It should only be used when called from multiple goroutines.
 	SetBatch(ctx context.Context, key string, buf []byte) error
 
-	// Scan can be used to iterate over all keys in the database.
+	// Scan can be used to iterate over all keys in the database starting at
+	// the specified key.
 	Scan(ctx context.Context, key string, visitor func(ctx context.Context, key string, val []byte) bool) error
+
+	// Stream can be used to iterate over all keys in the database concurrently
+	// that have the specified prefix.
+	Stream(ctx context.Context, prefix string, visitor func(ctx context.Context, key string, val []byte)) error
 
 	// Log should be used to record the start and stop time for
 	// a given operation and associated details/description.

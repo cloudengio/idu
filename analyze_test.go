@@ -56,7 +56,6 @@ func setupAnalyze(t *testing.T) (tmpDir, config, prefix string, tt *testtree) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	return tmpDir, filepath.Join(tmpDir, "config.yaml"), testTree, tt
 }
 
@@ -167,6 +166,8 @@ func verifyDB(t *testing.T, ctx context.Context, cfg config.T, fs filewalk.FS, a
 	expectedErrors := getExpectedErrors(scannable)
 	if got, want := len(storedErrors), len(expectedErrors); got != want {
 		t.Errorf("line %v, got %v, want %v", l, got, want)
+		fmt.Printf("stored: \n%v\n", strings.Join(storedErrors, "\n"))
+		fmt.Printf("\n\nexpected:\n%v\n", strings.Join(expectedErrors, "\n"))
 	}
 	for _, e := range storedErrors {
 		if !strings.Contains(e, "permission denied") {
@@ -220,12 +221,11 @@ func compareSummary(t *testing.T, got anaylzeSummary,
 
 func TestAnalyze(t *testing.T) {
 	ctx := context.Background()
-	testAnalyze(ctx, t, true)
-	testAnalyze(ctx, t, false)
+	testAnalyze(ctx, t)
 
 }
 
-func testAnalyze(ctx context.Context, t *testing.T, inplace bool) {
+func testAnalyze(ctx context.Context, t *testing.T) {
 	tmpDir, cfgFile, arg0, tt := setupAnalyze(t)
 
 	scannable := slices.Clone(tt.base())
@@ -253,7 +253,6 @@ func testAnalyze(ctx context.Context, t *testing.T, inplace bool) {
 	af := analyzeFlags{
 		UseDB:    true,
 		Progress: false,
-		InPlace:  inplace,
 	}
 	if err := alz.analyzeFS(ctx, fs, &af, []string{arg0}); err != nil {
 		t.Fatal(err)
@@ -338,8 +337,4 @@ func testAnalyze(ctx context.Context, t *testing.T, inplace bool) {
 		nDirs-nAddedDirs-1, // one of the subdirectories has changed.
 		nAddedDirs,
 		nDirs)
-}
-
-func TestDatabaseLargeDirectory(t *testing.T) {
-	t.Fail()
 }

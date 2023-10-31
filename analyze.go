@@ -23,11 +23,8 @@ import (
 )
 
 type analyzeFlags struct {
-	UseDB      bool          `subcmd:"use-db,true,database backed scan that avoids stating files in unchanged directories"`
-	InPlace    bool          `subcmd:"in-place,true,update the database in place"`
-	Progress   bool          `subcmd:"progress,true,show progress"`
-	MaxThreads int           `subcmd:"set-max-threads,0,'if non-zero, use as the argument for debug.SetMaxThreads'"`
-	Newer      time.Duration `subcmd:"newer,24h,only scans directories and files that have changed since the specified duration"`
+	UseDB    bool `subcmd:"use-db,true,database backed scan that avoids stating files in unchanged directories"`
+	Progress bool `subcmd:"progress,true,show progress"`
 }
 
 type analyzeCmd struct{}
@@ -42,18 +39,18 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fs filewalk.FS, af *analyz
 	if err := useMaxProcs(ctx); err != nil {
 		internal.Log(ctx, internal.LogError, "failed to set max procs", "error", err)
 	}
-	if af.MaxThreads > 0 {
-		debug.SetMaxThreads(af.MaxThreads)
-		internal.Log(ctx, internal.LogProgress, "set max threads", "max-threads", af.MaxThreads)
-	}
 	start := time.Now()
 	ctx, cfg, err := internal.LookupPrefix(ctx, globalConfig, args[0])
 	if err != nil {
 		return err
 	}
+	if cfg.SetMaxThreads > 0 {
+		debug.SetMaxThreads(cfg.SetMaxThreads)
+		internal.Log(ctx, internal.LogProgress, "set max threads", "max-threads", cfg.SetMaxThreads)
+	}
 	var sdb internal.ScanDB
 	if af.UseDB {
-		sdb, err = internal.NewScanDB(ctx, cfg, af.InPlace)
+		sdb, err = internal.NewScanDB(ctx, cfg)
 		if err != nil {
 			return err
 		}
@@ -76,7 +73,6 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fs filewalk.FS, af *analyz
 		fs:    fs,
 		pt:    pt,
 		usedb: af.UseDB,
-		since: time.Now().Add(-af.Newer),
 	}
 	w.lsi = newLStatIssuer(w, cfg, fs)
 	walkerStatus := make(chan filewalk.Status, 10)
@@ -133,7 +129,6 @@ type walker struct {
 	fs    filewalk.FS
 	pt    *progressTracker
 	lsi   *lstatIssuer
-	since time.Time
 	usedb bool
 }
 
@@ -298,7 +293,6 @@ func (w *walker) Done(ctx context.Context, state *prefixState, prefix string, er
 	if err != nil {
 		return err
 	}
-
 	if err := w.db.SetPrefixInfo(ctx, prefix, unchanged, &state.current); err != nil {
 		internal.Log(ctx, internal.LogPrefix, "prefix done", "prefix", w.cfg.Prefix, "path", prefix, "error", err)
 		return err
@@ -315,10 +309,7 @@ func (w *walker) handleDeletedOrChangedPrefixes(ctx context.Context, prefix stri
 			cm[cur.Name()] = cur
 		}
 	}
-	childrenUnchanged := false
-	if parentUnchanged {
-		childrenUnchanged = true
-	}
+	childrenUnchanged := parentUnchanged
 	for _, prev := range previous.InfoList() {
 		if prev.IsDir() {
 			pi, ok := cm[prev.Name()]
