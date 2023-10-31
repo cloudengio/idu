@@ -8,12 +8,14 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"cloudeng.io/cmd/idu/internal/database"
 	"cloudeng.io/cmd/idu/internal/database/types"
 	"cloudeng.io/errors"
+	"cloudeng.io/os/lockedfile"
 	"github.com/dgraph-io/badger/v4"
 	"github.com/dgraph-io/ristretto/z"
 )
@@ -42,6 +44,7 @@ type Database struct {
 	location string
 	bdb      *badger.DB
 	batch    *writeBatch
+	unlock   func()
 }
 
 var (
@@ -85,6 +88,12 @@ func Open[T Options](location string, opts ...Option) (database.DB, error) {
 	}
 	db.Options.Sub.Options = db.Options.Sub.Options.WithReadOnly(db.Options.ReadOnly)
 
+	lock := lockedfile.MutexAt(filepath.Join(location, "lock"))
+	unlock, err := lock.Lock()
+	if err != nil {
+		return nil, err
+	}
+	db.unlock = unlock
 	bdb, err := badger.Open(db.Options.Sub.Options)
 	if err != nil {
 		return nil, err
@@ -458,6 +467,9 @@ func (db *Database) VisitStats(ctx context.Context, start, stop time.Time, visit
 
 // Close closes the database.
 func (db *Database) Close(ctx context.Context) error {
+	if db.unlock != nil {
+		db.unlock()
+	}
 	if err := db.canceled(ctx); err != nil {
 		return err
 	}

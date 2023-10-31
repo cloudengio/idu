@@ -346,5 +346,5 @@ func (md *markdownReports) generateReports(ctx context.Context, rf *reportsFlags
 			return err
 		}
 	}
-	return os.WriteFile(filenames.summary("usage-summary.md"), out.Bytes(), 0660)
+	return os.WriteFile(filenames.summary("usage-summary"), out.Bytes(), 0660)
 }

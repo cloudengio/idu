@@ -55,7 +55,7 @@ func newLStatIssuer(w *walker, cfg config.Prefix, fs filewalk.FS) *lstatIssuer {
 	return lsi
 }
 
-func (lsi *lstatIssuer) lstat(ctx context.Context, state *prefixState, prefix, filename string) (file.Info, error) {
+func (lsi *lstatIssuer) lstat(ctx context.Context, prefix, filename string) (file.Info, error) {
 	start := time.Now()
 	lsi.pt.statStarted()
 	info, err := lsi.fs.LStat(ctx, filename)
@@ -74,11 +74,12 @@ func (lsi *lstatIssuer) lstatContents(ctx context.Context, state *prefixState, p
 	return lsi.asyncIssue(ctx, state, prefix, contents)
 }
 
-func (lsi *lstatIssuer) syncIssue(ctx context.Context, state *prefixState, prefix string, contents []filewalk.Entry) (file.InfoList, error) {
+func (lsi *lstatIssuer) syncIssue(ctx context.Context, state *prefixState, prefix string, contents []filewalk.Entry) (file.InfoList, int, int, error) {
 	var children file.InfoList
+	nFiles := 0
 	for _, entry := range contents {
 		filename := lsi.fs.Join(prefix, entry.Name)
-		info, err := lsi.lstat(ctx, state, prefix, filename)
+		info, err := lsi.lstat(ctx, prefix, filename)
 		if err != nil {
 			continue
 		}
@@ -123,7 +124,7 @@ func (lsi *lstatIssuer) asyncIssue(ctx context.Context, state *prefixState, pref
 			return file.InfoList{}, err
 		}
 		g.Go(func() error {
-			info, err := lsi.lstat(ctx, state, prefix, filename)
+			info, err := lsi.lstat(ctx, prefix, filename)
 			item.V = lstatResult{info, err}
 			ch <- item
 			lsi.releaseLimiter()

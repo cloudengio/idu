@@ -190,7 +190,7 @@ func (st *statsCmds) aggregate(ctx context.Context, values interface{}, args []s
 	}
 	heapFormatter[string]{}.formatTotals(sdb.Prefix, os.Stdout)
 
-	banner(os.Stdout, "=", "Usage by top %v Prefixes as of: %v \n", af.DisplayN, when)
+	banner(os.Stdout, "=", "Usage by top %v Prefixes as of: %v\n", af.DisplayN, when)
 	heapFormatter[string]{}.formatHeaps(sdb.Prefix, os.Stdout, func(v string) string { return v }, af.DisplayN)
 
 	banner(os.Stdout, "=", "\nUsage by top %v users as of: %v\n", af.DisplayN, when)
