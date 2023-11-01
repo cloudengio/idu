@@ -6,12 +6,8 @@ package main
 
 import (
 	"context"
-	"sync"
-	"sync/atomic"
 	"time"
 
-	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/file"
 	"cloudeng.io/file/filewalk"
 	"cloudeng.io/sync/errgroup"
@@ -19,16 +15,12 @@ import (
 )
 
 type lstatIssuer struct {
-	cfg config.Prefix
-	fs  filewalk.FS
-	w   *walker
-	pt  *progressTracker
-
-	statsMu sync.Mutex
-	min     time.Duration
-	max     time.Duration
-
-	limitCh chan struct{}
+	fs             filewalk.FS
+	pt             *progressTracker
+	errLogger      lstatErrorLogger
+	concurrency    int
+	asyncThreshold int
+	limitCh        chan struct{}
 }
 
 type lstatResult struct {
@@ -36,62 +28,62 @@ type lstatResult struct {
 	err  error
 }
 
-func initLimiter(cfg config.Prefix) chan struct{} {
-	ch := make(chan struct{}, cfg.ConcurrentStats)
+func initLimiter(concurrency int) chan struct{} {
+	ch := make(chan struct{}, concurrency)
 	for i := 0; i < cap(ch); i++ {
 		ch <- struct{}{}
 	}
 	return ch
 }
 
-func newLStatIssuer(w *walker, cfg config.Prefix, fs filewalk.FS) *lstatIssuer {
+type lstatErrorLogger func(ctx context.Context, filename string, err error)
+
+func newLStatIssuer(pt *progressTracker, errLogger lstatErrorLogger, concurrency, asyncThreshold int, fs filewalk.FS) *lstatIssuer {
 	lsi := &lstatIssuer{
-		cfg:     cfg,
-		fs:      fs,
-		w:       w,
-		pt:      w.pt,
-		limitCh: initLimiter(cfg),
+		errLogger:      errLogger,
+		fs:             fs,
+		pt:             pt,
+		concurrency:    concurrency,
+		asyncThreshold: asyncThreshold,
+		limitCh:        initLimiter(concurrency),
 	}
 	return lsi
 }
 
-func (lsi *lstatIssuer) lstat(ctx context.Context, prefix, filename string) (file.Info, error) {
+func (lsi *lstatIssuer) lstat(ctx context.Context, filename string) (file.Info, error) {
 	start := time.Now()
 	lsi.pt.statStarted()
 	info, err := lsi.fs.LStat(ctx, filename)
 	lsi.pt.statFinished(start)
 	if err != nil {
-		internal.Log(ctx, internal.LogError, "stat error", "prefix", lsi.cfg.Prefix, "file", filename, "error", err)
-		lsi.w.dbLog(ctx, filename, []byte(err.Error()))
+		lsi.errLogger(ctx, filename, err)
 	}
 	return info, err
 }
 
-func (lsi *lstatIssuer) lstatContents(ctx context.Context, state *prefixState, prefix string, contents []filewalk.Entry) (file.InfoList, error) {
-	if len(contents) < lsi.cfg.ConcurrentStatsThreshold {
-		return lsi.syncIssue(ctx, state, prefix, contents)
+func (lsi *lstatIssuer) lstatContents(ctx context.Context, prefix string, contents []filewalk.Entry) (children, all file.InfoList, nFiles, nErrors int64, errs error) {
+	if len(contents) < lsi.asyncThreshold {
+		return lsi.syncIssue(ctx, prefix, contents)
 	}
-	return lsi.asyncIssue(ctx, state, prefix, contents)
+	return lsi.asyncIssue(ctx, prefix, contents)
 }
 
-func (lsi *lstatIssuer) syncIssue(ctx context.Context, state *prefixState, prefix string, contents []filewalk.Entry) (file.InfoList, int, int, error) {
-	var children file.InfoList
-	nFiles := 0
+func (lsi *lstatIssuer) syncIssue(ctx context.Context, prefix string, contents []filewalk.Entry) (children, all file.InfoList, nFiles, nErrors int64, err error) {
 	for _, entry := range contents {
 		filename := lsi.fs.Join(prefix, entry.Name)
-		info, err := lsi.lstat(ctx, prefix, filename)
+		info, err := lsi.lstat(ctx, filename)
 		if err != nil {
+			nErrors++
 			continue
 		}
 		if entry.IsDir() {
-			atomic.AddInt64(&state.nchildren, 1)
 			children = append(children, info)
 		} else {
-			atomic.AddInt64(&state.nfiles, 1)
+			nFiles++
 		}
-		state.current.AppendInfo(info)
+		all = all.AppendInfo(info)
 	}
-	return children, nil
+	return children, all, nFiles, nErrors, nil
 }
 
 func (lsi *lstatIssuer) waitOnLimiter(ctx context.Context) error {
@@ -107,8 +99,8 @@ func (lsi *lstatIssuer) releaseLimiter() {
 	lsi.limitCh <- struct{}{}
 }
 
-func (lsi *lstatIssuer) asyncIssue(ctx context.Context, state *prefixState, prefix string, contents []filewalk.Entry) (file.InfoList, error) {
-	concurrency := min(lsi.w.cfg.ConcurrentStats, len(contents))
+func (lsi *lstatIssuer) asyncIssue(ctx context.Context, prefix string, contents []filewalk.Entry) (children, all file.InfoList, nFiles, nErrors int64, err error) {
+	concurrency := min(lsi.concurrency, len(contents))
 
 	g := &errgroup.T{}
 	g = errgroup.WithConcurrency(g, concurrency)
@@ -120,11 +112,11 @@ func (lsi *lstatIssuer) asyncIssue(ctx context.Context, state *prefixState, pref
 		name := entry.Name
 		item := seq.NextItem(lstatResult{})
 		filename := lsi.fs.Join(prefix, name)
-		if err := lsi.waitOnLimiter(ctx); err != nil {
-			return file.InfoList{}, err
+		if err = lsi.waitOnLimiter(ctx); err != nil {
+			return
 		}
 		g.Go(func() error {
-			info, err := lsi.lstat(ctx, prefix, filename)
+			info, err := lsi.lstat(ctx, filename)
 			item.V = lstatResult{info, err}
 			ch <- item
 			lsi.releaseLimiter()
@@ -133,19 +125,19 @@ func (lsi *lstatIssuer) asyncIssue(ctx context.Context, state *prefixState, pref
 	}
 	g.Wait()
 	close(ch)
-	var children file.InfoList
 	for seq.Scan() {
 		res := seq.Item()
 		if res.err != nil {
+			nErrors++
 			continue
 		}
 		if res.info.IsDir() {
-			atomic.AddInt64(&state.nchildren, 1)
 			children = append(children, res.info)
 		} else {
-			atomic.AddInt64(&state.nfiles, 1)
+			nFiles++
 		}
-		state.current.AppendInfo(res.info)
+		all = all.AppendInfo(res.info)
 	}
-	return children, seq.Err()
+	err = seq.Err()
+	return
 }

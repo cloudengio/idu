@@ -110,7 +110,6 @@ commands:
     summary: display disk usage for the specified directory tree without using a database
     arguments:
       - <directory>
-      - ...
 
   - name: database
     summary: database management commands
@@ -126,7 +125,7 @@ type GlobalFlags struct {
 	ConfigFile  string                `subcmd:"config,$HOME/.idu.yml,configuration file"`
 	Units       string                `subcmd:"units,decimal,display usage in decimal (KB) or binary (KiB) formats"`
 	Verbose     int                   `subcmd:"v,0,lower values show more debugging output"`
-	LogDir      string                `subcmd:"log-dir,./logs,directory to write log files to"`
+	LogDir      string                `subcmd:"log-dir,,directory to write log files to"`
 	Stderr      bool                  `subcmd:"stderr,false,write log messages to stderr"`
 	HTTP        string                `subcmd:"http,,set to a port to enable http serving of /debug/vars and profiling"`
 	GCPercent   int                   `subcmd:"gcpercent,50,value to use for runtime/debug.SetGCPercent"`
@@ -239,6 +238,10 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 
 	internal.Verbosity = slog.Level(globalFlags.Verbose)
 	internal.LogDir = globalFlags.LogDir
+	if internal.LogDir == "" {
+		internal.LogDir = os.TempDir()
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	cmdutil.HandleSignals(cancel, os.Interrupt, os.Kill)
 	defer cancel()

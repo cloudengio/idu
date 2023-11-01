@@ -267,7 +267,7 @@ func (hf heapFormatter[T]) formatHeaps(h *reports.Heaps[T], out io.Writer, value
 	}
 	banner(out, "-", "\nNumber of Files\n")
 	hf.formatHeap(h.Files, out, fmtCount, valueFormatter, n)
-	banner(out, "-", "\nNumer of Prefixes/Directories\n")
+	banner(out, "-", "\nNumber of Prefixes/Directories\n")
 	hf.formatHeap(h.Prefixes, out, fmtCount, valueFormatter, n)
 }
 

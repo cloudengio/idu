@@ -137,7 +137,6 @@ type scanDB struct {
 }
 
 func NewScanDB(ctx context.Context, cfg config.Prefix) (ScanDB, error) {
-
 	db, err := OpenDatabase(ctx, cfg, false)
 	if err != nil {
 		return nil, err

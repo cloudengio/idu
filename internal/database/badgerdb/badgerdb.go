@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"cloudeng.io/cmd/idu/internal/database"
@@ -44,6 +45,8 @@ type Database struct {
 	location string
 	bdb      *badger.DB
 	batch    *writeBatch
+	lock     *lockedfile.Mutex
+	unlockMu sync.Mutex
 	unlock   func()
 }
 
@@ -88,8 +91,15 @@ func Open[T Options](location string, opts ...Option) (database.DB, error) {
 	}
 	db.Options.Sub.Options = db.Options.Sub.Options.WithReadOnly(db.Options.ReadOnly)
 
-	lock := lockedfile.MutexAt(filepath.Join(location, "lock"))
-	unlock, err := lock.Lock()
+	lockfile := filepath.Join(location, "lock")
+	db.lock = lockedfile.MutexAt(lockfile)
+	var unlock func()
+	var err error
+	if db.Options.ReadOnly {
+		unlock, err = db.lock.RLockCreate()
+	} else {
+		unlock, err = db.lock.Lock()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -467,15 +477,16 @@ func (db *Database) VisitStats(ctx context.Context, start, stop time.Time, visit
 
 // Close closes the database.
 func (db *Database) Close(ctx context.Context) error {
-	if db.unlock != nil {
-		db.unlock()
-	}
-	if err := db.canceled(ctx); err != nil {
-		return err
+	db.unlockMu.Lock()
+	defer db.unlockMu.Unlock()
+	if db.unlock == nil {
+		return nil
 	}
 	var errs errors.M
 	errs.Append(db.batch.flush())
 	errs.Append(db.bdb.Close())
+	db.unlock()
+	db.unlock = nil
 	return errs.Err()
 }
 

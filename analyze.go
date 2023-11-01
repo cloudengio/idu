@@ -11,6 +11,7 @@ import (
 	"os"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"cloudeng.io/cmd/idu/internal"
@@ -23,7 +24,6 @@ import (
 )
 
 type analyzeFlags struct {
-	UseDB    bool `subcmd:"use-db,true,database backed scan that avoids stating files in unchanged directories"`
 	Progress bool `subcmd:"progress,true,show progress"`
 }
 
@@ -49,33 +49,29 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fs filewalk.FS, af *analyz
 		internal.Log(ctx, internal.LogProgress, "set max threads", "max-threads", cfg.SetMaxThreads)
 	}
 	var sdb internal.ScanDB
-	if af.UseDB {
-		sdb, err = internal.NewScanDB(ctx, cfg)
-		if err != nil {
-			return err
-		}
-		if err := sdb.DeleteErrors(ctx, args[0]); err != nil {
-			return err
-		}
-		defer func() {
-			sdb.Close(ctx)
-		}()
+	sdb, err = internal.NewScanDB(ctx, cfg)
+	if err != nil {
+		return err
 	}
+	if err := sdb.DeleteErrors(ctx, args[0]); err != nil {
+		return err
+	}
+	defer sdb.Close(ctx)
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel() // cancel progress tracker, status reporting etc.
-
-	pt := newProgressTracker(ctx, time.Second, af.Progress)
+	pctx, pcancel := context.WithCancel(ctx)
+	defer pcancel() // cancel progress tracker, status reporting etc.
+	var wg sync.WaitGroup
+	wg.Add(2)
+	pt := newProgressTracker(pctx, time.Second, af.Progress, true, &wg)
 
 	w := &walker{
-		cfg:   cfg,
-		db:    sdb,
-		fs:    fs,
-		pt:    pt,
-		usedb: af.UseDB,
+		cfg: cfg,
+		db:  sdb,
+		fs:  fs,
+		pt:  pt,
 	}
-	w.lsi = newLStatIssuer(w, cfg, fs)
-	walkerStatus := make(chan filewalk.Status, 10)
+	w.lsi = newLStatIssuer(w.pt, w.logLStatError, cfg.ConcurrentScans, cfg.ConcurrentStatsThreshold, fs)
+	walkerStatus := make(chan filewalk.Status, 100)
 	walker := filewalk.New(w.fs,
 		w,
 		filewalk.WithConcurrency(cfg.ConcurrentScans),
@@ -83,10 +79,15 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fs filewalk.FS, af *analyz
 		filewalk.WithReporting(walkerStatus, time.Second, time.Second*10),
 	)
 
-	go w.status(ctx, walkerStatus)
+	go func() {
+		w.status(pctx, walkerStatus)
+		wg.Done()
+	}()
 
 	errs := errors.M{}
 	errs.Append(walker.Walk(ctx, args[0]))
+	pcancel() // cancel progress tracker and walker status.
+	wg.Wait()
 	errs.Append(alz.summarizeAndLog(ctx, sdb, pt, start))
 	return errs.Squash(context.Canceled)
 }
@@ -124,12 +125,11 @@ func (alz *analyzeCmd) summarizeAndLog(ctx context.Context, sdb internal.ScanDB,
 }
 
 type walker struct {
-	cfg   config.Prefix
-	db    internal.ScanDB
-	fs    filewalk.FS
-	pt    *progressTracker
-	lsi   *lstatIssuer
-	usedb bool
+	cfg config.Prefix
+	db  internal.ScanDB
+	fs  filewalk.FS
+	pt  *progressTracker
+	lsi *lstatIssuer
 }
 
 type prefixState struct {
@@ -139,7 +139,7 @@ type prefixState struct {
 	existing        prefixinfo.T
 	current         prefixinfo.T
 	start           time.Time
-	nerrors         int
+	nerrors         int64
 	nfiles          int64
 	nchildren       int64
 	ndeleted        int
@@ -167,8 +167,14 @@ func (w *walker) dbLog(ctx context.Context, prefix string, val []byte) {
 	w.db.LogError(ctx, prefix, time.Now(), []byte(val))
 }
 
+func (w *walker) logLStatError(ctx context.Context, filename string, err error) {
+	internal.Log(ctx, internal.LogError, "stat error", "file", filename, "error", err)
+	w.dbLog(ctx, filename, []byte(err.Error()))
+}
+
 func (w *walker) handlePrefix(ctx context.Context, state *prefixState, prefix string, info file.Info, err error) (stop, unchanged bool, _ error) {
 	if err != nil {
+		w.pt.incErrors()
 		internal.Log(ctx, internal.LogError, "prefix error", "prefix", w.cfg.Prefix, "path", prefix, "error", err)
 		w.dbLog(ctx, prefix, []byte(err.Error()))
 		if w.fs.IsPermissionError(err) || w.fs.IsNotExist(err) {
@@ -197,17 +203,15 @@ func (w *walker) handlePrefix(ctx context.Context, state *prefixState, prefix st
 		return true, false, err
 	}
 
-	if w.usedb {
-		ok, err := w.db.GetPrefixInfo(ctx, prefix, &state.existing)
-		if !ok || err != nil {
-			return false, false, err
-		}
-		if state.existing.Unchanged(state.current) {
-			state.current.SetInfoList(state.existing.FilesOnly())
-			// Will need to restat prefixes/directories in any case.
-			w.pt.incParentUnchanged()
-			return false, true, nil
-		}
+	ok, err := w.db.GetPrefixInfo(ctx, prefix, &state.existing)
+	if !ok || err != nil {
+		return false, false, err
+	}
+	if state.existing.Unchanged(state.current) {
+		state.current.SetInfoList(state.existing.FilesOnly())
+		// Will need to restat prefixes/directories in any case.
+		w.pt.incParentUnchanged()
+		return false, true, nil
 	}
 	return false, false, nil
 }
@@ -230,18 +234,7 @@ func (w *walker) Prefix(ctx context.Context, state *prefixState, prefix string, 
 	return stop, nil, err
 }
 
-func (w *walker) Contents(ctx context.Context, state *prefixState, prefix string, contents []filewalk.Entry, err error) (file.InfoList, error) {
-
-	if err != nil {
-		internal.Log(ctx, internal.LogError, "listing error", "prefix", w.cfg.Prefix, "path", prefix, "error", err)
-		w.dbLog(ctx, prefix, []byte(err.Error()))
-		state.nerrors++
-		if w.fs.IsPermissionError(err) || w.fs.IsNotExist(err) {
-			// Don't return an error to the walker, just log it.
-			return nil, nil
-		}
-		return nil, err
-	}
+func (w *walker) Contents(ctx context.Context, state *prefixState, prefix string, contents []filewalk.Entry) (file.InfoList, error) {
 
 	if state.parentUnchanged {
 		// Need to traverse sub-directories even if the parent is unchanged.
@@ -253,24 +246,33 @@ func (w *walker) Contents(ctx context.Context, state *prefixState, prefix string
 			}
 			toStat = append(toStat, entry)
 		}
-		children, err := w.lsi.lstatContents(ctx, state, prefix, toStat)
+		children, all, nfiles, nerrors, err := w.lsi.lstatContents(ctx, prefix, toStat)
 		if err != nil {
 			w.dbLog(ctx, prefix, []byte(err.Error()))
 		}
+		state.current.AppendInfoList(all)
+		state.nfiles += nfiles
+		state.nerrors += nerrors
+		state.nchildren += int64(len(children))
 		return children, nil
 	}
 
-	children, err := w.lsi.lstatContents(ctx, state, prefix, contents)
+	children, all, nfiles, nerrors, err := w.lsi.lstatContents(ctx, prefix, contents)
 	if err != nil {
 		w.dbLog(ctx, prefix, []byte(err.Error()))
 	}
-	return children, err
+	state.nfiles += nfiles
+	state.nerrors += nerrors
+	state.nchildren += int64(len(children))
+	state.current.AppendInfoList(all)
+	return children, nil
 }
 
 func (w *walker) Done(ctx context.Context, state *prefixState, prefix string, err error) error {
 	if err != nil {
 		internal.Log(ctx, internal.LogPrefix, "prefix done with error", "prefix", w.cfg.Prefix, "path", prefix, "error", err)
 		w.dbLog(ctx, prefix, []byte(err.Error()))
+		state.nerrors++
 	}
 
 	if err := state.current.Finalize(); err != nil {
@@ -284,15 +286,12 @@ func (w *walker) Done(ctx context.Context, state *prefixState, prefix string, er
 		w.pt.incDonePrefix(state.nerrors, state.ndeleted, state.nfiles)
 	}(state)
 
-	if !w.usedb {
-		return nil
-	}
-
 	n, unchanged, err := w.handleDeletedOrChangedPrefixes(ctx, prefix, state.parentUnchanged, state.current, state.existing)
 	state.ndeleted += n
 	if err != nil {
 		return err
 	}
+
 	if err := w.db.SetPrefixInfo(ctx, prefix, unchanged, &state.current); err != nil {
 		internal.Log(ctx, internal.LogPrefix, "prefix done", "prefix", w.cfg.Prefix, "path", prefix, "error", err)
 		return err

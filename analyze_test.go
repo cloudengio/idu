@@ -132,13 +132,7 @@ func scanErrors(t *testing.T, ctx context.Context, db database.DB, fs filewalk.F
 	return errors
 }
 
-func getLastLog(t *testing.T, ctx context.Context, cfg config.T, arg0 string) (start, stop time.Time, s anaylzeSummary) {
-	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, cfg, arg0, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close(ctx)
-
+func getLastLog(t *testing.T, ctx context.Context, db database.DB) (start, stop time.Time, s anaylzeSummary) {
 	start, stop, detail, err := db.LastLog(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -175,7 +169,7 @@ func verifyDB(t *testing.T, ctx context.Context, cfg config.T, fs filewalk.FS, a
 		}
 	}
 
-	start, stop, summary := getLastLog(t, ctx, cfg, arg0)
+	start, stop, summary := getLastLog(t, ctx, db)
 
 	if took := stop.Sub(start); took > 10*time.Minute {
 		t.Errorf("line %v, unexpected duration: %v", l, took)

@@ -53,17 +53,22 @@ type progressTracker struct {
 	sync.Mutex
 	interval time.Duration
 	progressStats
+	displayUnchanged bool
 }
 
-func newProgressTracker(ctx context.Context, interval time.Duration, display bool) *progressTracker {
+func newProgressTracker(ctx context.Context, interval time.Duration, display, displayUnchanged bool, wg *sync.WaitGroup) *progressTracker {
 	pt := &progressTracker{
-		interval: interval,
+		interval:         interval,
+		displayUnchanged: displayUnchanged,
 	}
 	pt.start = time.Now()
 	pt.sysMemstats = &sysMemstats{}
 	pt.refreshMemstatsLocked()
 	if display {
-		go pt.display(ctx)
+		go func() {
+			pt.display(ctx)
+			wg.Done()
+		}()
 	}
 	return pt
 }
@@ -116,13 +121,19 @@ func (pt *progressTracker) incStartPrefix() {
 	pt.numPrefixesStarted++
 }
 
-func (pt *progressTracker) incDonePrefix(errors, deleted int, files int64) {
+func (pt *progressTracker) incDonePrefix(errors int64, deleted int, files int64) {
 	pt.Lock()
 	defer pt.Unlock()
 	pt.numPrefixesFinished++
 	pt.numErrors += int64(errors)
 	pt.numFiles += int64(files)
 	pt.numDeleted += int64(deleted)
+}
+
+func (pt *progressTracker) incErrors() {
+	pt.Lock()
+	defer pt.Unlock()
+	pt.numErrors++
 }
 
 func (pt *progressTracker) incParentUnchanged() {
@@ -164,8 +175,10 @@ func (pt *progressTracker) summary(ctx context.Context) {
 	ifmt.Printf("\n")
 	ifmt.Printf("          prefixes : % 15v\n", cpy.numPrefixesFinished)
 	ifmt.Printf("             files : % 15v\n", cpy.numFiles)
-	ifmt.Printf("  parent unchanged : % 15v\n", cpy.numParentUnchanged)
-	ifmt.Printf("children unchanged : % 15v\n", cpy.numChildrenUnchanged)
+	if pt.displayUnchanged {
+		ifmt.Printf("  parent unchanged : % 15v\n", cpy.numParentUnchanged)
+		ifmt.Printf("children unchanged : % 15v\n", cpy.numChildrenUnchanged)
+	}
 	ifmt.Printf("           deleted : % 15v\n", cpy.numDeleted)
 	ifmt.Printf("            errors : % 15v\n", cpy.numErrors)
 	ifmt.Printf("        sync scans : % 15v\n", cpy.numSyncScans)
@@ -252,7 +265,25 @@ func (pt *progressTracker) display(ctx context.Context) {
 
 		cpy.log(ctx)
 
-		ifmt.Printf("% 10v(%3v) prefixes, % 10v files, % 8.0f (prefixes/s), % 8.0f (stats/second), % 8v (latency), % 6v (outstanding), % 8.0f (sync scans/s), % 8v unchanged, % 5v errors, % 8v, (%s) %s",
+		if pt.displayUnchanged {
+			ifmt.Printf("% 10v(%3v) prefixes, % 10v files, % 8.0f (prefixes/s), % 8.0f (stats/second), % 8v (latency), % 6v (outstanding), % 8.0f (sync scans/s), % 8v unchanged, % 5v errors, % 8v, (%s) %s",
+				finished,
+				started-finished,
+				cpy.numFiles,
+				prefixRate,
+				statRate,
+				statLatency,
+				cpy.numStatsStarted-cpy.numStatsFinished,
+				syncRate,
+				cpy.numParentUnchanged+cpy.numChildrenUnchanged,
+				cpy.numErrors,
+				runningFor,
+				time.Now().Format("15:04:05"),
+				cr)
+			continue
+		}
+
+		ifmt.Printf("% 10v(%3v) prefixes, % 10v files, % 8.0f (prefixes/s), % 8.0f (stats/second), % 8v (latency), % 6v (outstanding), % 8.0f (sync scans/s), % 5v errors, % 8v, (%s) %s",
 			finished,
 			started-finished,
 			cpy.numFiles,
@@ -261,7 +292,6 @@ func (pt *progressTracker) display(ctx context.Context) {
 			statLatency,
 			cpy.numStatsStarted-cpy.numStatsFinished,
 			syncRate,
-			cpy.numParentUnchanged+cpy.numChildrenUnchanged,
 			cpy.numErrors,
 			runningFor,
 			time.Now().Format("15:04:05"),
