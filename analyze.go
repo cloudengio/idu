@@ -173,21 +173,6 @@ func (w *walker) logLStatError(ctx context.Context, filename string, err error) 
 }
 
 func (w *walker) handlePrefix(ctx context.Context, state *prefixState, prefix string, info file.Info, err error) (stop, unchanged bool, _ error) {
-	if err != nil {
-		w.pt.incErrors()
-		internal.Log(ctx, internal.LogError, "prefix error", "prefix", w.cfg.Prefix, "path", prefix, "error", err)
-		w.dbLog(ctx, prefix, []byte(err.Error()))
-		if w.fs.IsPermissionError(err) || w.fs.IsNotExist(err) {
-			// Don't track these errors in the walker.
-			return true, false, nil
-		}
-		return true, false, err
-	}
-
-	if w.cfg.Exclude(prefix) {
-		internal.Log(ctx, internal.LogPrefix, "prefix exclusion", "prefix", w.cfg.Prefix, "path", prefix)
-		return true, false, nil
-	}
 
 	if info.Mode()&os.ModeSymlink == os.ModeSymlink {
 		// Ignore symlinks.
@@ -204,12 +189,19 @@ func (w *walker) handlePrefix(ctx context.Context, state *prefixState, prefix st
 	}
 
 	ok, err := w.db.GetPrefixInfo(ctx, prefix, &state.existing)
-	if !ok || err != nil {
-		return false, false, err
+	if !ok {
+		// a new entry
+		return false, false, nil
 	}
+	if err != nil {
+		// Some sort of database read error.
+		return true, false, err
+	}
+
 	if state.existing.Unchanged(state.current) {
+		// Cam reuse all file entries, but will need to restat all
+		// prefixes/directories in any case.
 		state.current.SetInfoList(state.existing.FilesOnly())
-		// Will need to restat prefixes/directories in any case.
 		w.pt.incParentUnchanged()
 		return false, true, nil
 	}
@@ -217,11 +209,25 @@ func (w *walker) handlePrefix(ctx context.Context, state *prefixState, prefix st
 }
 
 func (w *walker) Prefix(ctx context.Context, state *prefixState, prefix string, info file.Info, err error) (stop bool, _ file.InfoList, retErr error) {
-	start := time.Now()
+	if err != nil {
+		w.pt.incErrors()
+		internal.Log(ctx, internal.LogError, "prefix error", "prefix", w.cfg.Prefix, "path", prefix, "error", err)
+		w.dbLog(ctx, prefix, []byte(err.Error()))
+		if w.fs.IsPermissionError(err) || w.fs.IsNotExist(err) {
+			// Don't return these errors via the walker.
+			return true, nil, nil
+		}
+		return true, nil, err
+	}
 
-	internal.Log(ctx, internal.LogPrefix, "prefix start", "start", start, "prefix", w.cfg.Prefix, "path", prefix)
+	if w.cfg.Exclude(prefix) {
+		internal.Log(ctx, internal.LogPrefix, "prefix exclusion", "prefix", w.cfg.Prefix, "path", prefix)
+		return true, nil, nil
+	}
 
 	state.start = time.Now()
+	internal.Log(ctx, internal.LogPrefix, "prefix start", "start", state.start, "prefix", w.cfg.Prefix, "path", prefix)
+
 	stop, state.parentUnchanged, retErr = w.handlePrefix(ctx, state, prefix, info, err)
 	if retErr != nil {
 		w.dbLog(ctx, prefix, []byte(retErr.Error()))

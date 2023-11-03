@@ -69,6 +69,8 @@ func newProgressTracker(ctx context.Context, interval time.Duration, display, di
 			pt.display(ctx)
 			wg.Done()
 		}()
+	} else {
+		wg.Done()
 	}
 	return pt
 }

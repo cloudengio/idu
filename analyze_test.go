@@ -244,10 +244,7 @@ func testAnalyze(ctx context.Context, t *testing.T) {
 
 	fs := localfs.New()
 	alz := &analyzeCmd{}
-	af := analyzeFlags{
-		UseDB:    true,
-		Progress: false,
-	}
+	af := analyzeFlags{}
 	if err := alz.analyzeFS(ctx, fs, &af, []string{arg0}); err != nil {
 		t.Fatal(err)
 	}
