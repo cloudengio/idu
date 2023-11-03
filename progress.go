@@ -103,13 +103,16 @@ func (pt *progressTracker) summarize() anaylzeSummary {
 	}
 }
 
-func (pt *progressTracker) statStarted() {
+// Implements asyncstat.LatencyTracker
+func (pt *progressTracker) Before() time.Time {
 	pt.Lock()
 	defer pt.Unlock()
 	pt.numStatsStarted++
+	return time.Now()
 }
 
-func (pt *progressTracker) statFinished(start time.Time) {
+// Implements asyncstat.LatencyTracker
+func (pt *progressTracker) After(start time.Time) {
 	took := time.Since(start)
 	pt.Lock()
 	defer pt.Unlock()
@@ -123,11 +126,10 @@ func (pt *progressTracker) incStartPrefix() {
 	pt.numPrefixesStarted++
 }
 
-func (pt *progressTracker) incDonePrefix(errors int64, deleted int, files int64) {
+func (pt *progressTracker) incDonePrefix(deleted int, files int64) {
 	pt.Lock()
 	defer pt.Unlock()
 	pt.numPrefixesFinished++
-	pt.numErrors += int64(errors)
 	pt.numFiles += int64(files)
 	pt.numDeleted += int64(deleted)
 }

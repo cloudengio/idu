@@ -4,6 +4,7 @@
 
 package main
 
+/*
 import (
 	"context"
 	"time"
@@ -141,3 +142,4 @@ func (lsi *lstatIssuer) asyncIssue(ctx context.Context, prefix string, contents 
 	err = seq.Err()
 	return
 }
+*/
