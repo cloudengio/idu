@@ -80,7 +80,7 @@ func keyForBucket(prefix, key string) []byte {
 // be created.
 func Open[T Options](location string, opts ...Option) (database.DB, error) {
 	if len(location) > 0 && location != "." {
-		os.MkdirAll(location, 0700)
+		os.MkdirAll(location, 0770)
 	}
 	db := &Database{
 		location: location,
@@ -203,20 +203,33 @@ func (db *Database) DeletePrefix(ctx context.Context, prefix string) error {
 	return db.deletePrefix(ctx, []byte(prefix))
 }
 
-func (db *Database) deletePrefix(ctx context.Context, prefix []byte) error {
-	if err := db.canceled(ctx); err != nil {
-		return err
-	}
+func (db *Database) deleteBatch(prefix []byte) (bool, error) {
 	tx := db.bdb.NewTransaction(true)
 	defer tx.Discard()
 	it := tx.NewIterator(badger.DefaultIteratorOptions)
 	for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 		if err := tx.Delete(it.Item().KeyCopy(nil)); err != nil {
-			return err
+			it.Close()
+			if err == badger.ErrTxnTooBig {
+				return false, tx.Commit()
+			}
+			return true, err
 		}
 	}
 	it.Close()
-	return tx.Commit()
+	return true, tx.Commit()
+}
+
+func (db *Database) deletePrefix(ctx context.Context, prefix []byte) error {
+	for {
+		if err := db.canceled(ctx); err != nil {
+			return err
+		}
+		done, err := db.deleteBatch(prefix)
+		if done || err != nil {
+			return err
+		}
+	}
 }
 
 func (db *Database) DeleteErrors(ctx context.Context, prefix string) error {

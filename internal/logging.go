@@ -37,13 +37,13 @@ type logger struct {
 
 var globalLogger = &logger{}
 
-func getOrCreateLogger(ctx context.Context) *slog.Logger {
+func getOrCreateLogger(name string, ctx context.Context) *slog.Logger {
 	globalLogger.Lock()
 	defer globalLogger.Unlock()
 	if globalLogger.Logger != nil {
 		return globalLogger.Logger
 	}
-	f, name, err := createNamedLogfile(LogDir, time.Now())
+	f, name, err := createNamedLogfile(name, LogDir, time.Now())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create log file: %v, %v\n", name, err)
 	}
@@ -61,20 +61,20 @@ func Log(ctx context.Context, level slog.Level, msg string, args ...interface{})
 	}
 	r := slog.NewRecord(time.Now(), level, msg, pcs[0])
 	r.Add(args...)
-	_ = getOrCreateLogger(ctx).Handler().Handle(ctx, r)
+	_ = getOrCreateLogger(defaultLogName, ctx).Handler().Handle(ctx, r)
 }
 
 var (
-	logSourceCode = false
-	pid           = os.Getpid()
-	program       = filepath.Base(os.Args[0])
+	logSourceCode  = false
+	pid            = os.Getpid()
+	defaultLogName = filepath.Base(os.Args[0]) + "-" + os.Getenv("USER")
 )
 
 // logName returns a new log file name containing tag, with start time t, and
 // the name for the symlink for tag.
-func logName(t time.Time) (name, link string) {
+func logName(logName string, t time.Time) (name, link string) {
 	name = fmt.Sprintf("%s.log.%04d%02d%02d-%02d%02d%02d.%d",
-		program,
+		logName,
 		t.Year(),
 		t.Month(),
 		t.Day(),
@@ -82,11 +82,11 @@ func logName(t time.Time) (name, link string) {
 		t.Minute(),
 		t.Second(),
 		pid)
-	return name, program + ".log"
+	return name, logName + ".log"
 }
 
-func createNamedLogfile(dir string, t time.Time) (f *os.File, fname string, err error) {
-	name, link := logName(t)
+func createNamedLogfile(name, dir string, t time.Time) (f *os.File, fname string, err error) {
+	name, link := logName(name, t)
 	fname = filepath.Join(dir, name)
 	f, err = os.Create(fname)
 	if err == nil {

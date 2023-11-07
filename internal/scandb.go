@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"runtime"
 	"sync"
 	"time"
 
@@ -20,26 +21,41 @@ import (
 	"github.com/dgraph-io/badger/v4"
 )
 
+var badgerLogName = defaultLogName + "-badger"
+
+func logDB(ctx context.Context, level slog.Level, msg string, args ...interface{}) {
+	if level < Verbosity {
+		return
+	}
+	var pcs [1]uintptr
+	if logSourceCode {
+		runtime.Callers(2, pcs[:]) // skip [Callers, infof]
+	}
+	r := slog.NewRecord(time.Now(), level, msg, pcs[0])
+	r.Add(args...)
+	_ = getOrCreateLogger(badgerLogName, ctx).Handler().Handle(ctx, r)
+}
+
 type badgerLogger struct{}
 
 func (l *badgerLogger) Errorf(f string, a ...interface{}) {
 	m := fmt.Sprintf(f, a...)
-	Log(context.Background(), LogError, "badger", "msg", m)
+	logDB(context.Background(), LogError, "badger", "msg", m)
 }
 
 func (l *badgerLogger) Warningf(f string, a ...interface{}) {
 	m := fmt.Sprintf(f, a...)
-	Log(context.Background(), slog.LevelWarn, "badger", "msg", m)
+	logDB(context.Background(), slog.LevelWarn, "badger", "msg", m)
 }
 
 func (l *badgerLogger) Infof(f string, a ...interface{}) {
 	m := fmt.Sprintf(f, a...)
-	Log(context.Background(), slog.LevelInfo, "badger", "msg", m)
+	logDB(context.Background(), slog.LevelInfo, "badger", "msg", m)
 }
 
 func (l *badgerLogger) Debugf(f string, a ...interface{}) {
 	m := fmt.Sprintf(f, a...)
-	Log(context.Background(), slog.LevelWarn, "badger", "msg", m)
+	logDB(context.Background(), slog.LevelWarn, "badger", "msg", m)
 }
 
 func boltdbOptions(readonly bool, opts ...boltdb.Option) []boltdb.Option {

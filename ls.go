@@ -127,11 +127,17 @@ func (l *lister) logs(ctx context.Context, values interface{}, args []string) er
 				fmt.Printf("%v...%v: %v: %s\n", begin, end, end.Sub(begin), detail)
 				return true
 			}
-			var summary anaylzeSummary
+			var summary struct {
+				Begin time.Time `json:"begin"`
+				End   time.Time `json:"end"`
+				anaylzeSummary
+			}
 			if err := json.Unmarshal(detail, &summary); err != nil {
 				fmt.Fprintf(os.Stderr, "failed to unmarshal log %v entry: %v\n", begin, err)
 				return true
 			}
+			summary.Begin = begin
+			summary.End = end
 			out, _ := json.Marshal(summary)
 			fmt.Println(string(out))
 			return true

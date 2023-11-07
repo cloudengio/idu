@@ -67,7 +67,7 @@ func initBuckets(bdb *bolt.DB) error {
 func Open[T Options](location string, opts ...Option) (database.DB, error) {
 	dir := filepath.Dir(location)
 	if len(dir) > 0 && dir != "." {
-		os.MkdirAll(dir, 0700)
+		os.MkdirAll(dir, 0770)
 	}
 	db := &Database{
 		filename: location,

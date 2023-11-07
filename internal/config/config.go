@@ -20,11 +20,11 @@ type Prefix struct {
 	Prefix                   string   `yaml:"prefix" cmd:"the prefix to be analyzed"`
 	Database                 string   `yaml:"database" cmd:"the location of the database to use for this prefix"`
 	Separator                string   `yaml:"separator" cmd:"filename separator to use, defaults to /"`
-	ConcurrentScans          int      `yaml:"concurrent_scans" cmd:"maximum number of concurrent scan operations, defaults to 20"`
-	ConcurrentStats          int      `yaml:"concurrent_stats" cmd:"maximum number of concurrent stat operations, defaults to 50"`
-	ConcurrentStatsThreshold int      `yaml:"concurrent_stats_threshold" cmd:"minimum number of files before stats are performed concurrently, defaults to 10, set to 1 to disable synchornous stats"`
-	SetMaxThreads            int      `yaml:"set_max_threads" cmd:"if non-zero used for debug.SetMaxThreads, defaults to 0"`
-	ScanSize                 int      `yaml:"scan_size" cmd:"maximum number of items to fetch from the filesystem in a single operation, defaults to 1000"`
+	ConcurrentScans          int      `yaml:"concurrent_scans" cmd:"maximum number of concurrent scan operations"`
+	ConcurrentStats          int      `yaml:"concurrent_stats" cmd:"maximum number of concurrent stat operations"`
+	ConcurrentStatsThreshold int      `yaml:"concurrent_stats_threshold" cmd:"minimum number of files before stats are performed concurrently"`
+	SetMaxThreads            int      `yaml:"set_max_threads" cmd:"if non-zero used for debug.SetMaxThreads"`
+	ScanSize                 int      `yaml:"scan_size" cmd:"maximum number of items to fetch from the filesystem in a single operation"`
 	Exclusions               []string `yaml:"exclusions" cmd:"prefixes and files matching these regular expressions will be ignored when building a dataase"`
 	Layout                   layout   `yaml:"layout" cmd:"the filesystem layout to use for calculating raw bytes used"`
 
@@ -86,10 +86,10 @@ func (p *Prefix) StorageBytes(n int64) int64 {
 }
 
 var (
-	DefaultConcurrentScans          = 20
-	DefaultConcurrentStats          = 50
-	DefaultConcurrentStatsThreshold = 10
-	DefaultScanSize                 = 1000
+	DefaultConcurrentStats          = 0
+	DefaultConcurrentStatsThreshold = 0
+	DefaultConcurrentScans          = 0
+	DefaultScanSize                 = 0
 )
 
 // ParseConfig will parse a yaml config from the supplied byte slice.
@@ -98,6 +98,10 @@ func ParseConfig(buf []byte) (T, error) {
 	if err := yaml.Unmarshal(buf, &cfg.Prefixes); err != nil {
 		return T{}, err
 	}
+
+	raw := []map[string]any{}
+	yaml.Unmarshal(buf, &raw)
+
 	for i, p := range cfg.Prefixes {
 		cfg.Prefixes[i].Prefix = os.ExpandEnv(p.Prefix)
 		cfg.Prefixes[i].Database = os.ExpandEnv(p.Database)
@@ -113,20 +117,20 @@ func ParseConfig(buf []byte) (T, error) {
 			return T{}, err
 		}
 		cfg.Prefixes[i].calculator = calc
-		if p.ConcurrentScans == 0 {
-			cfg.Prefixes[i].ConcurrentScans = DefaultConcurrentScans
-		}
-		if p.ConcurrentStats == 0 {
-			cfg.Prefixes[i].ConcurrentStats = DefaultConcurrentStats
-		}
-		if p.ConcurrentStatsThreshold == 0 {
-			cfg.Prefixes[i].ConcurrentStatsThreshold = DefaultConcurrentStatsThreshold
-		}
-		if p.ScanSize == 0 {
-			cfg.Prefixes[i].ScanSize = DefaultScanSize
-		}
 		if len(p.Separator) == 0 {
 			cfg.Prefixes[i].Separator = string(filepath.Separator)
+		}
+		if _, ok := raw[i]["concurrent_stats_threshold"]; !ok {
+			cfg.Prefixes[i].ConcurrentStatsThreshold = DefaultConcurrentStatsThreshold
+		}
+		if _, ok := raw[i]["concurrent_stats"]; !ok {
+			cfg.Prefixes[i].ConcurrentStats = DefaultConcurrentStats
+		}
+		if _, ok := raw[i]["concurrent_scans"]; !ok {
+			cfg.Prefixes[i].ConcurrentScans = DefaultConcurrentScans
+		}
+		if _, ok := raw[i]["scan_size"]; !ok {
+			cfg.Prefixes[i].ScanSize = DefaultScanSize
 		}
 	}
 	return cfg, nil

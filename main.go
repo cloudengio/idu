@@ -26,6 +26,8 @@ import (
 	"cloudeng.io/cmdutil/profiling"
 	"cloudeng.io/cmdutil/subcmd"
 	"cloudeng.io/file/diskusage"
+	"cloudeng.io/file/filewalk"
+	"cloudeng.io/file/filewalk/asyncstat"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 )
@@ -131,6 +133,13 @@ type GlobalFlags struct {
 	GCPercent   int                   `subcmd:"gcpercent,50,value to use for runtime/debug.SetGCPercent"`
 	UseBadgerDB bool                  `subcmd:"use-badger-db,true,use badgerdb instead of boltdb"`
 	UseBoltDB   bool                  `subcmd:"use-bolt-db,false,use boltdb instead of badgerdb"`
+}
+
+func init() {
+	config.DefaultConcurrentStats = asyncstat.DefaultAsyncStats
+	config.DefaultConcurrentStatsThreshold = asyncstat.DefaultAsyncThreshold
+	config.DefaultConcurrentScans = filewalk.DefaultConcurrentScans
+	config.DefaultScanSize = filewalk.DefaultScanSize
 }
 
 func cli() *subcmd.CommandSetYAML {

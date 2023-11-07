@@ -24,8 +24,16 @@ import (
 	"cloudeng.io/file/filewalk/localfs"
 )
 
+func showDefaults() {
+	fmt.Printf("scan_size: %v\n", filewalk.DefaultScanSize)
+	fmt.Printf("concurrent_scans: %v\n", filewalk.DefaultConcurrentScans)
+	fmt.Printf("concurrent_stats: %v", asyncstat.DefaultAsyncStats)
+	fmt.Printf("concurrent_stats_threadhold: %v\n", asyncstat.DefaultAsyncThreshold)
+}
+
 type analyzeFlags struct {
 	Progress bool `subcmd:"progress,true,show progress"`
+	Defaults bool `subcmd:"show-defaults,false,display default scanning options and exit"`
 }
 
 type analyzeCmd struct{}
@@ -40,6 +48,10 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fs filewalk.FS, af *analyz
 	if err := useMaxProcs(ctx); err != nil {
 		internal.Log(ctx, internal.LogError, "failed to set max procs", "error", err)
 	}
+	if af.Defaults {
+		showDefaults()
+		return nil
+	}
 	start := time.Now()
 	ctx, cfg, err := internal.LookupPrefix(ctx, globalConfig, args[0])
 	if err != nil {
@@ -52,10 +64,10 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fs filewalk.FS, af *analyz
 	var sdb internal.ScanDB
 	sdb, err = internal.NewScanDB(ctx, cfg)
 	if err != nil {
-		return err
+		return fmt.Errorf("open/create database: %v: %v", cfg.Database, err)
 	}
 	if err := sdb.DeleteErrors(ctx, args[0]); err != nil {
-		return err
+		return fmt.Errorf("DeleteErrors: %v", err)
 	}
 	defer sdb.Close(ctx)
 
@@ -73,7 +85,7 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fs filewalk.FS, af *analyz
 	}
 
 	w.lsi = asyncstat.New(fs,
-		asyncstat.WithAsyncStats(cfg.ConcurrentScans),
+		asyncstat.WithAsyncStats(cfg.ConcurrentStats),
 		asyncstat.WithAsyncThreshold(cfg.ConcurrentStatsThreshold),
 		asyncstat.WithErrorLogger(w.logLStatError),
 		asyncstat.WithLatencyTracker(pt))
@@ -81,10 +93,14 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fs filewalk.FS, af *analyz
 	walkerStatus := make(chan filewalk.Status, 100)
 	walker := filewalk.New(w.fs,
 		w,
-		filewalk.WithConcurrency(cfg.ConcurrentScans),
+		filewalk.WithConcurrentScans(cfg.ConcurrentScans),
 		filewalk.WithScanSize(cfg.ScanSize),
 		filewalk.WithReporting(walkerStatus, time.Second, time.Second*10),
 	)
+
+	wc := walker.Configuration()
+	ic := w.lsi.Configuration()
+	fmt.Printf("configuration: scan size %v, concurrent scans %v, concurrent stats %v, concurrent stats threshold %v\n", wc.ScanSize, wc.ConcurrentScans, ic.AsyncStats, ic.AsyncThreshold)
 
 	go func() {
 		w.status(pctx, walkerStatus)

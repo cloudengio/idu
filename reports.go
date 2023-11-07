@@ -36,7 +36,7 @@ func (st *statsCmds) reports(ctx context.Context, values interface{}, args []str
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(rf.ReportDir, 0700); err != nil {
+	if err := os.MkdirAll(rf.ReportDir, 0770); err != nil {
 		return err
 	}
 	if set {
@@ -120,7 +120,7 @@ func newReportFilenames(root string, when time.Time, ext string) (*reportFilenam
 		rf.usersDir(),
 		rf.groupsDir(),
 	} {
-		if err := os.MkdirAll(sd, 0700); err != nil {
+		if err := os.MkdirAll(sd, 0770); err != nil {
 			return nil, err
 		}
 	}
