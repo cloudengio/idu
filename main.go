@@ -69,7 +69,7 @@ commands:
     summary: compute and display statistics from the database
     commands:
       - name: compute
-        summary: compute all statistics
+        summary: compute all statistics based on the current state of the database and store the results in the database
         arguments:
           - <prefix>
       - name: aggregate
@@ -90,14 +90,24 @@ commands:
         summary: list the available stats
         arguments:
           - <prefix>
-      - name: reports
-        summary: generate reports in a variety of formats, including tsv, json and markdown
-        arguments:
-          - <prefix>
       - name: erase
-        summary: erase the stats
+        summary: erase the stats stored in the database
         arguments:
           - <prefix>
+
+
+  - name: reports
+    summary: generate and manage reports
+    commands:
+      - name: generate
+        summary:  generate reports in a variety of formats, including tsv, json and markdown
+        arguments:
+          - <prefix>
+
+      - name: locate
+        summary: locate the last n sets of reports in a given directory as a json array of filenames. This is intended to be used by other scripts that analyze the reports.
+        arguments:
+          - <report-directory>
 
   - name: ls
     summary: list the contents of the database
@@ -160,7 +170,10 @@ func cli() *subcmd.CommandSetYAML {
 	cmdSet.Set("stats", "group").MustRunner(statsCmd.group, &groupFlags{})
 	cmdSet.Set("stats", "list").MustRunner(statsCmd.list, &listStatsFlags{})
 	cmdSet.Set("stats", "erase").MustRunner(statsCmd.erase, &eraseFlags{})
-	cmdSet.Set("stats", "reports").MustRunner(statsCmd.reports, &reportsFlags{})
+
+	reportsCmds := &reportCmds{}
+	cmdSet.Set("reports", "generate").MustRunner(reportsCmds.generate, &reportsFlags{})
+	cmdSet.Set("reports", "locate").MustRunner(reportsCmds.locate, &locateReportsFlags{})
 
 	findCmds := &findCmds{}
 	cmdSet.Set("find").MustRunner(findCmds.find, &findFlags{})

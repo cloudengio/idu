@@ -6,9 +6,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"cloudeng.io/cmd/idu/internal"
@@ -25,7 +28,9 @@ type reportsFlags struct {
 	JSON      int    `subcmd:"json,100,'generate json reports with the requested number of entries, 0 for none'"`
 }
 
-func (st *statsCmds) reports(ctx context.Context, values interface{}, args []string) error {
+type reportCmds struct{}
+
+func (rc *reportCmds) generate(ctx context.Context, values interface{}, args []string) error {
 	rf := values.(*reportsFlags)
 	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
 	if err != nil {
@@ -43,7 +48,7 @@ func (st *statsCmds) reports(ctx context.Context, values interface{}, args []str
 		var errs errors.M
 		err = db.VisitStats(ctx, from, to,
 			func(_ context.Context, when time.Time, data []byte) bool {
-				if err := st.generateReports(ctx, rf, args[0], when, data); err != nil {
+				if err := rc.generateReports(ctx, rf, args[0], when, data); err != nil {
 					errs.Append(err)
 					return false
 				}
@@ -57,10 +62,10 @@ func (st *statsCmds) reports(ctx context.Context, values interface{}, args []str
 	if err != nil {
 		return err
 	}
-	return st.generateReports(ctx, rf, args[0], when, data)
+	return rc.generateReports(ctx, rf, args[0], when, data)
 }
 
-func (st *statsCmds) generateReports(ctx context.Context, rf *reportsFlags, prefix string, when time.Time, data []byte) error {
+func (rc *reportCmds) generateReports(ctx context.Context, rf *reportsFlags, prefix string, when time.Time, data []byte) error {
 	if rf.TSV == 0 && rf.JSON == 0 && rf.Markdown == 0 {
 		return fmt.Errorf("no report requested, please specify one of --tsv, --json or --markdown")
 	}
@@ -207,7 +212,64 @@ func writeReportFiles(sdb *reports.AllStats,
 	if err := os.WriteFile(filenames.summary("group"), groupdata, 0600); err != nil {
 		return err
 	}
-
 	return nil
+}
+
+type locateReportsFlags struct {
+	N int `subcmd:"n,2,'locate the n most recent reports'"`
+}
+
+func (rc *reportCmds) listfiles(dir string) ([]string, error) {
+	var files []string
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err == nil {
+			files = append(files, filepath.Join(path, d.Name()))
+		}
+		return nil
+	})
+	return files, err
+}
+
+func (rc *reportCmds) locate(ctx context.Context, values interface{}, args []string) error {
+	lf := values.(*locateReportsFlags)
+	dir := args[0]
+	dirs, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	var candidates []string
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
+		}
+		_, err := time.Parse(time.RFC3339, d.Name())
+		if err != nil {
+			continue
+		}
+		candidates = append(candidates, d.Name())
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i] > candidates[j] })
+
+	type reportDir struct {
+		ReportDir string   `json:"report_dir"`
+		Files     []string `json:"files"`
+	}
+	var reports []reportDir
+	for i := 0; i < lf.N; i++ {
+		if i >= len(candidates) {
+			break
+		}
+		files, err := rc.listfiles(filepath.Join(dir, candidates[i]))
+		if err != nil {
+			return err
+		}
+		reports = append(reports, reportDir{candidates[i], files})
+	}
+	out, err := json.Marshal(reports)
+	if err != nil {
+		return err
+	}
+	_, err = os.Stdout.Write(out)
+	return err
 
 }
