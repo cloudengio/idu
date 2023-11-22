@@ -130,7 +130,7 @@ func (pt *progressTracker) incDonePrefix(deleted int, files int64) {
 	pt.Lock()
 	defer pt.Unlock()
 	pt.numPrefixesFinished++
-	pt.numFiles += int64(files)
+	pt.numFiles += files
 	pt.numDeleted += int64(deleted)
 }
 
@@ -246,7 +246,7 @@ func (pt *progressTracker) display(ctx context.Context) {
 		since := time.Since(lastReport)
 
 		current := cpy.numPrefixesFinished
-		prefixRate := (float64(current - lastPrefixes)) / float64(since.Seconds())
+		prefixRate := (float64(current - lastPrefixes)) / since.Seconds()
 		lastPrefixes = current
 
 		current = cpy.numStatsFinished

@@ -27,7 +27,7 @@ func (tt *testtree) createLevel(parent string, level int) ([]string, error) {
 	contents := []byte{0x1}
 	for i := 0; i < tt.nfiles; i++ {
 		filename := filepath.Join(parent, fmt.Sprintf("f%02v-%02v", level, i))
-		if err := os.WriteFile(filename, contents, 0666); err != nil {
+		if err := os.WriteFile(filename, contents, 0666); err != nil { //nolint:gosec
 			return nil, err
 		}
 		contents = append(contents, 0x1)
@@ -112,7 +112,7 @@ func (tt *testtree) createAdditional(depth, nfiles, ndirs int) error {
 	contents := make([]byte, fileOffset)
 	for i := fileOffset; i < fileOffset+nfiles; i++ {
 		filename := filepath.Join(p, fmt.Sprintf("f%02v-%02v", depth, i))
-		if err := os.WriteFile(filename, contents, 0666); err != nil {
+		if err := os.WriteFile(filename, contents, 0666); err != nil { //nolint:gosec
 			return err
 		}
 		contents = append(contents, 0x1)

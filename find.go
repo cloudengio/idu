@@ -55,6 +55,32 @@ func (or orRegexp) match(p string) bool {
 	return false
 }
 
+func (fc *findCmds) configure(ff *findFlags) (orPrefixes, orFiles orRegexp, useUID, useGID bool, uid, gid uint32, err error) {
+	orPrefixes, err = newOrRegExp(ff.PrefixMatch.Values)
+	if err != nil {
+		return
+	}
+	orFiles, err = newOrRegExp(ff.FileMatch.Values)
+	if err != nil {
+		return
+	}
+	useUID, useGID = len(ff.User) > 0, len(ff.Group) > 0
+	if useUID {
+		uid, err = globalUserManager.uidForName(ff.User)
+		if err != nil {
+			return
+		}
+	}
+
+	if useGID {
+		gid, err = globalUserManager.gidForName(ff.User)
+		if err != nil {
+			return
+		}
+	}
+
+}
+
 func (fc *findCmds) find(ctx context.Context, values interface{}, args []string) error {
 	ff := values.(*findFlags)
 	ctx, cfg, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
@@ -62,29 +88,9 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 		return err
 	}
 	defer db.Close(ctx)
-	orPrefixes, err := newOrRegExp(ff.PrefixMatch.Values)
+	orPrefixes, orFiles, useUID, useGID, uid, gid, err := fc.configure(ff)
 	if err != nil {
 		return err
-	}
-	orFiles, err := newOrRegExp(ff.FileMatch.Values)
-	if err != nil {
-		return err
-	}
-
-	var uid, gid uint32
-	useUID, useGID := len(ff.User) > 0, len(ff.Group) > 0
-	if useUID {
-		uid, err = globalUserManager.uidForName(ff.User)
-		if err != nil {
-			return err
-		}
-	}
-
-	if useGID {
-		gid, err = globalUserManager.gidForName(ff.User)
-		if err != nil {
-			return err
-		}
 	}
 
 	sep := cfg.Separator

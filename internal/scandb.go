@@ -148,8 +148,8 @@ type ScanDB interface {
 }
 
 type scanDB struct {
-	from, to string
-	db       database.DB
+	to string
+	db database.DB
 }
 
 func NewScanDB(ctx context.Context, cfg config.Prefix) (ScanDB, error) {

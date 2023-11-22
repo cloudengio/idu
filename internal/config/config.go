@@ -112,7 +112,7 @@ func ParseConfig(buf []byte) (T, error) {
 			}
 			cfg.Prefixes[i].regexps = append(cfg.Prefixes[i].regexps, re)
 		}
-		calc, err := parseLayout(&p.Layout)
+		calc, err := parseLayout(&cfg.Prefixes[i].Layout)
 		if err != nil {
 			return T{}, err
 		}

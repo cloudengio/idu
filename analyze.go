@@ -156,7 +156,6 @@ type walker struct {
 }
 
 type prefixState struct {
-	prefix          string
 	parentUnchanged bool
 	info            file.Info
 	existing        prefixinfo.T
@@ -186,7 +185,7 @@ func (w *walker) dbLog(ctx context.Context, prefix string, val []byte) {
 	if w.db == nil {
 		return
 	}
-	w.db.LogError(ctx, prefix, time.Now(), []byte(val))
+	w.db.LogError(ctx, prefix, time.Now(), val)
 }
 
 func (w *walker) logLStatError(ctx context.Context, filename string, err error) {
