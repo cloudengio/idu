@@ -252,6 +252,7 @@ func testErrors(t *testing.T, factory databaseFactory) {
 	prefix := "/filesytem-prefix"
 	tmpdir := t.TempDir()
 	db := factory(t, tmpdir, prefix, false)
+	defer db.Close(ctx)
 
 	t1, _ := time.Parse(time.RFC3339, "2023-08-10T10:00:02-08:00")
 	t2, _ := time.Parse(time.RFC3339, "2023-08-11T10:00:02-08:00")
@@ -278,7 +279,6 @@ func testErrors(t *testing.T, factory databaseFactory) {
 	entries := 1
 	err := db.VisitErrors(ctx, "/01",
 		func(_ context.Context, key string, when time.Time, detail []byte) bool {
-			fmt.Printf("W %v, %v %v\n", key, when, detail)
 			match(entries, key, when, detail)
 			entries++
 			return true
@@ -319,6 +319,7 @@ func testErrorsDelete(t *testing.T, factory databaseFactory) {
 	prefix := "/filesytem-prefix"
 	tmpdir := t.TempDir()
 	db := factory(t, tmpdir, prefix, false)
+	defer db.Close(ctx)
 
 	now := time.Now()
 	for i := 0; i < 100; i++ {
@@ -364,6 +365,7 @@ func testDelete(t *testing.T, factory databaseFactory) {
 	prefix := "/filesytem-prefix"
 	tmpdir := t.TempDir()
 	db := factory(t, tmpdir, prefix, false)
+	defer db.Close(ctx)
 
 	keys := []string{}
 	nItems := 50
@@ -433,6 +435,7 @@ func testStats(t *testing.T, factory databaseFactory) {
 	prefix := "/filesytem-prefix"
 	tmpdir := t.TempDir()
 	db := factory(t, tmpdir, prefix, false)
+	defer db.Close(ctx)
 
 	t1, _ := time.Parse(time.RFC3339, "2023-08-10T10:00:02-08:00")
 	t2, _ := time.Parse(time.RFC3339, "2023-08-11T10:00:02-08:00")

@@ -31,7 +31,7 @@ func (tr *tsvReports) formatMerged(merged map[string]reports.MergedStats) []byte
 	out := &bytes.Buffer{}
 	wr := csv.NewWriter(out)
 	wr.Comma = '\t'
-	wr.Write([]string{"prefix", "bytes", "storage bytes", "files", "directories", "directories", "directory bytes"})
+	wr.Write([]string{"prefix", "bytes", "storage bytes", "files", "directories", "directory bytes"})
 	for k, v := range merged {
 		wr.Write([]string{k,
 			strconv.FormatInt(v.Bytes, 10),

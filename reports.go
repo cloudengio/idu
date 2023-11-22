@@ -216,14 +216,25 @@ func writeReportFiles(sdb *reports.AllStats,
 }
 
 type locateReportsFlags struct {
-	N int `subcmd:"n,2,'locate the n most recent reports'"`
+	N        int    `subcmd:"n,2,'locate the n most recent reports'"`
+	Extesion string `subcmd:"extension,,file extension to match"`
 }
 
-func (rc *reportCmds) listfiles(dir string) ([]string, error) {
+func stripPrefix(prefix, path string) string {
+	if prefix == path {
+		return ""
+	}
+	return filepath.Join(stripPrefix(prefix, filepath.Dir(path)), filepath.Base(path))
+}
+
+func (rc *reportCmds) listfiles(dir, ext string) ([]string, error) {
+	dir = filepath.Clean(dir)
 	var files []string
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err == nil {
-			files = append(files, filepath.Join(path, d.Name()))
+		if err == nil && !d.IsDir() {
+			if len(ext) == 0 || filepath.Ext(path) == ext {
+				files = append(files, stripPrefix(dir, path))
+			}
 		}
 		return nil
 	})
@@ -237,33 +248,38 @@ func (rc *reportCmds) locate(ctx context.Context, values interface{}, args []str
 	if err != nil {
 		return err
 	}
-	var candidates []string
+	type candidate struct {
+		when time.Time
+		dir  string
+	}
+	candidates := []candidate{}
 	for _, d := range dirs {
 		if !d.IsDir() {
 			continue
 		}
-		_, err := time.Parse(time.RFC3339, d.Name())
+		when, err := time.Parse(time.RFC3339, d.Name())
 		if err != nil {
 			continue
 		}
-		candidates = append(candidates, d.Name())
+		candidates = append(candidates, candidate{when, d.Name()})
 	}
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i] > candidates[j] })
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].dir > candidates[j].dir })
 
 	type reportDir struct {
-		ReportDir string   `json:"report_dir"`
-		Files     []string `json:"files"`
+		ReportTime time.Time `json:"report_time"`
+		ReportDir  string    `json:"report_dir"`
+		Files      []string  `json:"files"`
 	}
 	var reports []reportDir
 	for i := 0; i < lf.N; i++ {
 		if i >= len(candidates) {
 			break
 		}
-		files, err := rc.listfiles(filepath.Join(dir, candidates[i]))
+		files, err := rc.listfiles(filepath.Join(dir, candidates[i].dir), lf.Extesion)
 		if err != nil {
 			return err
 		}
-		reports = append(reports, reportDir{candidates[i], files})
+		reports = append(reports, reportDir{candidates[i].when, candidates[i].dir, files})
 	}
 	out, err := json.Marshal(reports)
 	if err != nil {

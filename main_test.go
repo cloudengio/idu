@@ -72,7 +72,7 @@ func TestHelp(t *testing.T) {
 	out, _ = runIDU("help", "analyze") // will return exit status 1 for help.
 
 	err = containsAnyOf(out, "Usage of command analyze: analyze the file system to build a database of file counts, disk usage etc",
-		"analyze [--progress=true] <prefix>")
+		"analyze [--progress=true --show-defaults=false] <prefix>")
 	if err != nil {
 		t.Fatal(err)
 	}

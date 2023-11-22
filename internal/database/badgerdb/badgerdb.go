@@ -7,6 +7,7 @@ package badgerdb
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -459,15 +460,16 @@ func (db *Database) SaveStats(ctx context.Context, when time.Time, value []byte)
 func (db *Database) LastStats(ctx context.Context) (time.Time, []byte, error) {
 	lk, err := db.lastKey(statsPrefix)
 	if err != nil {
-		return time.Time{}, nil, err
+		return time.Time{}, nil, fmt.Errorf("failed to locate most recent stats: %v", err)
 	}
 	var buf bytes.Buffer
 	if err := db.get(ctx, lk, &buf); err != nil {
-		return time.Time{}, nil, err
+
+		return time.Time{}, nil, fmt.Errorf("failed to get most recent stats %v %v\n", lk, err)
 	}
 	var pl types.StatsPayload
 	if err := types.Decode(buf.Bytes(), &pl); err != nil {
-		return time.Time{}, nil, err
+		return time.Time{}, nil, fmt.Errorf("failed to decode most recent stats: %v", err)
 	}
 	return pl.When, pl.Payload, nil
 }

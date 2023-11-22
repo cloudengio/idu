@@ -25,11 +25,13 @@ type statsCmds struct {
 }
 
 type StatsFlags struct {
-	DisplayN int `subcmd:"display,10,number of top entries to display"`
+	DisplayN int  `subcmd:"display,10,number of top entries to display"`
+	Progress bool `subcmd:"progress,false,show progress"`
 }
 
 type computeFlags struct {
-	ComputeN int `subcmd:"n,2000,number of top entries to compute"`
+	ComputeN int  `subcmd:"n,2000,number of top entries to compute"`
+	Progress bool `subcmd:"progress,false,show progress"`
 }
 
 type aggregateFlags struct {
@@ -111,7 +113,7 @@ func (st *statsCmds) compute(ctx context.Context, values interface{}, args []str
 		return fmt.Errorf("error readling latest log entry: %v", err)
 	}
 
-	sdb, err := st.computeStats(ctx, rdb, cfg.Prefix, cfg.Calculator(), cf.ComputeN)
+	sdb, err := st.computeStats(ctx, rdb, cfg.Prefix, cfg.Calculator(), cf.ComputeN, cf.Progress)
 	if err != nil {
 		rdb.Close(ctx)
 		return err
@@ -132,7 +134,7 @@ func (st *statsCmds) compute(ctx context.Context, values interface{}, args []str
 	return db.SaveStats(ctx, when, buf.Bytes())
 }
 
-func (st *statsCmds) computeStats(ctx context.Context, db database.DB, prefix string, calc diskusage.Calculator, topN int) (*reports.AllStats, error) {
+func (st *statsCmds) computeStats(ctx context.Context, db database.DB, prefix string, calc diskusage.Calculator, topN int, progress bool) (*reports.AllStats, error) {
 
 	hasStorabeBytes := calc.String() != "identity"
 	sdb := reports.NewAllStats(prefix, hasStorabeBytes, topN)
@@ -147,7 +149,7 @@ func (st *statsCmds) computeStats(ctx context.Context, db database.DB, prefix st
 			fmt.Fprintf(os.Stderr, "failed to compute stats for %v: %v\n", k, err)
 			return
 		}
-		if n != 0 && n%1000 == 0 {
+		if progress && (n != 0 && n%1000 == 0) {
 			fmt.Printf("processed % 10v entries\n", fmtCount(int64(n)))
 		}
 		n++
@@ -158,7 +160,7 @@ func (st *statsCmds) computeStats(ctx context.Context, db database.DB, prefix st
 	return sdb, err
 }
 
-func (st *statsCmds) getOrComputeStats(ctx context.Context, prefix string, n int) (time.Time, *reports.AllStats, error) {
+func (st *statsCmds) getOrComputeStats(ctx context.Context, prefix string, n int, progress bool) (time.Time, *reports.AllStats, error) {
 	ctx, cfg, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, prefix, true)
 	if err != nil {
 		return time.Time{}, nil, err
@@ -178,13 +180,13 @@ func (st *statsCmds) getOrComputeStats(ctx context.Context, prefix string, n int
 	}
 
 	// Compute stats.
-	sdb, err := st.computeStats(ctx, db, prefix, cfg.Calculator(), n)
+	sdb, err := st.computeStats(ctx, db, prefix, cfg.Calculator(), n, progress)
 	return time.Now(), sdb, err
 }
 
 func (st *statsCmds) aggregate(ctx context.Context, values interface{}, args []string) error {
 	af := values.(*aggregateFlags)
-	when, sdb, err := st.getOrComputeStats(ctx, args[0], af.DisplayN)
+	when, sdb, err := st.getOrComputeStats(ctx, args[0], af.DisplayN, af.Progress)
 	if err != nil {
 		return err
 	}
@@ -216,7 +218,7 @@ func idmap(ids []string, mapper func(string) (uint32, error)) (map[uint32]bool, 
 
 func (st *statsCmds) user(ctx context.Context, values interface{}, args []string) error {
 	uf := values.(*userFlags)
-	when, sdb, err := st.getOrComputeStats(ctx, args[0], uf.DisplayN)
+	when, sdb, err := st.getOrComputeStats(ctx, args[0], uf.DisplayN, uf.Progress)
 	if err != nil {
 		return err
 	}
@@ -231,7 +233,7 @@ func (st *statsCmds) user(ctx context.Context, values interface{}, args []string
 
 func (st *statsCmds) group(ctx context.Context, values interface{}, args []string) error {
 	gf := values.(*groupFlags)
-	when, sdb, err := st.getOrComputeStats(ctx, args[0], gf.DisplayN)
+	when, sdb, err := st.getOrComputeStats(ctx, args[0], gf.DisplayN, gf.Progress)
 	if err != nil {
 		return err
 	}
