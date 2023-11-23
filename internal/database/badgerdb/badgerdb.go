@@ -92,13 +92,15 @@ func Open[T Options](location string, opts ...Option) (database.DB, error) {
 	}
 	db.Options.Sub.Options = db.Options.Sub.Options.WithReadOnly(db.Options.ReadOnly)
 
-	lockfile := filepath.Join(location, "lock")
+	lockfile := filepath.Join(location, "applock")
 	db.lock = lockedfile.MutexAt(lockfile)
 	var unlock func()
 	var err error
 	if db.Options.ReadOnly {
+		fmt.Fprint(os.Stderr, "READ ONLY\n")
 		unlock, err = db.lock.RLockCreate()
 	} else {
+		fmt.Fprint(os.Stderr, "READ WRITE\n")
 		unlock, err = db.lock.Lock()
 	}
 	fmt.Printf("LOCKED %v - %v\n", lockfile, err)
