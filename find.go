@@ -78,7 +78,7 @@ func (fc *findCmds) configure(ff *findFlags) (orPrefixes, orFiles orRegexp, useU
 			return
 		}
 	}
-
+	return
 }
 
 func (fc *findCmds) find(ctx context.Context, values interface{}, args []string) error {
@@ -88,6 +88,7 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 		return err
 	}
 	defer db.Close(ctx)
+
 	orPrefixes, orFiles, useUID, useGID, uid, gid, err := fc.configure(ff)
 	if err != nil {
 		return err
