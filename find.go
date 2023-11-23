@@ -143,19 +143,23 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 	}
 
 	if ff.Stats {
-		sdb.Finalize()
-
-		heapFormatter[string]{}.formatTotals(sdb.Prefix, os.Stdout)
-
-		banner(os.Stdout, "=", "Usage by top %v matched refixes\n", ff.TopN)
-		heapFormatter[string]{}.formatHeaps(sdb.Prefix, os.Stdout, func(v string) string { return v }, ff.TopN)
-
-		banner(os.Stdout, "=", "Bytes used by matched files\n")
-		for bytes.Len() > 0 {
-			k, v := bytes.PopMax()
-			fmt.Printf("%v %v\n", fmtSize(k), v)
-		}
+		fc.stats(sdb, bytes, ff.TopN)
 	}
 
 	return nil
+}
+
+func (fc *findCmds) stats(sdb *reports.AllStats, bytes *heap.MinMax[int64, string], topN int) {
+	sdb.Finalize()
+
+	heapFormatter[string]{}.formatTotals(sdb.Prefix, os.Stdout)
+
+	banner(os.Stdout, "=", "Usage by top %v matched refixes\n", topN)
+	heapFormatter[string]{}.formatHeaps(sdb.Prefix, os.Stdout, func(v string) string { return v }, topN)
+
+	banner(os.Stdout, "=", "Bytes used by matched files\n")
+	for bytes.Len() > 0 {
+		k, v := bytes.PopMax()
+		fmt.Printf("%v %v\n", fmtSize(k), v)
+	}
 }

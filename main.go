@@ -118,10 +118,10 @@ commands:
   - name: config
     summary: describe the current configuration
 
-  - name: du
-    summary: display disk usage for the specified directory tree without using a database
-    arguments:
-      - <directory>
+  #- name: du
+  #  summary: display disk usage for the specified directory tree without using a database
+  #  arguments:
+  #    - <directory>
 
   - name: database
     summary: database management commands
@@ -178,8 +178,10 @@ func cli() *subcmd.CommandSetYAML {
 	findCmds := &findCmds{}
 	cmdSet.Set("find").MustRunner(findCmds.find, &findFlags{})
 
-	//duCmd := &duCmd{}
-	//cmdSet.Set("du").MustRunner(duCmd.du, &duFlags{})
+	if false { // move out of this command and into the ufind.
+		duCmd := &duCmd{}
+		cmdSet.Set("du").MustRunner(duCmd.du, &duFlags{})
+	}
 
 	cmdSet.Set("config").MustRunner(configManager, &configFlags{})
 
