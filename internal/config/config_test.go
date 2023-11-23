@@ -128,16 +128,13 @@ func TestPrefixMatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, path, ok := cfg.ForPrefix("/tmp")
-	if got, want := p, "/tmp"; !ok || got.Prefix != want || path != "" {
-		t.Errorf("got %v, want %v", got, want)
-	}
-	p, path, ok = cfg.ForPrefix("/tmp/xyz")
+	p, ok := cfg.ForPrefix("/tmp")
 	if got, want := p, "/tmp"; !ok || got.Prefix != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	if got, want := path, "xyz"; !ok || got != want {
-		t.Errorf("got %q, want %q", got, want)
+	p, ok = cfg.ForPrefix("/tmp/xyz")
+	if got, want := p, "/tmp"; !ok || got.Prefix != want {
+		t.Errorf("got %v, want %v", got, want)
 	}
 }
 
