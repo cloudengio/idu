@@ -48,7 +48,7 @@ func LookupPrefix(ctx context.Context, all config.T, prefix string) (context.Con
 			prefix = filepath.Join(dir, prefix)
 		}
 	}
-	cfg, _, ok := all.ForPrefix(prefix)
+	cfg, ok := all.ForPrefix(prefix)
 	if !ok {
 		return ctx, cfg, fmt.Errorf("no configuration for %v", prefix)
 	}

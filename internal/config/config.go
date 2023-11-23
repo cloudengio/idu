@@ -49,7 +49,7 @@ type T struct {
 // prefix is the longest matching prefix in the configuration and the returned
 // string is the path relative to that prefix. The boolean return value is true
 // if a match is found.
-func (t T) ForPrefix(path string) (Prefix, string, bool) {
+func (t T) ForPrefix(path string) (Prefix, bool) {
 	var longest Prefix
 	for _, p := range t.Prefixes {
 		if strings.HasPrefix(path, p.Prefix) && len(p.Prefix) > len(longest.Prefix) {
@@ -57,13 +57,9 @@ func (t T) ForPrefix(path string) (Prefix, string, bool) {
 		}
 	}
 	if longest.Prefix == "" {
-		return Prefix{}, "", false
+		return Prefix{}, false
 	}
-	np := strings.TrimPrefix(path, longest.Prefix)
-	if len(np) > 0 && string(np[0]) == longest.Separator {
-		np = np[1:]
-	}
-	return longest, np, true
+	return longest, true
 }
 
 // Exclude returns true if path should be excluded/ignored.
