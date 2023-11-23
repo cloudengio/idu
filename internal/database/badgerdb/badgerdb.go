@@ -101,6 +101,7 @@ func Open[T Options](location string, opts ...Option) (database.DB, error) {
 	} else {
 		unlock, err = db.lock.Lock()
 	}
+	fmt.Printf("LOCKED %v - %v\n", lockfile, err)
 	if err != nil {
 		return nil, err
 	}
