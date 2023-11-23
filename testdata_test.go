@@ -34,10 +34,8 @@ func (tt *testtree) createLevel(parent string, level int) ([]string, error) {
 		created = append(created, filename)
 	}
 
-	dirs := []string{}
 	for i := 0; i < tt.breadth; i++ {
 		dirname := filepath.Join(parent, fmt.Sprintf("d%02v-%02v", level, i))
-		dirs = append(dirs, dirname)
 		if err := os.Mkdir(dirname, 0777); err != nil {
 			return nil, err
 		}
@@ -57,6 +55,7 @@ func (tt *testtree) createLevel(parent string, level int) ([]string, error) {
 	err = os.WriteFile(j(parent, "f-inaccessible-file"), []byte{'1', '2', '3'}, 0000)
 	errs.Append(err)
 	err = win32testutil.MakeInaccessibleToOwner(j(parent, "f-inaccessible-file")) // windows.
+	errs.Append(err)
 
 	created = append(created,
 		j(parent, "d-inaccessible-dir"),

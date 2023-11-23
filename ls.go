@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 )
 
@@ -40,9 +39,7 @@ type errorFlags struct {
 	Erase  bool `subcmd:"erase,false,erase the errors rather than displaying them"`
 }
 
-type lister struct {
-	prefix config.Prefix
-}
+type lister struct{}
 
 func (l *lister) prefixes(ctx context.Context, values interface{}, args []string) error {
 	flagValues := values.(*lsFlags)

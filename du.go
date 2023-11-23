@@ -226,11 +226,11 @@ func (ji *jsonHeapID) fill(h *reports.Heaps[uint32], fn func(uint32) string) {
 }
 
 type jsonOutput struct {
-	Errors    []struct{ Prefix, Error string } `json:"errors,omit_empty"`
+	Errors    []struct{ Prefix, Error string } `json:"errors,omitempty"`
 	SlowScans []struct {
 		Prefix   string
 		Duration time.Duration
-	} `json:"slow_scans,omit_empty"`
+	} `json:"slow_scans,omitempty"`
 	TotalBytes    int64 `json:"total_bytes"`
 	TotalFiles    int64 `json:"total_files"`
 	TotalPrefixes int64 `json:"total_prefixes"`

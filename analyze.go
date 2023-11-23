@@ -194,7 +194,7 @@ func (w *walker) logLStatError(ctx context.Context, filename string, err error) 
 	w.pt.incErrors()
 }
 
-func (w *walker) handlePrefix(ctx context.Context, state *prefixState, prefix string, info file.Info, err error) (stop, unchanged bool, _ error) {
+func (w *walker) handlePrefix(ctx context.Context, state *prefixState, prefix string, info file.Info) (stop, unchanged bool, _ error) {
 
 	if info.Mode()&os.ModeSymlink == os.ModeSymlink {
 		// Ignore symlinks.
@@ -204,11 +204,12 @@ func (w *walker) handlePrefix(ctx context.Context, state *prefixState, prefix st
 	}
 
 	// info was obtained via lstat/stat and hence will have uid/gid information.
-	state.current, err = prefixinfo.New(info)
+	current, err := prefixinfo.New(info)
 	if err != nil {
 		w.dbLog(ctx, prefix, []byte(err.Error()))
 		return true, false, err
 	}
+	state.current = current
 
 	ok, err := w.db.GetPrefixInfo(ctx, prefix, &state.existing)
 	if !ok {
@@ -250,7 +251,7 @@ func (w *walker) Prefix(ctx context.Context, state *prefixState, prefix string, 
 	state.start = time.Now()
 	internal.Log(ctx, internal.LogPrefix, "prefix start", "start", state.start, "prefix", w.cfg.Prefix, "path", prefix)
 
-	stop, state.parentUnchanged, retErr = w.handlePrefix(ctx, state, prefix, info, err)
+	stop, state.parentUnchanged, retErr = w.handlePrefix(ctx, state, prefix, info)
 	if retErr != nil {
 		w.dbLog(ctx, prefix, []byte(retErr.Error()))
 		return true, nil, retErr

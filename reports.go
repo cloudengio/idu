@@ -107,11 +107,6 @@ func (rc *reportCmds) generateReports(ctx context.Context, rf *reportsFlags, pre
 	return nil
 }
 
-func reportFilename(reportDir string, when time.Time, tag, ext string) string {
-	dir := filepath.Join(reportDir, when.Format(time.RFC3339))
-	return filepath.Join(dir, "total", ext)
-}
-
 type reportFilenames struct {
 	root string
 	when time.Time

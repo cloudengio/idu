@@ -148,7 +148,6 @@ type ScanDB interface {
 }
 
 type scanDB struct {
-	to string
 	db database.DB
 }
 

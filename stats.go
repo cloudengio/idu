@@ -153,7 +153,6 @@ func (st *statsCmds) computeStats(ctx context.Context, db database.DB, prefix st
 			fmt.Printf("processed % 10v entries\n", fmtCount(int64(n)))
 		}
 		n++
-		return
 	})
 	fmt.Printf("processed % 10v entries\n", fmtCount(int64(n)))
 	sdb.Finalize()

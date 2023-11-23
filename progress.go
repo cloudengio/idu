@@ -250,7 +250,7 @@ func (pt *progressTracker) display(ctx context.Context) {
 		lastPrefixes = current
 
 		current = cpy.numStatsFinished
-		statRate := (float64(current - lastStats)) / float64(since.Seconds())
+		statRate := (float64(current - lastStats)) / since.Seconds()
 		lastStats = current
 		var statLatency time.Duration
 		if current > 0 {
@@ -258,7 +258,7 @@ func (pt *progressTracker) display(ctx context.Context) {
 		}
 
 		current = cpy.numSyncScans
-		syncRate := (float64(current - lastSyncScans)) / float64(since.Seconds())
+		syncRate := (float64(current - lastSyncScans)) / since.Seconds()
 		lastSyncScans = current
 
 		lastReport = time.Now()

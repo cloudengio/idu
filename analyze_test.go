@@ -28,7 +28,7 @@ import (
 func setupAnalyze(t *testing.T) (tmpDir, config, prefix string, tt *testtree) {
 	tmpDir, err := os.MkdirTemp("", "filewalk")
 	if err != nil {
-		t.Fatal(fmt.Sprintf("failed to create testdir: %v", err))
+		t.Fatalf("failed to create testdir: %v", err)
 	}
 
 	tt = newTestTree(tmpDir, 3, 5, 5)

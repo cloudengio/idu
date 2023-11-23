@@ -109,11 +109,8 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 			fmt.Fprintf(os.Stderr, "failed to unmarshal value for %v: %v\n", k, err)
 			return false
 		}
-		puid, pgid := pi.UserGroup()
-		if useUID && puid != uid {
-			return true
-		}
-		if useGID && pgid != gid {
+
+		if fc.filterID(pi, useUID, useGID, uid, gid) {
 			return true
 		}
 
@@ -147,6 +144,17 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 	}
 
 	return nil
+}
+
+func (fc *findCmds) filterID(pi prefixinfo.T, useUID, useGID bool, uid, gid uint32) bool {
+	puid, pgid := pi.UserGroup()
+	if useUID && puid != uid {
+		return true
+	}
+	if useGID && pgid != gid {
+		return true
+	}
+	return false
 }
 
 func (fc *findCmds) stats(sdb *reports.AllStats, bytes *heap.MinMax[int64, string], topN int) {
