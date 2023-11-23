@@ -10,6 +10,6 @@ import (
 	"cloudeng.io/file"
 )
 
-func UserGroupID(fi file.Info) (UserID, GroupID uint32) {
-	return 0, 0
+func userGroupID(fi file.Info) (userID, groupID uint32, ok bool) {
+	return 0, 0, true
 }
