@@ -18,3 +18,7 @@ func userGroupID(fi file.Info) (userID, groupID uint32, ok bool) {
 	}
 	return 0, 0, false
 }
+
+func sysUserGroupID(uid, gid uint32) any {
+	return &syscall.Stat_t{Uid: uid, Gid: gid}
+}

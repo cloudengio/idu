@@ -11,5 +11,16 @@ import (
 )
 
 func userGroupID(fi file.Info) (userID, groupID uint32, ok bool) {
-	return 0, 0, true
+	if u, ok := fi.Sys().(*userInfo); ok {
+		return u.Uid, u.Gid, true
+	}
+	return 0, 0, false
+}
+
+type userInfo struct {
+	uid, gid uint32
+}
+
+func sysUserGroupID(uid, gid uint32) any {
+	return &userInfo{Uid: uid, Gid: gid}
 }

@@ -112,3 +112,7 @@ func IDsFromStats(s StatsList) []uint32 {
 	}
 	return r
 }
+
+func SysUserGroupID(uid, gid uint32) any {
+	return sysUserGroupID(uid, gid)
+}
