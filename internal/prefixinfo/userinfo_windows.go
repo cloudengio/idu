@@ -12,7 +12,7 @@ import (
 
 func userGroupID(fi file.Info) (userID, groupID uint32, ok bool) {
 	if u, ok := fi.Sys().(*userInfo); ok {
-		return u.Uid, u.Gid, true
+		return u.uid, u.gid, true
 	}
 	return 0, 0, false
 }
