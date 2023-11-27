@@ -6,7 +6,9 @@
 
 package badgerdb
 
-func osOptions(opts badgerdb.Options) badgerdb.Options {
+import "github.com/dgraph-io/badger/v4"
+
+func osOptions(opts badger.Options) badger.Options {
 	opts.ReadOnly = false // Read-only mode is not supported on Windows.
 	return opts
 }
