@@ -5,216 +5,227 @@
 package config
 
 import (
-	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
+	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 
-	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmdutil/structdoc"
-	"cloudeng.io/errors"
 	"cloudeng.io/file/diskusage"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
-// Layout represents a means of calculating the disk usage for files with
-// the specified prefix.
-type Layout struct {
-	Prefix     string
-	Separator  string
-	Calculator diskusage.Calculator
+type Prefix struct {
+	Prefix                   string   `yaml:"prefix" cmd:"the prefix to be analyzed"`
+	Database                 string   `yaml:"database" cmd:"the location of the database to use for this prefix"`
+	Separator                string   `yaml:"separator" cmd:"filename separator to use, defaults to /"`
+	ConcurrentScans          int      `yaml:"concurrent_scans" cmd:"maximum number of concurrent scan operations"`
+	ConcurrentStats          int      `yaml:"concurrent_stats" cmd:"maximum number of concurrent stat operations"`
+	ConcurrentStatsThreshold int      `yaml:"concurrent_stats_threshold" cmd:"minimum number of files before stats are performed concurrently"`
+	SetMaxThreads            int      `yaml:"set_max_threads" cmd:"if non-zero used for debug.SetMaxThreads"`
+	ScanSize                 int      `yaml:"scan_size" cmd:"maximum number of items to fetch from the filesystem in a single operation"`
+	Exclusions               []string `yaml:"exclusions" cmd:"prefixes and files matching these regular expressions will be ignored when building a dataase"`
+	Layout                   layout   `yaml:"layout" cmd:"the filesystem layout to use for calculating raw bytes used"`
+
+	regexps    []*regexp.Regexp
+	calculator diskusage.Calculator
 }
 
-// DatabaseOpenFunc is called to open a filewalk.Database instance in
-// write or read-only mode.
-type DatabaseOpenFunc func(ctx context.Context, opts ...internal.DatabaseOption) (internal.Database, error)
-
-// DatabaseDeleteFunc is called to delete an instance of internal.Database.
-type DatabaseDeleteFunc func(ctx context.Context) error
-
-// Database represents a means of creating instances of internal.Database
-// configured as per the yaml configuration file that is to be used for
-// storing data for entries within the specified prefix.
-type Database struct {
-	Prefix      string
-	Type        string
-	Open        DatabaseOpenFunc
-	Delete      DatabaseDeleteFunc
-	Description string
+type layout struct {
+	Calculator string    `yaml:"calculator" cmd:"the type of disk usage calculator to use"`
+	Parameters yaml.Node `yaml:"parameters" cmd:"the layout parameters to use for this calculator"`
 }
 
-// Exclusions represents a set of exclusion regular expressions to
-// apply to a prefix.
-type Exclusions struct {
-	Prefix  string
-	Regexps []*regexp.Regexp
+func (p *Prefix) Calculator() diskusage.Calculator {
+	return p.calculator
 }
 
-// Config represents a complete configuration.
-type Config struct {
-	Databases  []Database   // Per-prefix databases.
-	Layouts    []Layout     // Per-prefix layouts.
-	Exclusions []Exclusions // Per-prefix exclusions.
+type T struct {
+	Prefixes []Prefix `yaml:"prefixes" cmd:"the prefixes to be analyzed"`
 }
 
-func (cfg *Config) DatabaseFor(prefix string) (Database, bool) {
-	for _, d := range cfg.Databases {
-		if strings.HasPrefix(prefix, d.Prefix) {
-			return d, true
+// ForPrefix returns the prefix configuration that corresponds to path. The
+// prefix is the longest matching prefix in the configuration and the returned
+// string is the path relative to that prefix. The boolean return value is true
+// if a match is found.
+func (t T) ForPrefix(path string) (Prefix, bool) {
+	var longest Prefix
+	for _, p := range t.Prefixes {
+		if strings.HasPrefix(path, p.Prefix) && len(p.Prefix) > len(longest.Prefix) {
+			longest = p
 		}
 	}
-	return Database{}, false
+	if longest.Prefix == "" {
+		return Prefix{}, false
+	}
+	return longest, true
 }
 
-var identityCalculator = diskusage.NewIdentity()
-
-func (cfg *Config) LayoutFor(prefix string) Layout {
-	for _, l := range cfg.Layouts {
-		if strings.HasPrefix(prefix, l.Prefix) {
-			return l
+// Exclude returns true if path should be excluded/ignored.
+func (p *Prefix) Exclude(path string) bool {
+	for _, re := range p.regexps {
+		if re.MatchString(path) {
+			return true
 		}
 	}
-	return Layout{
-		Prefix:     prefix,
-		Separator:  "/",
-		Calculator: identityCalculator,
-	}
+	return false
 }
 
-func (cfg *Config) ExclusionsFor(prefix string) (Exclusions, bool) {
-	for _, e := range cfg.Exclusions {
-		if strings.HasPrefix(prefix, e.Prefix) {
-			return e, true
+// StorageBytes returns the number of bytes used to store n bytes given
+// the underlying storage system.
+func (p *Prefix) StorageBytes(n int64) int64 {
+	if p.calculator == nil {
+		return n
+	}
+	return p.calculator.Calculate(n)
+}
+
+var (
+	DefaultConcurrentStats          = 0
+	DefaultConcurrentStatsThreshold = 0
+	DefaultConcurrentScans          = 0
+	DefaultScanSize                 = 0
+)
+
+// ParseConfig will parse a yaml config from the supplied byte slice.
+func ParseConfig(buf []byte) (T, error) {
+	var cfg T
+	if err := yaml.Unmarshal(buf, &cfg.Prefixes); err != nil {
+		return T{}, err
+	}
+
+	raw := []map[string]any{}
+	yaml.Unmarshal(buf, &raw)
+
+	for i, p := range cfg.Prefixes {
+		cfg.Prefixes[i].Prefix = os.ExpandEnv(p.Prefix)
+		cfg.Prefixes[i].Database = os.ExpandEnv(p.Database)
+		for _, e := range p.Exclusions {
+			re, err := regexp.Compile(e)
+			if err != nil {
+				return T{}, err
+			}
+			cfg.Prefixes[i].regexps = append(cfg.Prefixes[i].regexps, re)
+		}
+		calc, err := parseLayout(&cfg.Prefixes[i].Layout)
+		if err != nil {
+			return T{}, err
+		}
+		cfg.Prefixes[i].calculator = calc
+		if len(p.Separator) == 0 {
+			cfg.Prefixes[i].Separator = string(filepath.Separator)
+		}
+		if _, ok := raw[i]["concurrent_stats_threshold"]; !ok {
+			cfg.Prefixes[i].ConcurrentStatsThreshold = DefaultConcurrentStatsThreshold
+		}
+		if _, ok := raw[i]["concurrent_stats"]; !ok {
+			cfg.Prefixes[i].ConcurrentStats = DefaultConcurrentStats
+		}
+		if _, ok := raw[i]["concurrent_scans"]; !ok {
+			cfg.Prefixes[i].ConcurrentScans = DefaultConcurrentScans
+		}
+		if _, ok := raw[i]["scan_size"]; !ok {
+			cfg.Prefixes[i].ScanSize = DefaultScanSize
 		}
 	}
-	return Exclusions{}, false
-}
-
-type exclusions struct {
-	Prefix  string   `yaml:"prefix" cmd:"prefix that these exclusions apply to"`
-	Regexps []string `yaml:"regexps" cmd:"prefixes and files matching these regular expressions will be ignored when building a datagase"`
-}
-
-type yamlConfig struct {
-	Databases  []database   `yaml:"databases" cmd:"per-prefix database configurations"`
-	Layouts    []layout     `yaml:"layouts" cmd:"per-prefix filesystem layouts"`
-	Exclusions []exclusions `yaml:"exclusions" cmd:"per-prefix exclusions"`
+	return cfg, nil
 }
 
 // ReadConfig will read a yaml config from the specified file.
-func ReadConfig(filename string) (*Config, error) {
-	buf, err := ioutil.ReadFile(filename)
+func ReadConfig(filename string) (T, error) {
+	buf, err := os.ReadFile(filename)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %v: %v", filename, err)
+		return T{}, fmt.Errorf("failed to read config file: %v: %v", filename, err)
 	}
-	cfg, err := ParseConfig(buf)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse/process config file %v: %v", filename, err)
-	}
-	if len(cfg.Layouts) == 0 {
-		cfg.Layouts = []Layout{
-			{Prefix: "", Separator: "/", Calculator: diskusage.NewSimple(4096)},
-		}
-		fmt.Printf("warning: config %v does not contain a layout. assuming a simple layout with 4K block size\n", filename)
-	}
-	return cfg, nil
+	return ParseConfig(buf)
 }
 
-// ParseConfig will parse a yaml config from the supplied byte slice.
-func ParseConfig(buf []byte) (*Config, error) {
-	ymlcfg := &yamlConfig{}
-	if err := yaml.Unmarshal(buf, ymlcfg); err != nil {
-		return nil, err
-	}
-	cfg := &Config{}
-	cfg.Exclusions = make([]Exclusions, len(ymlcfg.Exclusions))
-	for i, e := range ymlcfg.Exclusions {
-		regexps := make([]*regexp.Regexp, len(e.Regexps))
-		errs := errors.M{}
-		for i, expr := range e.Regexps {
-			re, err := regexp.Compile(expr)
-			if err != nil {
-				errs.Append(fmt.Errorf("failed to compile %v: %v", expr, err))
-			}
-			regexps[i] = re
-		}
-		if err := errs.Err(); err != nil {
-			return nil, err
-		}
-		cfg.Exclusions[i] = Exclusions{e.Prefix, regexps}
-	}
-	cfg.Layouts = make([]Layout, len(ymlcfg.Layouts))
-	for i, l := range ymlcfg.Layouts {
-		sep := "/"
-		if len(l.Spec.Separator) > 0 {
-			sep = l.Spec.Separator
-		}
-		cfg.Layouts[i] = Layout{
-			Prefix:     os.ExpandEnv(l.Spec.Prefix),
-			Separator:  sep,
-			Calculator: l.instance,
-		}
-	}
-
-	cfg.Databases = make([]Database, len(ymlcfg.Databases))
-	for i, db := range ymlcfg.Databases {
-		cfg.Databases[i] = Database{
-			Prefix:      os.ExpandEnv(db.Spec.Prefix),
-			Type:        db.Spec.Type,
-			Open:        db.open,
-			Description: db.description,
-			Delete:      db.delete,
-		}
-	}
-	if len(cfg.Databases) == 0 || cfg.Databases[0].Open == nil {
-		return nil, fmt.Errorf("no database was configured")
-	}
-	// Sort by longest, ie most specific, prefix first.
-	sort.Slice(cfg.Exclusions, func(i, j int) bool {
-		return len(cfg.Exclusions[i].Prefix) > len(cfg.Exclusions[j].Prefix)
-	})
-	sort.Slice(cfg.Layouts, func(i, j int) bool {
-		return len(cfg.Layouts[i].Prefix) > len(cfg.Layouts[j].Prefix)
-	})
-	sort.Slice(cfg.Databases, func(i, j int) bool {
-		return len(cfg.Databases[i].Prefix) > len(cfg.Databases[j].Prefix)
-	})
-	return cfg, nil
+type RAID0 struct {
+	StripeSize int64 `yaml:"stripe_size" cmd:"the size of the raid0 stripes"`
+	NumStripes int   `yaml:"num_stripes" cmd:"the number of stripes used"`
 }
 
-func describe(name string, cfg interface{}) string {
+type Block struct {
+	BlockSize int64 `yaml:"size" cmd:"block size used by this filesystem"`
+}
+
+type layoutConfig struct {
+	newLayout      func(n yaml.Node) (diskusage.Calculator, error)
+	describeLayout func() string
+}
+
+func bytesCalc(n yaml.Node) (diskusage.Calculator, error) {
+	return diskusage.NewIdentity(), nil
+}
+
+func bytesDesc() string {
+	return "bytes: assumes that the size of each file is the number of bytes used\n"
+}
+
+func blockCalc(n yaml.Node) (diskusage.Calculator, error) {
+	var b Block
+	if err := n.Decode(&b); err != nil {
+		return nil, fmt.Errorf("failed parsing block layout parameters: %v", err)
+	}
+	return diskusage.NewSimple(b.BlockSize), nil
+}
+
+func blockDesc() string {
+	desc, _ := structdoc.Describe(&Block{}, "cmd", "block calculator parameters\n")
 	out := &strings.Builder{}
-	desc, err := structdoc.Describe(cfg, "cmd", name+":\n")
-	if err != nil {
-		panic(err)
-	}
-	out.WriteString("  " + desc.Detail)
-	out.WriteString(structdoc.FormatFields(4, 2, desc.Fields))
+	out.WriteString("block: the size of each file is a multiple of the block size\n")
+	out.WriteString(structdoc.FormatFields(2, 4, desc.Fields))
 	return out.String()
+}
+
+func raid0Calc(n yaml.Node) (diskusage.Calculator, error) {
+	var r RAID0
+	if err := n.Decode(&r); err != nil {
+		return nil, fmt.Errorf("failed parsing RAID0 layout parameters: %v", err)
+	}
+	return diskusage.NewRAID0(r.StripeSize, r.NumStripes), nil
+}
+
+func raid0Desc() string {
+	desc, _ := structdoc.Describe(&RAID0{}, "cmd", "raid0 calculator parameters\n")
+	out := &strings.Builder{}
+	out.WriteString("raid0: the size of each file depends on the RAID0 parameters in use\n")
+	out.WriteString(structdoc.FormatFields(2, 4, desc.Fields))
+	return out.String()
+}
+
+var supportedLayouts = map[string]layoutConfig{
+	"bytes": {bytesCalc, bytesDesc},
+	"block": {blockCalc, blockDesc},
+	"raid0": {raid0Calc, raid0Desc},
+}
+
+func parseLayout(l *layout) (diskusage.Calculator, error) {
+	if len(l.Calculator) == 0 {
+		l.Calculator = "bytes"
+	}
+	supported, ok := supportedLayouts[strings.ToLower(l.Calculator)]
+	if !ok {
+		return nil, fmt.Errorf("unsupported disk usage calculator: %v", l.Calculator)
+	}
+	return supported.newLayout(l.Parameters)
 }
 
 // Documentation will return a description of the format of the
 // yaml configuration file.
 func Documentation() string {
 	out := &strings.Builder{}
-	desc, err := structdoc.Describe(&yamlConfig{}, "cmd", "YAML configuration file options\n")
+	desc, err := structdoc.Describe(&T{}, "cmd", "YAML configuration file options\n")
 	if err != nil {
 		panic(err)
 	}
 	out.WriteString(structdoc.FormatFields(0, 2, desc.Fields))
-	if len(supportedLayouts) == 0 {
-		return out.String()
-	}
-	out.WriteString("\nSupported Databases:\n")
-	for name, cfg := range supportedDatabases {
-		out.WriteString(describe(name, cfg.config))
-	}
-	out.WriteString("\nSupported Layouts:\n")
-	for name, cfg := range supportedLayouts {
-		out.WriteString(describe(name, cfg.config))
+
+	out.WriteString("\nSupported layouts:\n\n")
+	for _, v := range supportedLayouts {
+		out.WriteString(v.describeLayout())
+		out.WriteRune('\n')
 	}
 	return out.String()
 }

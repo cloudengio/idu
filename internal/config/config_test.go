@@ -12,67 +12,128 @@ import (
 )
 
 const simple = `
-databases:
-  - prefix: /tmp
-    type: local
-    directory: ./db-tmp
-  - prefix: /
-    type: local
-    directory: ./db-local
-layouts:
-  - type: block
-    prefix: "/"
-    block_size: 4096
-  - type: "block"
-    prefix: "/labs/asbhatt"
-    block_size: 4096
-  - type: "raid0"
-    prefix: "/labs/bar"
-    num_stripes: 3
-    stripe_size: 1024
-exclusions:
-  - prefix: "/Users/cnicolaou"
-    regexps:
-      - ".DS_Store$"
-  - prefix: "/tmp"
-    regexps:
-       - ".DS_Store$"
-       - "something"
- `
+- prefix: /tmp
+  database: ./db-tmp
+  exclusions:
+    - something
+  layout:
+    calculator: block
+    parameters:
+      size: 4096
+- prefix: /
+  database: ./db-local
+  concurrent_scans: 2
+  concurrent_stats: 4
+  exclusions:
+    - /.DS_Store$"
+    - ^/System/Volumes/
+    - ^/System/Volumes$
+`
 
 func TestSimple(t *testing.T) {
 	cfg, err := config.ParseConfig([]byte(simple))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(cfg.Databases), 2; got != want {
+	if got, want := len(cfg.Prefixes), 2; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	if got, want := cfg.Databases[0].Type, "local"; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-
-	if got, want := cfg.Databases[1].Description, "local database in ./db-local"; got != want {
+	if got, want := cfg.Prefixes[0].Prefix, "/tmp"; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
-	if got, want := len(cfg.Layouts), 3; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-	if got, want := cfg.Layouts[0].Calculator.String(), "simple: 4096"; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-	if got, want := cfg.Layouts[2].Prefix, "/"; got != want {
+	if got, want := cfg.Prefixes[0].StorageBytes(3), int64(4096); got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
-	if got, want := len(cfg.Exclusions), 2; got != want {
+	if got, want := cfg.Prefixes[1].Exclude("something"), false; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	if got, want := len(cfg.Exclusions[1].Regexps), 2; got != want {
+
+	if got, want := cfg.Prefixes[1].Exclude("/System/Volumes/XX"), true; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	if got, want := cfg.Exclusions[1].Regexps[1].String(), "something"; got != want {
+
+	if got, want := cfg.Prefixes[1].Exclude("/System/Volumes"), true; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
+	if got, want := cfg.Prefixes[1].Exclude("/System/VolumesX"), false; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
+	if got, want := cfg.Prefixes[1].ConcurrentScans == 2, true; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
+	if got, want := cfg.Prefixes[1].ConcurrentStats == 4, true; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+const defaults = `
+- prefix: /tmp
+  database: ./db-tmp
+- prefix: /var
+  concurrent_scans: 300
+  concurrent_stats: 100
+  concurrent_stats_threshold: 200
+  scan_size: 400
+`
+
+func init() {
+	config.DefaultConcurrentStats = 1
+	config.DefaultConcurrentStatsThreshold = 2
+	config.DefaultConcurrentScans = 3
+	config.DefaultScanSize = 4
+}
+
+func TestDefaults(t *testing.T) {
+	cfg, err := config.ParseConfig([]byte(defaults))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dp := cfg.Prefixes[0]
+	if got, want := dp.ConcurrentStats, 1; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if got, want := dp.ConcurrentStatsThreshold, 2; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if got, want := dp.ConcurrentScans, 3; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if got, want := dp.ScanSize, 4; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
+	dp = cfg.Prefixes[1]
+	if got, want := dp.ConcurrentStats, 100; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if got, want := dp.ConcurrentStatsThreshold, 200; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if got, want := dp.ConcurrentScans, 300; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if got, want := dp.ScanSize, 400; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestPrefixMatch(t *testing.T) {
+	cfg, err := config.ParseConfig([]byte(simple))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, ok := cfg.ForPrefix("/tmp")
+	if got, want := p, "/tmp"; !ok || got.Prefix != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	p, ok = cfg.ForPrefix("/tmp/xyz")
+	if got, want := p, "/tmp"; !ok || got.Prefix != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }
@@ -81,9 +142,9 @@ func TestDocumentation(t *testing.T) {
 	got := config.Documentation()
 	for _, expected := range []string{
 		"raid0",
-		"local",
-		"Supported Databases:",
-		"Supported Layouts:",
+		"prefix:",
+		"when building",
+		"raid0",
 	} {
 		if !strings.Contains(got, expected) {
 			t.Errorf("documentation does not contain: %q", expected)

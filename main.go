@@ -7,109 +7,192 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"strings"
 
 	// G108
 	_ "net/http/pprof" //nolint:gosec
-	"path/filepath"
 	"runtime"
 	debugpkg "runtime/debug"
-	"time"
 
+	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/config"
+	"cloudeng.io/cmdutil"
 	"cloudeng.io/cmdutil/flags"
 	"cloudeng.io/cmdutil/profiling"
 	"cloudeng.io/cmdutil/subcmd"
 	"cloudeng.io/file/diskusage"
+	"cloudeng.io/file/filewalk"
+	"cloudeng.io/file/filewalk/asyncstat"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 )
 
 var (
-	cmdSet       *subcmd.CommandSet
 	globalFlags  GlobalFlags
-	globalConfig *config.Config
+	globalConfig config.T
+)
+
+var (
 	panicBuf     = make([]byte, 1024*1024)
 	bytesPrinter func(size int64) (float64, string)
 )
 
+var commands = `name: idu
+summary: analyze disk usage using a database for incremental updates
+commands:
+  - name: analyze
+    summary: analyze the file system to build a database of file counts, disk usage etc
+    arguments:
+      - <prefix>
+
+  - name: logs
+    summary: list the log of past operations stored in the database
+    arguments:
+      - <prefix>
+
+  - name: errors
+    summary: list the errors stored in the database
+    arguments:
+      - <prefix>
+
+  - name: find
+    summary: find files matching the specified criteria
+    arguments:
+     - <prefix>
+
+  - name: stats
+    summary: compute and display statistics from the database
+    commands:
+      - name: compute
+        summary: compute all statistics based on the current state of the database and store the results in the database
+        arguments:
+          - <prefix>
+      - name: aggregate
+        summary: display aggregated/tatal stats
+        arguments:
+          - <prefix>
+      - name: user
+        summary: summarize file count and disk usage on a per user basis
+        arguments:
+          - <prefix>
+          - '[user]...'
+      - name: group
+        summary: summarize file count and disk usage on a per group basis
+        arguments:
+          - <prefix>
+          - '[group]...'
+      - name: list
+        summary: list the available stats
+        arguments:
+          - <prefix>
+      - name: erase
+        summary: erase the stats stored in the database
+        arguments:
+          - <prefix>
+
+
+  - name: reports
+    summary: generate and manage reports
+    commands:
+      - name: generate
+        summary:  generate reports in a variety of formats, including tsv, json and markdown
+        arguments:
+          - <prefix>
+
+      - name: locate
+        summary: locate the last n sets of reports in a given directory as a json array of filenames. This is intended to be used by other scripts that analyze the reports.
+        arguments:
+          - <report-directory>
+
+  - name: ls
+    summary: list the contents of the database
+    arguments:
+       - <prefix>
+       - '[prefixes]...'
+
+  - name: config
+    summary: describe the current configuration
+
+  #- name: du
+  #  summary: display disk usage for the specified directory tree without using a database
+  #  arguments:
+  #    - <directory>
+
+  - name: database
+    summary: database management commands
+    commands:
+    - name: locate
+      summary: display the location of the database
+      arguments:
+        - <prefix>
+`
+
 type GlobalFlags struct {
-	ExitProfile profiling.ProfileFlag `subcmd:"exit-profile,,'write a profile on exit; the format is <profile-name>:<file> and the flag may be repeated to request multiple profile types, use cpu to request cpu profiling in addition to predefined profiles in runtime/pprof'"`
-	Human       bool                  `subcmd:"h,true,show sizes in human readable form"`
+	ExitProfile profiling.ProfileFlag `subcmd:"profile,,'write a profile on exit; the format is <profile-name>:<file> and the flag may be repeated to request multiple profile types, use cpu to request cpu profiling in addition to predefined profiles in runtime/pprof'"`
 	ConfigFile  string                `subcmd:"config,$HOME/.idu.yml,configuration file"`
 	Units       string                `subcmd:"units,decimal,display usage in decimal (KB) or binary (KiB) formats"`
-	Verbose     int                   `subcmd:"v,0,higher values show more debugging output"`
+	Verbose     int                   `subcmd:"v,0,lower values show more debugging output"`
+	LogDir      string                `subcmd:"log-dir,,directory to write log files to"`
+	Stderr      bool                  `subcmd:"stderr,false,write log messages to stderr"`
 	HTTP        string                `subcmd:"http,,set to a port to enable http serving of /debug/vars and profiling"`
 	GCPercent   int                   `subcmd:"gcpercent,50,value to use for runtime/debug.SetGCPercent"`
+	UseBadgerDB bool                  `subcmd:"use-badger-db,true,use badgerdb instead of boltdb"`
+	UseBoltDB   bool                  `subcmd:"use-bolt-db,false,use boltdb instead of badgerdb"`
 }
 
 func init() {
-	analyzeFlagSet := subcmd.MustRegisterFlagStruct(&analyzeFlags{}, nil, nil)
-	summaryFlagSet := subcmd.MustRegisterFlagStruct(&summaryFlags{}, nil, nil)
-	userFlagSet := subcmd.MustRegisterFlagStruct(&userFlags{}, nil, nil)
-	groupFlagSet := subcmd.MustRegisterFlagStruct(&groupFlags{}, nil, nil)
-	findFlagSet := subcmd.MustRegisterFlagStruct(&findFlags{}, nil, nil)
-	lsFlagSet := subcmd.MustRegisterFlagStruct(&lsFlags{}, nil, nil)
-	eraseFlagSet := subcmd.MustRegisterFlagStruct(&eraseFlags{}, nil, nil)
+	config.DefaultConcurrentStats = asyncstat.DefaultAsyncStats
+	config.DefaultConcurrentStatsThreshold = asyncstat.DefaultAsyncThreshold
+	config.DefaultConcurrentScans = filewalk.DefaultConcurrentScans
+	config.DefaultScanSize = filewalk.DefaultScanSize
+}
 
-	analyzeCmd := subcmd.NewCommand("analyze", analyzeFlagSet, analyze, subcmd.ExactlyNumArguments(1))
-	analyzeCmd.Document("analyze the file system to build a database of file counts, disk usage etc", "<directory/prefix>+")
+func cli() *subcmd.CommandSetYAML {
+	cmdSet := subcmd.MustFromYAML(commands)
 
-	summaryCmd := subcmd.NewCommand("summary", summaryFlagSet, summary, subcmd.ExactlyNumArguments(1))
-	summaryCmd.Document("summarize file count and disk usage")
+	analyzer := &analyzeCmd{}
+	cmdSet.Set("analyze").MustRunner(analyzer.analyze, &analyzeFlags{})
 
-	userSummaryCmd := subcmd.NewCommand("user", userFlagSet, userSummary, subcmd.AtLeastNArguments(1))
-	userSummaryCmd.Document("summarize file count and disk usage on a per user basis", "<prefix> <users>...")
+	ls := &lister{}
+	cmdSet.Set("ls").MustRunner(ls.prefixes, &lsFlags{})
+	cmdSet.Set("errors").MustRunner(ls.errors, &errorFlags{})
+	cmdSet.Set("logs").MustRunner(ls.logs, &logFlags{})
 
-	groupSummaryCmd := subcmd.NewCommand("group", groupFlagSet, groupSummary, subcmd.AtLeastNArguments(1))
-	groupSummaryCmd.Document("summarize file count and disk usage on a per group basis", "<prefix> <groups>...")
+	statsCmd := &statsCmds{}
+	cmdSet.Set("stats", "compute").MustRunner(statsCmd.compute, &computeFlags{})
+	cmdSet.Set("stats", "aggregate").MustRunner(statsCmd.aggregate, &aggregateFlags{})
+	cmdSet.Set("stats", "user").MustRunner(statsCmd.user, &userFlags{})
+	cmdSet.Set("stats", "group").MustRunner(statsCmd.group, &groupFlags{})
+	cmdSet.Set("stats", "list").MustRunner(statsCmd.list, &listStatsFlags{})
+	cmdSet.Set("stats", "erase").MustRunner(statsCmd.erase, &eraseFlags{})
 
-	findCmd := subcmd.NewCommand("find", findFlagSet, find)
-	findCmd.Document("find prefixes/files in statistics database")
+	reportsCmds := &reportCmds{}
+	cmdSet.Set("reports", "generate").MustRunner(reportsCmds.generate, &reportsFlags{})
+	cmdSet.Set("reports", "locate").MustRunner(reportsCmds.locate, &locateReportsFlags{})
 
-	lsrCmd := subcmd.NewCommand("lsr", lsFlagSet, lsr, subcmd.AtLeastNArguments(1))
-	lsrCmd.Document("list the contents of the database")
+	findCmds := &findCmds{}
+	cmdSet.Set("find").MustRunner(findCmds.find, &findFlags{})
 
-	dbEraseCmd := subcmd.NewCommand("erase", eraseFlagSet, dbErase, subcmd.ExactlyNumArguments(1))
-	dbEraseCmd.Document("erase the file and statistics database")
+	if false { // move out of this command and into the ufind.
+		duCmd := &duCmd{}
+		cmdSet.Set("du").MustRunner(duCmd.du, &duFlags{})
+	}
 
-	dbStatsFlagSet := subcmd.MustRegisterFlagStruct(&configFlags{}, nil, nil)
-	dbStatsCmd := subcmd.NewCommand("stats", dbStatsFlagSet, dbStats, subcmd.AtLeastNArguments(1))
-	dbStatsCmd.Document("display database stastistics")
+	cmdSet.Set("config").MustRunner(configManager, &configFlags{})
 
-	dbCompactFlagSet := subcmd.MustRegisterFlagStruct(&configFlags{}, nil, nil)
-	dbCompactCmd := subcmd.NewCommand("compact", dbCompactFlagSet, dbCompact, subcmd.AtLeastNArguments(1))
-	dbCompactCmd.Document("perform database compaction")
-
-	dbRefreshStatsFlagSet := subcmd.NewFlagSet()
-	dbRefreshStatsCmd := subcmd.NewCommand("refresh-stats", dbRefreshStatsFlagSet, dbRefreshStats, subcmd.ExactlyNumArguments(1))
-	dbRefreshStatsCmd.Document("refresh statistics by recalculating them over the entire database")
-
-	dbRmPrefixesFlagSet := subcmd.NewFlagSet()
-	dmRmPrefixesCmd := subcmd.NewCommand("rm-prefixes", dbRmPrefixesFlagSet, dbRmPrefixes)
-	dmRmPrefixesCmd.Document("delete the specified prefixes, recursively, from the database")
-
-	dbCmds := subcmd.NewCommandSet(dbCompactCmd, dbStatsCmd, dbEraseCmd, dbRefreshStatsCmd, dmRmPrefixesCmd)
-
-	dbCommands := subcmd.NewCommandLevel("database", dbCmds)
-	dbCommands.Document("database management commands")
-
-	configFlagSet := subcmd.MustRegisterFlagStruct(&configFlags{}, nil, nil)
-	configCmd := subcmd.NewCommand("config", configFlagSet, configManager, subcmd.WithoutArguments())
-	configCmd.Document("describe the current configuration")
-
-	errorsFlagSet := subcmd.NewFlagSet()
-	errorsCmd := subcmd.NewCommand("errors", errorsFlagSet, listErrors, subcmd.ExactlyNumArguments(1))
-	errorsCmd.Document("list the contents of the errors database")
-
-	cmdSet = subcmd.NewCommandSet(analyzeCmd, configCmd, errorsCmd, lsrCmd, findCmd, summaryCmd, userSummaryCmd, groupSummaryCmd, dbCommands)
-	cmdSet.Document(`idu: analyze file systems to create a database of per-file and aggregate size stastistics to support incremental updates and subsequent interrogation. Local and cloud based filesystems are contemplated. See https://github.com/cloudengio/blob/master/idu/README.md for full details.`)
+	db := &dbCmd{}
+	cmdSet.Set("database", "locate").MustRunner(db.locate, &locateFlags{})
 
 	globals := subcmd.GlobalFlagSet()
 	globals.MustRegisterFlagStruct(&globalFlags, nil, nil)
 	cmdSet.WithGlobalFlags(globals)
 	cmdSet.WithMain(mainWrapper)
+	return cmdSet
 }
 
 func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error) error {
@@ -131,6 +214,9 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 		}
 	}
 	for _, profile := range globalFlags.ExitProfile.Profiles {
+		if !profiling.IsPredefined(profile.Name) {
+			fmt.Printf("warning profile %v defaults to CPU profiling since it is not one of the predefined profile types: %v", profile.Name, strings.Join(profiling.PredefinedProfiles(), ", "))
+		}
 		save, err := profiling.Start(profile.Name, profile.Filename)
 		if err != nil {
 			return err
@@ -145,6 +231,7 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 			fmt.Println(string(panicBuf))
 		}
 	}()
+
 	cfg, err := config.ReadConfig(globalFlags.ConfigFile)
 	if err != nil {
 		return err
@@ -159,28 +246,52 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 		// gosec G114
 		go http.Serve(ln, nil) //nolint:gosec
 	}
+
+	db := 0
+	if globalFlags.UseBadgerDB {
+		internal.UseBadgerDB()
+		db++
+	}
+	if globalFlags.UseBoltDB {
+		internal.UseBoltDB()
+		db++
+	}
+	if db != 1 {
+		return fmt.Errorf("must specify exactly one of use-badger-db or use-bolt-db")
+	}
+
+	internal.Verbosity = slog.Level(globalFlags.Verbose)
+	internal.LogDir = globalFlags.LogDir
+	if internal.LogDir == "" {
+		internal.LogDir = os.TempDir()
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	cmdutil.HandleSignals(cancel, os.Interrupt, os.Kill)
+	defer cancel()
 	return cmdRunner(ctx)
 }
 
 func main() {
-	cmdSet.MustDispatch(context.Background())
-}
-
-func debug(ctx context.Context, level int, format string, args ...interface{}) {
-	if level > globalFlags.Verbose {
-		return
-	}
-	_, file, line, _ := runtime.Caller(1)
-	fmt.Printf("%s: %s:% 4d: ", time.Now().Format(time.RFC3339), filepath.Base(file), line)
-	fmt.Printf(format, args...)
+	cli().MustDispatch(context.Background())
 }
 
 var printer = message.NewPrinter(language.English)
 
-func fsize(size int64) string {
-	if globalFlags.Human {
-		f, u := bytesPrinter(size)
-		return printer.Sprintf("%0.3f %s", f, u)
-	}
-	return printer.Sprintf("%v", size)
+func fmtSize(size int64) string {
+	f, u := bytesPrinter(size)
+	return printer.Sprintf("% 8.3f %s", f, u)
+}
+
+func fmtCount(count int64) string {
+	return printer.Sprintf("% 11v", count)
+}
+
+func banner(out io.Writer, ul string, format string, args ...any) {
+	buf := strings.Builder{}
+	o := fmt.Sprintf(format, args...)
+	buf.WriteString(o)
+	buf.WriteString(strings.Repeat(ul, len(o)))
+	buf.WriteRune('\n')
+	out.Write([]byte(buf.String()))
 }

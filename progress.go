@@ -6,60 +6,161 @@ package main
 
 import (
 	"context"
-	"expvar"
 	"os"
 	"runtime"
-	"sync/atomic"
+	"sync"
 	"time"
 
+	"cloudeng.io/cmd/idu/internal"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 )
 
-type progressUpdate struct {
-	prefixStart int
-	prefixDone  int
-	files       int
-	deletions   int
-	errors      int
-	reused      int
+type anaylzeSummary struct {
+	Operation         string        `json:"operation"`
+	Command           string        `json:"command"`
+	Duration          time.Duration `json:"duration"`
+	PrefixesStarted   int64         `json:"prefixes_started"`
+	PrefixesFinished  int64         `json:"prefixes_finished"`
+	SynchronousScans  int64         `json:"synchronous_scans"`
+	FSStats           int64         `json:"fs_stats"`
+	FSStatsTotal      int64         `json:"fs_stats_total"`
+	FSStatMeanLatency int64         `json:"fs_stat_mean_latency"`
+	Files             int64         `json:"files"`
+	ParentUnchanged   int64         `json:"parent_unchanged"`
+	ChildrenUnchanged int64         `json:"children_unchanged"`
+	Errors            int64         `json:"errors"`
+	PrefixesDeleted   int64         `json:"prefixes_deleted"`
 }
 
-type progressTracker struct {
-	ch                                      chan progressUpdate
+type progressStats struct {
 	numPrefixesStarted, numPrefixesFinished int64
-	numFiles, numReused                     int64
-	numDeletions, numErrors, lastFiles      int64
-	interval                                time.Duration
+	numFiles                                int64
+	numParentUnchanged                      int64
+	numChildrenUnchanged                    int64
+	numErrors                               int64
+	numSyncScans                            int64
+	numDeleted                              int64
+	numStatsStarted, numStatsFinished       int64
+	statsTotalTime                          int64
 	start                                   time.Time
 	lastGC                                  time.Time
 	memstats                                runtime.MemStats
 	sysMemstats                             *sysMemstats
 }
 
-func newProgressTracker(ctx context.Context, interval time.Duration) *progressTracker {
+type progressTracker struct {
+	sync.Mutex
+	interval time.Duration
+	progressStats
+	displayUnchanged bool
+}
+
+func newProgressTracker(ctx context.Context, interval time.Duration, display, displayUnchanged bool, wg *sync.WaitGroup) *progressTracker {
 	pt := &progressTracker{
-		ch:       make(chan progressUpdate, 10),
-		interval: interval,
-		start:    time.Now(),
+		interval:         interval,
+		displayUnchanged: displayUnchanged,
 	}
-	pt.refreshMemstats()
-	go pt.display(ctx)
+	pt.start = time.Now()
+	pt.sysMemstats = &sysMemstats{}
+	pt.refreshMemstatsLocked()
+	if display {
+		go func() {
+			pt.display(ctx)
+			wg.Done()
+		}()
+	} else {
+		wg.Done()
+	}
 	return pt
 }
 
-func (pt *progressTracker) send(ctx context.Context, u progressUpdate) {
-	if pt == nil {
-		return
+func (pt progressStats) meanStatLatency() int64 {
+	sum := pt.statsTotalTime
+	count := pt.numStatsFinished
+	if count > 0 {
+		return sum / count
 	}
-	select {
-	case <-ctx.Done():
-		return
-	case pt.ch <- u:
+	return 0
+}
+
+func (pt *progressTracker) summarize() anaylzeSummary {
+	pt.Lock()
+	cpy := pt.progressStats
+	pt.Unlock()
+	return anaylzeSummary{
+		PrefixesStarted:   cpy.numPrefixesStarted,
+		PrefixesFinished:  cpy.numPrefixesFinished,
+		SynchronousScans:  cpy.numSyncScans,
+		FSStats:           cpy.numStatsFinished,
+		FSStatsTotal:      cpy.statsTotalTime,
+		FSStatMeanLatency: cpy.meanStatLatency(),
+		Files:             cpy.numFiles,
+		ParentUnchanged:   cpy.numParentUnchanged,
+		ChildrenUnchanged: cpy.numChildrenUnchanged,
+		Errors:            cpy.numErrors,
+		PrefixesDeleted:   cpy.numDeleted,
 	}
 }
 
-func (pt *progressTracker) refreshMemstats() {
+// Implements asyncstat.LatencyTracker
+func (pt *progressTracker) Before() time.Time {
+	pt.Lock()
+	defer pt.Unlock()
+	pt.numStatsStarted++
+	return time.Now()
+}
+
+// Implements asyncstat.LatencyTracker
+func (pt *progressTracker) After(start time.Time) {
+	took := time.Since(start)
+	pt.Lock()
+	defer pt.Unlock()
+	pt.numStatsFinished++
+	pt.statsTotalTime += int64(took)
+}
+
+func (pt *progressTracker) incStartPrefix() {
+	pt.Lock()
+	defer pt.Unlock()
+	pt.numPrefixesStarted++
+}
+
+func (pt *progressTracker) incDonePrefix(deleted int, files int64) {
+	pt.Lock()
+	defer pt.Unlock()
+	pt.numPrefixesFinished++
+	pt.numFiles += files
+	pt.numDeleted += int64(deleted)
+}
+
+func (pt *progressTracker) incErrors() {
+	pt.Lock()
+	defer pt.Unlock()
+	pt.numErrors++
+}
+
+func (pt *progressTracker) incParentUnchanged() {
+	pt.Lock()
+	defer pt.Unlock()
+	pt.numParentUnchanged++
+}
+
+func (pt *progressTracker) incChildrenUnchanged() {
+	pt.Lock()
+	defer pt.Unlock()
+	pt.numChildrenUnchanged++
+}
+
+func (pt *progressTracker) setSyncScans(numSyncScans int64) {
+	pt.Lock()
+	defer pt.Unlock()
+	if numSyncScans > 0 {
+		pt.numSyncScans = numSyncScans
+	}
+}
+
+func (pt *progressTracker) refreshMemstatsLocked() {
 	if time.Since(pt.lastGC) > (5 * time.Minute) {
 		runtime.GC()
 		runtime.ReadMemStats(&pt.memstats)
@@ -68,19 +169,49 @@ func (pt *progressTracker) refreshMemstats() {
 	}
 }
 
-func (pt *progressTracker) summary() {
-	pt.refreshMemstats()
+func (pt *progressTracker) summary(ctx context.Context) {
+	pt.Lock()
+	pt.refreshMemstatsLocked()
+	cpy := pt.progressStats
+	pt.Unlock()
+
 	ifmt := message.NewPrinter(language.English)
 	ifmt.Printf("\n")
-	ifmt.Printf("        prefixes : % 15v\n", atomic.LoadInt64(&pt.numPrefixesFinished))
-	ifmt.Printf("           files : % 15v\n", atomic.LoadInt64(&pt.numFiles))
-	ifmt.Printf("prefix deletions : % 15v\n", atomic.LoadInt64(&pt.numDeletions))
-	ifmt.Printf("          reused : % 15v\n", atomic.LoadInt64(&pt.numReused))
-	ifmt.Printf("          errors : % 15v\n", atomic.LoadInt64(&pt.numErrors))
-	ifmt.Printf("        run time : % 15v\n", time.Since(pt.start))
-	ifmt.Printf("      heap alloc : % 15.6fGiB\n", float64(pt.memstats.HeapAlloc)/(1024*1024*1024))
-	ifmt.Printf("  max heap alloc : % 15.6fGiB\n", float64(pt.memstats.HeapSys)/(1024*1024*1024))
-	ifmt.Printf(" max process RSS : %15.6fGiB\n", pt.sysMemstats.MaxRSSGiB())
+	ifmt.Printf("          prefixes : % 15v\n", cpy.numPrefixesFinished)
+	ifmt.Printf("             files : % 15v\n", cpy.numFiles)
+	if pt.displayUnchanged {
+		ifmt.Printf("  parent unchanged : % 15v\n", cpy.numParentUnchanged)
+		ifmt.Printf("children unchanged : % 15v\n", cpy.numChildrenUnchanged)
+	}
+	ifmt.Printf("           deleted : % 15v\n", cpy.numDeleted)
+	ifmt.Printf("            errors : % 15v\n", cpy.numErrors)
+	ifmt.Printf("        sync scans : % 15v\n", cpy.numSyncScans)
+	ifmt.Printf("          stat ops : % 15v\n", cpy.numStatsFinished)
+	ifmt.Printf("   total stat time : % 15v\n", time.Duration(cpy.statsTotalTime))
+	ifmt.Printf(" mean stat latency : % 15v\n", time.Duration(cpy.meanStatLatency()))
+	ifmt.Printf("          run time : % 15v\n", time.Since(cpy.start).Truncate(time.Second))
+	ifmt.Printf("        heap alloc : % 15.6fGiB\n", float64(cpy.memstats.HeapAlloc)/(1024*1024*1024))
+	ifmt.Printf("    max heap alloc : % 15.6fGiB\n", float64(cpy.memstats.HeapSys)/(1024*1024*1024))
+	ifmt.Printf("   max process RSS : % 15.6fGiB\n", cpy.sysMemstats.MaxRSSGiB())
+	cpy.log(ctx)
+}
+
+func (pt progressStats) log(ctx context.Context) {
+	internal.Log(ctx, internal.LogProgress, "summary",
+		"prefixes started", pt.numPrefixesStarted,
+		"prefixes", pt.numPrefixesFinished,
+		"deleted", pt.numDeleted,
+		"files", pt.numFiles,
+		"parent_unchanged", pt.numParentUnchanged,
+		"children_unchanged", pt.numChildrenUnchanged,
+		"errors", pt.numErrors,
+		"sync_scans", pt.numSyncScans,
+		"stat_ops", pt.numStatsFinished,
+		"num_goroutines", runtime.NumGoroutine(),
+		"run_time", time.Since(pt.start),
+		"heap_alloc_GiB", float64(pt.memstats.HeapAlloc)/(1024*1024*1024),
+		"max_heap_alloc_GiB", float64(pt.memstats.HeapSys)/(1024*1024*1024),
+		"max_process_RSS_GiB", pt.sysMemstats.MaxRSSGiB())
 }
 
 func isInteractive() bool {
@@ -91,8 +222,6 @@ func isInteractive() bool {
 	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
-var progressMap = expvar.NewMap("cloudeng.io/idu.progress")
-
 func (pt *progressTracker) display(ctx context.Context) {
 	ifmt := message.NewPrinter(language.English)
 	cr := "\r"
@@ -101,51 +230,75 @@ func (pt *progressTracker) display(ctx context.Context) {
 		cr = "\n"
 	}
 	lastReport := time.Now()
+	var lastPrefixes, lastStats, lastSyncScans int64
+
 	for {
 		select {
-		case update := <-pt.ch:
-			atomic.AddInt64(&pt.numPrefixesStarted, int64(update.prefixStart))
-			atomic.AddInt64(&pt.numPrefixesFinished, int64(update.prefixDone))
-			atomic.AddInt64(&pt.numFiles, int64(update.files))
-			atomic.AddInt64(&pt.numDeletions, int64(update.deletions))
-			atomic.AddInt64(&pt.numReused, int64(update.reused))
-			atomic.AddInt64(&pt.numErrors, int64(update.errors))
-
-			progressMap.Add("started", int64(update.prefixStart))
-			progressMap.Add("finished", int64(update.prefixDone))
-			progressMap.Add("files", int64(update.files))
-			progressMap.Add("deletions", int64(update.deletions))
-			progressMap.Add("reused", int64(update.reused))
-			progressMap.Add("errors", int64(update.errors))
-			fl := &expvar.Float{}
-			fl.Set(float64(pt.memstats.HeapAlloc) / (1024 * 1024 * 1024))
-			progressMap.Set("heap-alloc-GiB", fl)
-			fl.Set(float64(pt.memstats.HeapSys) / (1024 * 1024 * 1024))
-			progressMap.Set("max-heap-alloc-GiB", fl)
-			fl.Set(pt.sysMemstats.MaxRSSGiB())
-			progressMap.Set("max-RSS-GiB", fl)
-
+		case <-time.After(pt.interval):
 		case <-ctx.Done():
 			return
 		}
-		if since := time.Since(lastReport); since > pt.interval {
-			last := atomic.SwapInt64(&pt.lastFiles, atomic.LoadInt64(&pt.numFiles))
-			rate := float64(pt.numFiles-last) / since.Seconds()
-			started, finished := atomic.LoadInt64(&pt.numPrefixesStarted), atomic.LoadInt64(&pt.numPrefixesFinished)
-			ifmt.Printf("% 8v(%3v) prefixes, % 8v files, % 8v reused, % 6v errors, % 9.2f stats/second  % 8v, (%s)  (%3.6f/%3.6f/%3.6f GiB) %s",
+		pt.Lock()
+		pt.refreshMemstatsLocked()
+		cpy := pt.progressStats
+		pt.Unlock()
+
+		since := time.Since(lastReport)
+
+		current := cpy.numPrefixesFinished
+		prefixRate := (float64(current - lastPrefixes)) / since.Seconds()
+		lastPrefixes = current
+
+		current = cpy.numStatsFinished
+		statRate := (float64(current - lastStats)) / since.Seconds()
+		lastStats = current
+		var statLatency time.Duration
+		if current > 0 {
+			statLatency = time.Duration(cpy.statsTotalTime / current)
+		}
+
+		current = cpy.numSyncScans
+		syncRate := (float64(current - lastSyncScans)) / since.Seconds()
+		lastSyncScans = current
+
+		lastReport = time.Now()
+
+		started, finished := cpy.numPrefixesStarted, cpy.numPrefixesFinished
+
+		runningFor := time.Since(cpy.start).Truncate(time.Second)
+
+		cpy.log(ctx)
+
+		if pt.displayUnchanged {
+			ifmt.Printf("% 10v(%3v) prefixes, % 10v files, % 8.0f (prefixes/s), % 8.0f (stats/second), % 8v (latency), % 6v (outstanding), % 8.0f (sync scans/s), % 8v unchanged, % 5v errors, % 8v, (%s) %s",
 				finished,
 				started-finished,
-				atomic.LoadInt64(&pt.numFiles),
-				atomic.LoadInt64(&pt.numReused),
-				atomic.LoadInt64(&pt.numErrors),
-				rate,
-				time.Since(pt.start).Truncate(time.Second),
+				cpy.numFiles,
+				prefixRate,
+				statRate,
+				statLatency,
+				cpy.numStatsStarted-cpy.numStatsFinished,
+				syncRate,
+				cpy.numParentUnchanged+cpy.numChildrenUnchanged,
+				cpy.numErrors,
+				runningFor,
 				time.Now().Format("15:04:05"),
-				float64(pt.memstats.HeapAlloc)/(1024*1024*1024),
-				float64(pt.memstats.HeapSys)/(1024*1024*1024),
-				pt.sysMemstats.MaxRSSGiB(),
 				cr)
-			lastReport = time.Now()
+			continue
 		}
+
+		ifmt.Printf("% 10v(%3v) prefixes, % 10v files, % 8.0f (prefixes/s), % 8.0f (stats/second), % 8v (latency), % 6v (outstanding), % 8.0f (sync scans/s), % 5v errors, % 8v, (%s) %s",
+			finished,
+			started-finished,
+			cpy.numFiles,
+			prefixRate,
+			statRate,
+			statLatency,
+			cpy.numStatsStarted-cpy.numStatsFinished,
+			syncRate,
+			cpy.numErrors,
+			runningFor,
+			time.Now().Format("15:04:05"),
+			cr)
 	}
 }

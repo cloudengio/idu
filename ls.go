@@ -6,21 +6,21 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"strings"
 	"time"
 
-	"cloudeng.io/algo/container/heap"
 	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/cmdutil"
-	"cloudeng.io/errors"
-	"cloudeng.io/sync/errgroup"
+	"cloudeng.io/cmd/idu/internal/prefixinfo"
 )
 
 type lsFlags struct {
 	Limit      int    `subcmd:"limit,-1,'limit the number of items to list'"`
 	TopN       int    `subcmd:"top,10,'show the top prefixes by file/prefix counts and disk usage, set to zero to disable'"`
+	Recurse    bool   `subcmd:"recurse,false,list prefixes recursively"`
 	Summary    bool   `subcmd:"summary,true,show summary statistics"`
 	ShowDirs   bool   `subcmd:"prefixes,false,show information on each prefix"`
 	ShowFiles  bool   `subcmd:"files,false,show information on individual files"`
@@ -28,158 +28,116 @@ type lsFlags struct {
 	User       string `subcmd:"user,,show information for this user only"`
 }
 
-func lsTree(ctx context.Context, pt *progressTracker, db internal.Database, root, user string, flags *lsFlags) (files, children, disk *heap.KeyedInt64, nerrors int64, err error) {
-	files, children, disk = heap.NewKeyedInt64(heap.Descending), heap.NewKeyedInt64(heap.Descending), heap.NewKeyedInt64(heap.Descending)
-	if flags.ShowDirs {
-		fmt.Printf("     disk usage :  # files : # dirs : directory/prefix\n")
-	}
-	sc := db.NewScanner(root, flags.Limit, internal.ScanLimit(10000))
-	for sc.Scan(ctx) {
-		prefix, pi := sc.PrefixInfo()
-		if len(user) > 0 && pi.UserID != user {
-			continue
-		}
-		if err := pi.Err; len(err) > 0 {
-			nerrors++
-			if flags.ShowErrors {
-				fmt.Printf("%s: %s\n", prefix, pi.Err)
-			}
-			if !flags.ShowDirs && !flags.ShowFiles {
-				pt.send(ctx, progressUpdate{prefixStart: 1, prefixDone: 1, errors: 1})
-			}
-			continue
-		}
-		files.Update(prefix, int64(len(pi.Files)))
-		children.Update(prefix, int64(len(pi.Children)))
-		disk.Update(prefix, pi.DiskUsage)
-		if flags.ShowDirs || flags.ShowFiles {
-			fmt.Printf("% 15v : % 8v : % 6v : %s\n", fsize(pi.DiskUsage), len(pi.Files), len(pi.Children), prefix)
-			if flags.ShowDirs {
-				for _, fi := range pi.Children {
-					fmt.Printf("    % 15v : % 40v: % 10v : %v\n", fsize(fi.Size()), fi.ModTime(), globalUserManager.nameForUID(fi.User()), fi.Name())
-				}
-			}
-			if flags.ShowFiles {
-				for _, fi := range pi.Files {
-					fmt.Printf("    % 15v : % 40v: % 10v : %v\n", fsize(fi.Size()), fi.ModTime(), globalUserManager.nameForUID(fi.User()), fi.Name())
-				}
-			}
-			continue
-		}
-		pt.send(ctx, progressUpdate{prefixStart: 1, prefixDone: 1, files: len(pi.Files)})
-	}
-	err = sc.Err()
-	return
+type logFlags struct {
+	internal.TimeRangeFlags
+	Erase bool `subcmd:"erase,false,erase the logs rather than displaying them"`
+	JSON  bool `subcmd:"json,true,display logs in json format"`
 }
 
-func topNMetrics(top []struct {
-	K string
-	V int64
-}) []internal.Metric {
-	m := make([]internal.Metric, len(top))
-	for i, kv := range top {
-		m[i] = internal.Metric{Prefix: kv.K, Value: kv.V}
-	}
-	return m
+type errorFlags struct {
+	Prefix bool `subcmd:"prefix,false,list errors by prefix"`
+	Erase  bool `subcmd:"erase,false,erase the errors rather than displaying them"`
 }
 
-func lsr(ctx context.Context, values interface{}, args []string) error {
+type lister struct{}
+
+func (l *lister) prefixes(ctx context.Context, values interface{}, args []string) error {
 	flagValues := values.(*lsFlags)
-
 	if len(args) > 1 {
 		flagValues.ShowFiles = false
 		flagValues.ShowDirs = false
 		flagValues.Summary = true
 	}
-
-	type results struct {
-		root                  string
-		files, children, disk *heap.KeyedInt64
-		errors                int64
-		db                    internal.Database
-	}
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	cmdutil.HandleSignals(cancel, os.Interrupt, os.Kill)
-
-	key := ""
-	if usr := flagValues.User; len(usr) > 0 {
-		key = globalUserManager.uidForName(usr)
-	}
-
-	var pt *progressTracker
-	if !flagValues.ShowFiles && !flagValues.ShowDirs {
-		pt = newProgressTracker(ctx, time.Second)
-	}
-	listers := &errgroup.T{}
-	listers = errgroup.WithConcurrency(listers, len(args))
-	resultsCh := make(chan results)
-	for _, root := range args {
-		root := root
-		db, err := globalDatabaseManager.DatabaseFor(ctx, root, internal.ReadOnly())
-		if err != nil {
-			return err
-		}
-		listers.Go(func() error {
-			files, children, disk, errors, err := lsTree(
-				ctx,
-				pt,
-				db,
-				root,
-				key,
-				flagValues,
-			)
-			resultsCh <- results{
-				root:     root,
-				files:    files,
-				children: children,
-				errors:   errors,
-				disk:     disk,
-				db:       db,
-			}
-			return err
-		})
-	}
-
-	errs := errors.M{}
-	go func() {
-		errs.Append(listers.Wait())
-		close(resultsCh)
-	}()
-
-	for result := range resultsCh {
-		if flagValues.TopN == 0 {
-			continue
-		}
-		files, children, disk, nErrors := result.files, result.children, result.disk, result.errors
-		heading := fmt.Sprintf("\n\nResults for %v", result.root)
-		fmt.Println(heading)
-		fmt.Println(strings.Repeat("=", len(heading)))
-
-		nFiles, nChildren, nBytes := files.Sum(), children.Sum(), disk.Sum()
-		topFiles, topChildren, topBytes := topNMetrics(files.TopN(flagValues.TopN)),
-			topNMetrics(children.TopN(flagValues.TopN)),
-			topNMetrics(disk.TopN(flagValues.TopN))
-
-		printSummaryStats(ctx, os.Stdout, nFiles, nChildren, nBytes, nErrors, flagValues.TopN, topFiles, topChildren, topBytes)
-	}
-	errs.Append(globalDatabaseManager.CloseAll(ctx))
-	return errs.Err()
-}
-
-func listErrors(ctx context.Context, values interface{}, args []string) error {
-	db, err := globalDatabaseManager.DatabaseFor(ctx, args[0], internal.ErrorsOnly(), internal.ReadOnly())
+	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
 	if err != nil {
 		return err
 	}
-	sc := db.NewScanner("", 0, internal.ScanErrors())
-	for sc.Scan(ctx) {
-		prefix, info := sc.PrefixInfo()
-		fmt.Printf("%v: %v\n", prefix, info.Err)
+	if len(args) == 1 {
+		args = append(args, args[0])
 	}
-	errs := errors.M{}
-	errs.Append(sc.Err())
-	errs.Append(globalDatabaseManager.CloseAll(ctx))
-	return errs.Err()
+	for _, prefix := range args[1:] {
+		err := db.Scan(ctx, prefix, func(_ context.Context, k string, v []byte) bool {
+			if !strings.HasPrefix(k, prefix) {
+				return false
+			}
+			var pi prefixinfo.T
+			if err := pi.UnmarshalBinary(v); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to unmarshal value for %v: %v\n", k, err)
+				return false
+			}
+			fmt.Println(fs.FormatFileInfo(internal.PrefixInfoAsFSInfo(pi, k)))
+			for _, fi := range pi.InfoList() {
+				if flagValues.ShowFiles && !fi.IsDir() {
+					fmt.Println("    ", fs.FormatFileInfo(fi))
+				}
+				if flagValues.ShowDirs && fi.IsDir() {
+					fmt.Println("    ", fs.FormatFileInfo(fi))
+				}
+			}
+			return true
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (l *lister) errors(ctx context.Context, values interface{}, args []string) error {
+	ef := values.(*errorFlags)
+	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
+	if err != nil {
+		return err
+	}
+	defer db.Close(ctx)
+	if ef.Erase {
+		return db.Clear(ctx, false, true, false)
+	}
+
+	return db.VisitErrors(ctx, args[0],
+		func(_ context.Context, key string, when time.Time, detail []byte) bool {
+			fmt.Printf("%s: %s\n", key, detail)
+			return true
+		})
+}
+
+func (l *lister) logs(ctx context.Context, values interface{}, args []string) error {
+	lf := values.(*logFlags)
+	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
+	if err != nil {
+		return err
+	}
+	defer db.Close(ctx)
+
+	if lf.Erase {
+		return db.Clear(ctx, false, true, false)
+	}
+
+	from, to, _, err := lf.TimeRangeFlags.FromTo()
+	if err != nil {
+		return err
+	}
+
+	return db.VisitLogs(ctx, from, to,
+		func(_ context.Context, begin, end time.Time, detail []byte) bool {
+			if !lf.JSON {
+				fmt.Printf("%v...%v: %v: %s\n", begin, end, end.Sub(begin), detail)
+				return true
+			}
+			var summary struct {
+				Begin time.Time `json:"begin"`
+				End   time.Time `json:"end"`
+				anaylzeSummary
+			}
+			if err := json.Unmarshal(detail, &summary); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to unmarshal log %v entry: %v\n", begin, err)
+				return true
+			}
+			summary.Begin = begin
+			summary.End = end
+			out, _ := json.Marshal(summary)
+			fmt.Println(string(out))
+			return true
+
+		})
 }

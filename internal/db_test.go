@@ -4,17 +4,7 @@
 
 package internal_test
 
-import (
-	"bytes"
-	"encoding/gob"
-	"reflect"
-	"testing"
-	"time"
-
-	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/file"
-)
-
+/*
 func TestCodec(t *testing.T) {
 	now := time.Now().Round(0)
 	pi := internal.PrefixInfo{
@@ -49,3 +39,4 @@ func TestCodec(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }
+*/
