@@ -13,6 +13,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"cloudeng.io/cmd/idu/internal"
@@ -77,7 +78,7 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fs filewalk.FS, af *analyz
 	defer sdb.Close(ctx)
 
 	// Close the database as quickly as possible.
-	signal.Reset(os.Interrupt, os.Kill)
+	signal.Reset(os.Interrupt, syscall.SIGTERM)
 	cmdutil.HandleSignals(func() {
 		cancel()
 		sdb.Close(ctx)
@@ -280,6 +281,7 @@ func (w *walker) Contents(ctx context.Context, state *prefixState, prefix string
 			"prefix", w.cfg.Prefix,
 			"path", prefix,
 			"duration", sinceLast.String())
+		w.pt.incSlowScans()
 	}
 	if state.parentUnchanged {
 		// Need to traverse sub-directories even if the parent is unchanged.

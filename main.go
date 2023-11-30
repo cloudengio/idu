@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"syscall"
 
 	// G108
 	_ "net/http/pprof" //nolint:gosec
@@ -257,7 +258,7 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
-	cmdutil.HandleSignals(cancel, os.Interrupt, os.Kill)
+	cmdutil.HandleSignals(cancel, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	return cmdRunner(ctx)
 }
