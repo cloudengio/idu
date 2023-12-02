@@ -18,7 +18,9 @@ func userGroupID(fi file.Info) (userID, groupID uint32, ok bool) {
 	if u, ok := fi.Sys().(*userInfo); ok {
 		return u.uid, u.gid, true
 	}
-	return 0, 0, false
+	// TODO: implement user/group in some form for windows, for now just
+	// pretend that the user and group are zero.
+	return 0, 0, true
 }
 
 func sysUserGroupID(uid, gid uint32) any {
