@@ -16,9 +16,11 @@ import (
 func TestUserInfo(t *testing.T) {
 	tmpDir := t.TempDir()
 	tmpFileName := filepath.Join(tmpDir, "a")
-	if _, err := os.Create(tmpFileName); err != nil {
+	f, err := os.Create(tmpFileName)
+	if err != nil {
 		t.Fatal(err)
 	}
+	defer f.Close()
 	info, err := os.DirFS(tmpDir).(fs.StatFS).Stat("a")
 	if err != nil {
 		t.Fatal(err)
@@ -29,11 +31,16 @@ func TestUserInfo(t *testing.T) {
 	pi := T{userID: 1, groupID: 2}
 
 	uid, gid := pi.UserGroupInfo(fi)
+	ouid, ogid := os.Getuid(), os.Getgid()
+	if ouid == -1 {
+		// Windows returns uid and gid as -1
+		ouid, ogid = 0, 0
+	}
 
-	if got, want := int(uid), os.Getuid(); got != want {
+	if got, want := int(uid), ouid; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	if got, want := int(gid), os.Getgid(); got != want {
+	if got, want := int(gid), ogid; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 

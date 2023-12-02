@@ -11,7 +11,6 @@ import (
 	"runtime"
 	"slices"
 	"sort"
-	"syscall"
 	"testing"
 	"time"
 
@@ -24,7 +23,7 @@ import (
 )
 
 func newInfo(name string, size int64, mode fs.FileMode, modTime time.Time, uid, gid uint32) file.Info {
-	return file.NewInfo(name, size, mode, modTime, &syscall.Stat_t{Uid: uid, Gid: gid})
+	return file.NewInfo(name, size, mode, modTime, prefixinfo.SysUserGroupID(uid, gid))
 }
 
 func createPrefixInfo(t *testing.T, uid, gid uint32, name string, contents ...[]file.Info) prefixinfo.T {

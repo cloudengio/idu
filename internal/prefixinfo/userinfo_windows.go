@@ -19,10 +19,10 @@ func userGroupID(fi file.Info) (userID, groupID uint32, ok bool) {
 		return u.uid, u.gid, true
 	}
 	// TODO: implement user/group in some form for windows, for now just
-	// pretend that the user and group are zero.
+	// pretend that the user and group are 0
 	return 0, 0, true
 }
 
-func sysUserGroupID(uid, gid uint32) any {
+func SysUserGroupID(uid, gid uint32) any {
 	return &userInfo{uid: uid, gid: gid}
 }
