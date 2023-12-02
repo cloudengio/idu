@@ -205,9 +205,6 @@ func compareSummary(t *testing.T, got anaylzeSummary,
 	if got, want := got.PrefixesDeleted, deletions; got != want {
 		t.Errorf("line %v: PrefixesDeleted: got %v, want %v", l, got, want)
 	}
-	if stats > 0 {
-		stats-- // the stat for the top level directory is not included in the summary
-	}
 	if got, want := got.FSStats, stats; got != want {
 		t.Errorf("line %v: FSStats: got %v, want %v", l, got, want)
 	}
