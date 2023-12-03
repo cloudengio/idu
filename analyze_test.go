@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -95,6 +96,15 @@ func scanDB(t *testing.T, ctx context.Context, db database.DB, lfs filewalk.FS, 
 			if err != nil {
 				t.Errorf("%v: %v", path, err)
 				continue
+			}
+			size := info.Size()
+			if size == 0 && ((info.Mode().Type() & fs.ModeSymlink) != 0) {
+				l, err := os.Readlink(path)
+				if err != nil {
+					t.Fatalf("%v: %v", path, err)
+					continue
+				}
+				size = int64(len(l))
 			}
 			if got, want := p.Size(), info.Size(); got != want {
 				t.Errorf("%v: got %v, want %v", path, got, want)
