@@ -51,7 +51,7 @@ func setupAnalyze(t *testing.T) (tmpDir, config, prefix string, tt *testtree) {
   concurrent_stats: 4
   items: 2
   exclusions:
-    - d-testtree/d00-01
+    - 'd-testtree[/\\]d00-01'
 `, testTree, dbDir)
 	err = os.WriteFile(filepath.Join(tmpDir, "config.yaml"), []byte(cfg), 0600)
 	if err != nil {
@@ -63,7 +63,7 @@ func setupAnalyze(t *testing.T) (tmpDir, config, prefix string, tt *testtree) {
 func removeExclusions(c []string) []string {
 	r := []string{}
 	for _, s := range c {
-		if strings.Contains(s, "testtree/d00-01") {
+		if strings.Contains(s, "testtree/d00-01") || strings.Contains(s, "testtree\\d00-01") {
 			continue
 		}
 		r = append(r, s)
