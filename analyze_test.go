@@ -106,7 +106,7 @@ func scanDB(t *testing.T, ctx context.Context, db database.DB, lfs filewalk.FS, 
 				}
 				size = int64(len(l))
 			}
-			if got, want := p.Size(), info.Size(); got != want {
+			if got, want := p.Size(), size; got != want {
 				t.Errorf("%v: got %v, want %v", path, got, want)
 			}
 			if got, want := p.ModTime(), info.ModTime(); !got.Equal(want) {
