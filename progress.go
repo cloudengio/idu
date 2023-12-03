@@ -23,6 +23,7 @@ type anaylzeSummary struct {
 	PrefixesStarted   int64         `json:"prefixes_started"`
 	PrefixesFinished  int64         `json:"prefixes_finished"`
 	SynchronousScans  int64         `json:"synchronous_scans"`
+	SlowScans         int64         `json:"slow_scans"`
 	FSStats           int64         `json:"fs_stats"`
 	FSStatsTotal      int64         `json:"fs_stats_total"`
 	FSStatMeanLatency int64         `json:"fs_stat_mean_latency"`
@@ -42,6 +43,7 @@ type progressStats struct {
 	numSyncScans                            int64
 	numDeleted                              int64
 	numStatsStarted, numStatsFinished       int64
+	numSlowScans                            int64
 	statsTotalTime                          int64
 	start                                   time.Time
 	lastGC                                  time.Time
@@ -152,6 +154,12 @@ func (pt *progressTracker) incChildrenUnchanged() {
 	pt.numChildrenUnchanged++
 }
 
+func (pt *progressTracker) incSlowScans() {
+	pt.Lock()
+	defer pt.Unlock()
+	pt.numSlowScans++
+}
+
 func (pt *progressTracker) setSyncScans(numSyncScans int64) {
 	pt.Lock()
 	defer pt.Unlock()
@@ -186,6 +194,7 @@ func (pt *progressTracker) summary(ctx context.Context) {
 	ifmt.Printf("           deleted : % 15v\n", cpy.numDeleted)
 	ifmt.Printf("            errors : % 15v\n", cpy.numErrors)
 	ifmt.Printf("        sync scans : % 15v\n", cpy.numSyncScans)
+	ifmt.Printf("        slow scans : % 15v\n", cpy.numSlowScans)
 	ifmt.Printf("          stat ops : % 15v\n", cpy.numStatsFinished)
 	ifmt.Printf("   total stat time : % 15v\n", time.Duration(cpy.statsTotalTime))
 	ifmt.Printf(" mean stat latency : % 15v\n", time.Duration(cpy.meanStatLatency()))
@@ -206,6 +215,7 @@ func (pt progressStats) log(ctx context.Context) {
 		"children_unchanged", pt.numChildrenUnchanged,
 		"errors", pt.numErrors,
 		"sync_scans", pt.numSyncScans,
+		"slow_scans", pt.numSlowScans,
 		"stat_ops", pt.numStatsFinished,
 		"num_goroutines", runtime.NumGoroutine(),
 		"run_time", time.Since(pt.start),
@@ -270,7 +280,7 @@ func (pt *progressTracker) display(ctx context.Context) {
 		cpy.log(ctx)
 
 		if pt.displayUnchanged {
-			ifmt.Printf("% 10v(%3v) prefixes, % 10v files, % 8.0f (prefixes/s), % 8.0f (stats/second), % 8v (latency), % 6v (outstanding), % 8.0f (sync scans/s), % 8v unchanged, % 5v errors, % 8v, (%s) %s",
+			ifmt.Printf("% 10v(%3v) prefixes, % 10v files, % 8.0f (prefixes/s), % 8.0f (stats/second), % 8v (latency), % 6v (outstanding), % 8.0f (sync scans/s), % 8v unchanged, % 5v (slow scans), % 5v errors, % 8v, (%s) %s",
 				finished,
 				started-finished,
 				cpy.numFiles,
@@ -280,6 +290,7 @@ func (pt *progressTracker) display(ctx context.Context) {
 				cpy.numStatsStarted-cpy.numStatsFinished,
 				syncRate,
 				cpy.numParentUnchanged+cpy.numChildrenUnchanged,
+				cpy.numSlowScans,
 				cpy.numErrors,
 				runningFor,
 				time.Now().Format("15:04:05"),
@@ -287,7 +298,7 @@ func (pt *progressTracker) display(ctx context.Context) {
 			continue
 		}
 
-		ifmt.Printf("% 10v(%3v) prefixes, % 10v files, % 8.0f (prefixes/s), % 8.0f (stats/second), % 8v (latency), % 6v (outstanding), % 8.0f (sync scans/s), % 5v errors, % 8v, (%s) %s",
+		ifmt.Printf("% 10v(%3v) prefixes, % 10v files, % 8.0f (prefixes/s), % 8.0f (stats/second), % 8v (latency), % 6v (outstanding), % 8.0f (sync scans/s), % 5v (slow scans), % 5v errors, % 8v, (%s) %s",
 			finished,
 			started-finished,
 			cpy.numFiles,
@@ -296,6 +307,7 @@ func (pt *progressTracker) display(ctx context.Context) {
 			statLatency,
 			cpy.numStatsStarted-cpy.numStatsFinished,
 			syncRate,
+			cpy.numSlowScans,
 			cpy.numErrors,
 			runningFor,
 			time.Now().Format("15:04:05"),

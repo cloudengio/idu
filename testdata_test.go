@@ -167,7 +167,7 @@ func (tt *testtree) deletionAdditonal() error {
 
 func newTestTree(parent string, depth, breadth, nfiles int) *testtree {
 	return &testtree{
-		root:    filepath.Join(parent, "d-testree"),
+		root:    filepath.Join(parent, "d-testtree"),
 		depth:   depth,
 		breadth: breadth,
 		nfiles:  nfiles,

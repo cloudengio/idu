@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"syscall"
 	"testing"
 	"time"
 
@@ -93,7 +92,7 @@ func TestdataIDCombinationsDirs(modTime time.Time, uid, gid uint32) (ug00, ug10,
 }
 
 func TestdataNewInfo(name string, size int64, mode fs.FileMode, modTime time.Time, uid, gid uint32) file.Info {
-	return file.NewInfo(name, size, mode, modTime, &syscall.Stat_t{Uid: uid, Gid: gid})
+	return file.NewInfo(name, size, mode, modTime, SysUserGroupID(uid, gid))
 }
 
 func TestdataNewPrefixInfo(t *testing.T, name string, size int64, mode fs.FileMode, modTime time.Time, uid, gid uint32) T {
@@ -111,8 +110,4 @@ func IDsFromStats(s StatsList) []uint32 {
 		r = append(r, st.ID)
 	}
 	return r
-}
-
-func SysUserGroupID(uid, gid uint32) any {
-	return sysUserGroupID(uid, gid)
 }

@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -50,7 +51,7 @@ func setupAnalyze(t *testing.T) (tmpDir, config, prefix string, tt *testtree) {
   concurrent_stats: 4
   items: 2
   exclusions:
-    - d-testtree/d00-01
+    - 'd-testtree[/\\]d00-01'
 `, testTree, dbDir)
 	err = os.WriteFile(filepath.Join(tmpDir, "config.yaml"), []byte(cfg), 0600)
 	if err != nil {
@@ -62,7 +63,7 @@ func setupAnalyze(t *testing.T) (tmpDir, config, prefix string, tt *testtree) {
 func removeExclusions(c []string) []string {
 	r := []string{}
 	for _, s := range c {
-		if strings.Contains(s, "testtree/d00-01") {
+		if strings.Contains(s, "testtree/d00-01") || strings.Contains(s, "testtree\\d00-01") {
 			continue
 		}
 		r = append(r, s)
@@ -96,7 +97,16 @@ func scanDB(t *testing.T, ctx context.Context, db database.DB, lfs filewalk.FS, 
 				t.Errorf("%v: %v", path, err)
 				continue
 			}
-			if got, want := p.Size(), info.Size(); got != want {
+			size := info.Size()
+			if size == 0 && ((info.Mode().Type() & fs.ModeSymlink) != 0) {
+				l, err := os.Readlink(path)
+				if err != nil {
+					t.Fatalf("%v: %v", path, err)
+					continue
+				}
+				size = int64(len(l))
+			}
+			if got, want := p.Size(), size; got != want {
 				t.Errorf("%v: got %v, want %v", path, got, want)
 			}
 			if got, want := p.ModTime(), info.ModTime(); !got.Equal(want) {
@@ -164,7 +174,7 @@ func verifyDB(t *testing.T, ctx context.Context, cfg config.T, fs filewalk.FS, a
 		fmt.Printf("\n\nexpected:\n%v\n", strings.Join(expectedErrors, "\n"))
 	}
 	for _, e := range storedErrors {
-		if !strings.Contains(e, "permission denied") {
+		if !(strings.Contains(e, "permission denied") || strings.Contains(e, "Access is denied")) {
 			t.Errorf("line %v, unexpected error: %v", l, e)
 		}
 	}
@@ -204,9 +214,6 @@ func compareSummary(t *testing.T, got anaylzeSummary,
 	}
 	if got, want := got.PrefixesDeleted, deletions; got != want {
 		t.Errorf("line %v: PrefixesDeleted: got %v, want %v", l, got, want)
-	}
-	if stats > 0 {
-		stats-- // the stat for the top level directory is not included in the summary
 	}
 	if got, want := got.FSStats, stats; got != want {
 		t.Errorf("line %v: FSStats: got %v, want %v", l, got, want)

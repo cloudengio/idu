@@ -59,6 +59,7 @@ func TestOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer db.Close(ctx)
 
 	buckets, err := listBuckets(db)
 	if err != nil {
@@ -73,6 +74,7 @@ func TestOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer db2.Close(ctx)
 
 	buckets, err = listBuckets(db2)
 	if err != nil {

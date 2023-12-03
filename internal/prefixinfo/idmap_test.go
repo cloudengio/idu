@@ -7,7 +7,6 @@ package prefixinfo
 import (
 	"bytes"
 	"reflect"
-	"syscall"
 	"testing"
 	"time"
 
@@ -126,7 +125,7 @@ func TestCreateIDMaps(t *testing.T) {
 			[]uint32{uid + 1, uid + 1}, []uint32{gid + 1, gid + 1},
 			[]uint32{uid + 1, uid + 1}, []uint32{gid + 1, gid + 1}},
 	} {
-		info := file.NewInfo("dir", 1, 0700, time.Now().Truncate(0), &syscall.Stat_t{Uid: uid, Gid: gid})
+		info := file.NewInfo("dir", 1, 0700, time.Now().Truncate(0), SysUserGroupID(uid, gid))
 		pi, err := New(info)
 		if err != nil {
 			t.Fatal(err)

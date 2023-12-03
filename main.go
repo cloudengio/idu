@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"syscall"
 
 	// G108
 	_ "net/http/pprof" //nolint:gosec
@@ -118,11 +119,6 @@ commands:
   - name: config
     summary: describe the current configuration
 
-  #- name: du
-  #  summary: display disk usage for the specified directory tree without using a database
-  #  arguments:
-  #    - <directory>
-
   - name: database
     summary: database management commands
     commands:
@@ -177,11 +173,6 @@ func cli() *subcmd.CommandSetYAML {
 
 	findCmds := &findCmds{}
 	cmdSet.Set("find").MustRunner(findCmds.find, &findFlags{})
-
-	if false { // move out of this command and into the ufind.
-		duCmd := &duCmd{}
-		cmdSet.Set("du").MustRunner(duCmd.du, &duFlags{})
-	}
 
 	cmdSet.Set("config").MustRunner(configManager, &configFlags{})
 
@@ -267,7 +258,7 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
-	cmdutil.HandleSignals(cancel, os.Interrupt, os.Kill)
+	cmdutil.HandleSignals(cancel, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	return cmdRunner(ctx)
 }
