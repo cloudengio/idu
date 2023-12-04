@@ -150,7 +150,6 @@ func cli() *subcmd.CommandSetYAML {
 	cmdSet.Set("analyze").MustRunner(analyzer.analyze, &analyzeFlags{})
 
 	ls := &lister{}
-	cmdSet.Set("ls").MustRunner(ls.prefixes, &lsFlags{})
 	cmdSet.Set("errors").MustRunner(ls.errors, &errorFlags{})
 	cmdSet.Set("logs").MustRunner(ls.logs, &logFlags{})
 
