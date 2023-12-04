@@ -104,11 +104,9 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 	if err != nil {
 		return err
 	}
-
 	if ff.Stats {
 		fc.stats(sdb, bytes, ff.TopN)
 	}
-
 	return nil
 }
 

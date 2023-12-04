@@ -111,12 +111,6 @@ commands:
         arguments:
           - <report-directory>
 
-  - name: ls
-    summary: list the contents of the database
-    arguments:
-       - <prefix>
-       - '[prefixes]...'
-
   - name: config
     summary: describe the current configuration
 
