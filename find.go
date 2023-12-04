@@ -15,14 +15,16 @@ import (
 	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/internal/reports"
+	"cloudeng.io/cmdutil/boolexpr"
 	"cloudeng.io/file"
 	"cloudeng.io/file/matcher"
 )
 
 type findFlags struct {
-	Stats bool `subcmd:"stats,false,'calculate statistics on found entries'"`
-	TopN  int  `subcmd:"n,50,'number of entries to show for statistics'"`
-	Long  bool `subcmd:"long,false,'show long listing for each result'"`
+	Stats    bool `subcmd:"stats,false,'calculate statistics on found entries'"`
+	TopN     int  `subcmd:"n,50,'number of entries to show for statistics'"`
+	Long     bool `subcmd:"long,false,'show long listing for each result'"`
+	Document bool `subcmd:"document,false,'show documentation for find expressions'"`
 }
 
 type findCmds struct{}
@@ -36,8 +38,28 @@ func (fwid fileWithID) UserGroup() (uint32, uint32) {
 	return fwid.uid, fwid.gid
 }
 
+func (fc *findCmds) document(p *boolexpr.Parser) {
+	fmt.Printf("find accepts boolean expressions using || && and ( and ) to combine any of the following operands:\n\n")
+	for _, op := range p.ListOperands() {
+		fmt.Printf("  %v\n", op.Document())
+	}
+	fmt.Printf("\nNote that directories are evaluated both using their full path name as well as their name within a parent, whereas files use evaluated just using their name within a directory.\n")
+}
+
 func (fc *findCmds) find(ctx context.Context, values interface{}, args []string) error {
 	ff := values.(*findFlags)
+
+	parser := matcher.New()
+	prefixinfo.RegisterOperands(parser, globalUserManager.uidForName, globalUserManager.gidForName)
+	expr, err := parser.Parse(strings.Join(args[1:], " "))
+	if err != nil {
+		return err
+	}
+
+	if ff.Document {
+		fc.document(parser)
+		return nil
+	}
 	ctx, cfg, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
 	if err != nil {
 		return err
@@ -49,13 +71,6 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 	hasStorabeBytes := calc.String() != "identity"
 	sdb := reports.NewAllStats(args[0], hasStorabeBytes, ff.TopN)
 	bytes := heap.NewMinMax[int64, string]()
-
-	parser := matcher.New()
-	prefixinfo.RegisterOperands(parser, globalUserManager.uidForName, globalUserManager.gidForName)
-	expr, err := parser.Parse(strings.Join(args[1:], " "))
-	if err != nil {
-		return err
-	}
 
 	err = db.Scan(ctx, args[0], func(_ context.Context, k string, v []byte) bool {
 		if !strings.HasPrefix(k, args[0]) {

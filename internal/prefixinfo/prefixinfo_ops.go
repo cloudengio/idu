@@ -73,9 +73,16 @@ func (op UserOrGroup) Needs(t reflect.Type) bool {
 	return t.Implements(op.requires)
 }
 
+// IDLookup is a function that can be used to lookup a user or group id
+// from a name.
 type IDLookup func(name string) (uint32, error)
 
+// NewUID returns an operand that matches the specified user id/name.
+// The evaluated value must provide the method UserGroup() (uint32, uint32).
 func NewUID(_, v string, idl IDLookup) boolexpr.Operand { return UserOrGroup{text: v} }
+
+// NewGID returns an operand that matches the specified group id/name.
+// The evaluated value must provide the method UserGroup() (uint32, uint32).
 func NewGID(_, v string, idl IDLookup) boolexpr.Operand { return UserOrGroup{text: v, group: true} }
 
 func RegisterOperands(p *boolexpr.Parser, uidLookup, gidLookup IDLookup) {
@@ -83,14 +90,14 @@ func RegisterOperands(p *boolexpr.Parser, uidLookup, gidLookup IDLookup) {
 		func(_, v string) boolexpr.Operand {
 			return UserOrGroup{
 				text:     v,
-				document: `uid=<id> matches the specified if the type implements: UserGroup() (uid, gid uint32)`,
+				document: `uid=<uid/name> matches the specified user id/name`,
 				idLookup: uidLookup}
 		})
 	p.RegisterOperand("group", func(_, v string) boolexpr.Operand {
 		return UserOrGroup{
 			text:     v,
 			group:    true,
-			document: `gid=<id> matches the specified if the type implements: UserGroup() (uid, gid uint32)`,
+			document: `gid=<gid/name> matches the specified group id/name`,
 			idLookup: gidLookup}
 	})
 }
