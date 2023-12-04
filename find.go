@@ -58,7 +58,7 @@ func (fc *findCmds) createExpr(args []string) (boolexpr.T, error) {
 	input := strings.Join(args, " ")
 	expr, err := fc.createParser().Parse(input)
 	if err != nil {
-		return boolexpr.T{}, fmt.Errorf("failed to parse expresion: %v\n", input, err)
+		return boolexpr.T{}, fmt.Errorf("failed to parse expresion: %v: %v\n", input, err)
 	}
 	return expr, nil
 }
