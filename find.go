@@ -17,6 +17,7 @@ import (
 	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/cmdutil/boolexpr"
 	"cloudeng.io/file"
+	"cloudeng.io/file/diskusage"
 	"cloudeng.io/file/matcher"
 )
 
@@ -38,7 +39,14 @@ func (fwid fileWithID) UserGroup() (uint32, uint32) {
 	return fwid.uid, fwid.gid
 }
 
-func (fc *findCmds) document(p *boolexpr.Parser) {
+func (fc *findCmds) createParser() *boolexpr.Parser {
+	parser := matcher.New()
+	prefixinfo.RegisterOperands(parser, globalUserManager.uidForName, globalUserManager.gidForName)
+	return parser
+}
+
+func (fc *findCmds) document() {
+	p := fc.createParser()
 	fmt.Printf("find accepts boolean expressions using || && and ( and ) to combine any of the following operands:\n\n")
 	for _, op := range p.ListOperands() {
 		fmt.Printf("  %v\n", op.Document())
@@ -46,81 +54,110 @@ func (fc *findCmds) document(p *boolexpr.Parser) {
 	fmt.Printf("\nNote that directories are evaluated both using their full path name as well as their name within a parent, whereas files use evaluated just using their name within a directory.\n")
 }
 
+func (fc *findCmds) createExpr(args []string) (boolexpr.T, error) {
+	input := strings.Join(args, " ")
+	expr, err := fc.createParser().Parse(input)
+	if err != nil {
+		return boolexpr.T{}, fmt.Errorf("failed to parse expresion: %v\n", input, err)
+	}
+	return expr, nil
+}
+
+type findHandler struct {
+	sep   string
+	calc  diskusage.Calculator
+	stats *reports.AllStats
+	expr  boolexpr.T
+	long  bool
+	topN  int
+	bytes *heap.MinMax[int64, string]
+}
+
+func (fh *findHandler) handlePrefix(k string, pi prefixinfo.T) {
+	named := prefixinfo.NewNamed(k, pi)
+	if fh.expr.Eval(named) {
+		if fh.stats != nil {
+			if err := fh.stats.Update(k, pi, fh.calc); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to compute stats for %v: %v\n", k, err)
+			}
+			return
+		}
+		if fh.long {
+			fmt.Println(fs.FormatFileInfo(internal.PrefixInfoAsFSInfo(pi, k)))
+		} else {
+			fmt.Printf("%v/\n", k)
+		}
+	}
+
+	for _, fi := range pi.InfoList() {
+		uid, gid := pi.UserGroupInfo(fi)
+		fid := fileWithID{Info: fi, uid: uid, gid: gid}
+		n := fid.Name()
+		if fh.expr.Eval(fid) {
+			if fh.stats != nil {
+				fh.bytes.PushMaxN(fi.Size(), k+fh.sep+n, fh.topN)
+				continue
+			}
+			if fh.long {
+				fmt.Println("    ", fs.FormatFileInfo(fi))
+			} else {
+				fmt.Printf("%v\n", k+fh.sep+n)
+			}
+		}
+	}
+}
+
 func (fc *findCmds) find(ctx context.Context, values interface{}, args []string) error {
 	ff := values.(*findFlags)
+	if ff.Document {
+		fc.document()
+		return nil
+	}
 
-	parser := matcher.New()
-	prefixinfo.RegisterOperands(parser, globalUserManager.uidForName, globalUserManager.gidForName)
-	expr, err := parser.Parse(strings.Join(args[1:], " "))
+	expr, err := fc.createExpr(args[1:])
 	if err != nil {
 		return err
 	}
 
-	if ff.Document {
-		fc.document(parser)
-		return nil
-	}
 	ctx, cfg, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
 	if err != nil {
 		return err
 	}
 	defer db.Close(ctx)
 
-	sep := cfg.Separator
-	calc := cfg.Calculator()
-	hasStorabeBytes := calc.String() != "identity"
-	sdb := reports.NewAllStats(args[0], hasStorabeBytes, ff.TopN)
-	bytes := heap.NewMinMax[int64, string]()
+	fh := &findHandler{
+		expr:  expr,
+		long:  ff.Long,
+		sep:   cfg.Separator,
+		calc:  cfg.Calculator(),
+		topN:  ff.TopN,
+		bytes: heap.NewMinMax[int64, string](),
+	}
+	hasStorabeBytes := fh.calc.String() != "identity"
+	if ff.Stats {
+		fh.stats = reports.NewAllStats(args[0], hasStorabeBytes, ff.TopN)
+	}
 
 	err = db.Scan(ctx, args[0], func(_ context.Context, k string, v []byte) bool {
 		if !strings.HasPrefix(k, args[0]) {
 			return false
 		}
+
 		var pi prefixinfo.T
 		if err := pi.UnmarshalBinary(v); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to unmarshal value for %v: %v\n", k, err)
 			return false
 		}
 
-		named := prefixinfo.NewNamed(k, pi)
-		if expr.Eval(named) {
-			if ff.Stats {
-				if err := sdb.Update(k, pi, calc); err != nil {
-					fmt.Fprintf(os.Stderr, "failed to compute stats for %v: %v\n", k, err)
-				}
-			} else {
-				if ff.Long {
-					fmt.Println(fs.FormatFileInfo(internal.PrefixInfoAsFSInfo(pi, k)))
-				} else {
-					fmt.Printf("%v/\n", k)
-				}
-			}
-		}
+		fh.handlePrefix(k, pi)
 
-		for _, fi := range pi.InfoList() {
-			uid, gid := pi.UserGroupInfo(fi)
-			fid := fileWithID{Info: fi, uid: uid, gid: gid}
-			n := fid.Name()
-			if expr.Eval(fid) {
-				if ff.Stats {
-					bytes.PushMaxN(fi.Size(), k+sep+n, ff.TopN)
-					continue
-				}
-				if ff.Long {
-					fmt.Println("    ", fs.FormatFileInfo(fi))
-				} else {
-					fmt.Printf("%v\n", k+sep+n)
-				}
-
-			}
-		}
 		return true
 	})
 	if err != nil {
 		return err
 	}
 	if ff.Stats {
-		fc.stats(sdb, bytes, ff.TopN)
+		fc.stats(fh.stats, fh.bytes, ff.TopN)
 	}
 	return nil
 }
