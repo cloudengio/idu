@@ -8,25 +8,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
-	"strings"
 	"time"
 
 	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/cmd/idu/internal/prefixinfo"
 )
-
-type lsFlags struct {
-	Limit      int    `subcmd:"limit,-1,'limit the number of items to list'"`
-	TopN       int    `subcmd:"top,10,'show the top prefixes by file/prefix counts and disk usage, set to zero to disable'"`
-	Recurse    bool   `subcmd:"recurse,false,list prefixes recursively"`
-	Summary    bool   `subcmd:"summary,true,show summary statistics"`
-	ShowDirs   bool   `subcmd:"prefixes,false,show information on each prefix"`
-	ShowFiles  bool   `subcmd:"files,false,show information on individual files"`
-	ShowErrors bool   `subcmd:"errors,false,show information on individual errors"`
-	User       string `subcmd:"user,,show information for this user only"`
-}
 
 type logFlags struct {
 	internal.TimeRangeFlags
@@ -40,48 +26,6 @@ type errorFlags struct {
 }
 
 type lister struct{}
-
-func (l *lister) prefixes(ctx context.Context, values interface{}, args []string) error {
-	flagValues := values.(*lsFlags)
-	if len(args) > 1 {
-		flagValues.ShowFiles = false
-		flagValues.ShowDirs = false
-		flagValues.Summary = true
-	}
-	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
-	if err != nil {
-		return err
-	}
-	if len(args) == 1 {
-		args = append(args, args[0])
-	}
-	for _, prefix := range args[1:] {
-		err := db.Scan(ctx, prefix, func(_ context.Context, k string, v []byte) bool {
-			if !strings.HasPrefix(k, prefix) {
-				return false
-			}
-			var pi prefixinfo.T
-			if err := pi.UnmarshalBinary(v); err != nil {
-				fmt.Fprintf(os.Stderr, "failed to unmarshal value for %v: %v\n", k, err)
-				return false
-			}
-			fmt.Println(fs.FormatFileInfo(internal.PrefixInfoAsFSInfo(pi, k)))
-			for _, fi := range pi.InfoList() {
-				if flagValues.ShowFiles && !fi.IsDir() {
-					fmt.Println("    ", fs.FormatFileInfo(fi))
-				}
-				if flagValues.ShowDirs && fi.IsDir() {
-					fmt.Println("    ", fs.FormatFileInfo(fi))
-				}
-			}
-			return true
-		})
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
 
 func (l *lister) errors(ctx context.Context, values interface{}, args []string) error {
 	ef := values.(*errorFlags)

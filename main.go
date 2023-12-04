@@ -65,6 +65,7 @@ commands:
     summary: find files matching the specified criteria
     arguments:
      - <prefix>
+     - <expr>...
 
   - name: stats
     summary: compute and display statistics from the database
@@ -110,12 +111,6 @@ commands:
         arguments:
           - <report-directory>
 
-  - name: ls
-    summary: list the contents of the database
-    arguments:
-       - <prefix>
-       - '[prefixes]...'
-
   - name: config
     summary: describe the current configuration
 
@@ -155,7 +150,6 @@ func cli() *subcmd.CommandSetYAML {
 	cmdSet.Set("analyze").MustRunner(analyzer.analyze, &analyzeFlags{})
 
 	ls := &lister{}
-	cmdSet.Set("ls").MustRunner(ls.prefixes, &lsFlags{})
 	cmdSet.Set("errors").MustRunner(ls.errors, &errorFlags{})
 	cmdSet.Set("logs").MustRunner(ls.logs, &logFlags{})
 
