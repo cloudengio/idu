@@ -65,6 +65,7 @@ commands:
     summary: find files matching the specified criteria
     arguments:
      - <prefix>
+     - <expr>...
 
   - name: stats
     summary: compute and display statistics from the database

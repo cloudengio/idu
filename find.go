@@ -7,78 +7,33 @@ package main
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
-	"regexp"
 	"strings"
 
 	"cloudeng.io/algo/container/heap"
 	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/internal/reports"
-	"cloudeng.io/cmdutil/flags"
+	"cloudeng.io/file"
+	"cloudeng.io/file/matcher"
 )
 
 type findFlags struct {
-	User        string          `subcmd:"user,,restrict output to the specified user"`
-	Group       string          `subcmd:"group,,restrict output to the specified group"`
-	PrefixMatch flags.Repeating `subcmd:"prefix,,'a regular expression to match against prefixes/directories, repeated entries are OR\\'d together'"`
-	FileMatch   flags.Repeating `subcmd:"file,,'a regular expression to match against filenames, repeated entries are OR\\'d together'"`
-	Stats       bool            `subcmd:"stats,false,'calculate statistics on found entries'"`
-	TopN        int             `subcmd:"n,50,'number of entries to show for statistics'"`
+	Stats bool `subcmd:"stats,false,'calculate statistics on found entries'"`
+	TopN  int  `subcmd:"n,50,'number of entries to show for statistics'"`
+	Long  bool `subcmd:"long,false,'show long listing for each result'"`
 }
 
 type findCmds struct{}
 
-type orRegexp []*regexp.Regexp
-
-func newOrRegExp(values []string) (orRegexp, error) {
-	res := make(orRegexp, len(values))
-	for i, v := range values {
-		r, err := regexp.Compile(v)
-		if err != nil {
-			return nil, fmt.Errorf("failed to compile regexp for --match: %v: %v", v, err)
-		}
-		res[i] = r
-	}
-	return res, nil
+type fileWithID struct {
+	file.Info
+	uid, gid uint32
 }
 
-func (or orRegexp) match(p string) bool {
-	if len(or) == 0 {
-		return false
-	}
-	for _, r := range or {
-		if r.MatchString(p) {
-			return true
-		}
-	}
-	return false
-}
-
-func (fc *findCmds) configure(ff *findFlags) (orPrefixes, orFiles orRegexp, useUID, useGID bool, uid, gid uint32, err error) {
-	orPrefixes, err = newOrRegExp(ff.PrefixMatch.Values)
-	if err != nil {
-		return
-	}
-	orFiles, err = newOrRegExp(ff.FileMatch.Values)
-	if err != nil {
-		return
-	}
-	useUID, useGID = len(ff.User) > 0, len(ff.Group) > 0
-	if useUID {
-		uid, err = globalUserManager.uidForName(ff.User)
-		if err != nil {
-			return
-		}
-	}
-
-	if useGID {
-		gid, err = globalUserManager.gidForName(ff.User)
-		if err != nil {
-			return
-		}
-	}
-	return
+func (fwid fileWithID) UserGroup() (uint32, uint32) {
+	return fwid.uid, fwid.gid
 }
 
 func (fc *findCmds) find(ctx context.Context, values interface{}, args []string) error {
@@ -89,16 +44,18 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 	}
 	defer db.Close(ctx)
 
-	orPrefixes, orFiles, useUID, useGID, uid, gid, err := fc.configure(ff)
-	if err != nil {
-		return err
-	}
-
 	sep := cfg.Separator
 	calc := cfg.Calculator()
 	hasStorabeBytes := calc.String() != "identity"
 	sdb := reports.NewAllStats(args[0], hasStorabeBytes, ff.TopN)
 	bytes := heap.NewMinMax[int64, string]()
+
+	parser := matcher.New()
+	prefixinfo.RegisterOperands(parser, globalUserManager.uidForName, globalUserManager.gidForName)
+	expr, err := parser.Parse(strings.Join(args[1:], " "))
+	if err != nil {
+		return err
+	}
 
 	err = db.Scan(ctx, args[0], func(_ context.Context, k string, v []byte) bool {
 		if !strings.HasPrefix(k, args[0]) {
@@ -110,27 +67,36 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 			return false
 		}
 
-		if fc.filterID(pi, useUID, useGID, uid, gid) {
-			return true
-		}
-
-		if orPrefixes.match(k) {
-			fmt.Printf("%v\n", k)
+		named := prefixinfo.NewNamed(k, pi)
+		if expr.Eval(named) {
 			if ff.Stats {
 				if err := sdb.Update(k, pi, calc); err != nil {
 					fmt.Fprintf(os.Stderr, "failed to compute stats for %v: %v\n", k, err)
 				}
+			} else {
+				if ff.Long {
+					fmt.Println(fs.FormatFileInfo(internal.PrefixInfoAsFSInfo(pi, k)))
+				} else {
+					fmt.Printf("%v/\n", k)
+				}
 			}
-			return true
 		}
 
 		for _, fi := range pi.InfoList() {
-			n := fi.Name()
-			if orFiles.match(n) {
-				fmt.Printf("---- %v\n", k+sep+n)
+			uid, gid := pi.UserGroupInfo(fi)
+			fid := fileWithID{Info: fi, uid: uid, gid: gid}
+			n := fid.Name()
+			if expr.Eval(fid) {
 				if ff.Stats {
 					bytes.PushMaxN(fi.Size(), k+sep+n, ff.TopN)
+					continue
 				}
+				if ff.Long {
+					fmt.Println("    ", fs.FormatFileInfo(fi))
+				} else {
+					fmt.Printf("%v\n", k+sep+n)
+				}
+
 			}
 		}
 		return true
@@ -146,23 +112,12 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 	return nil
 }
 
-func (fc *findCmds) filterID(pi prefixinfo.T, useUID, useGID bool, uid, gid uint32) bool {
-	puid, pgid := pi.UserGroup()
-	if useUID && puid != uid {
-		return true
-	}
-	if useGID && pgid != gid {
-		return true
-	}
-	return false
-}
-
 func (fc *findCmds) stats(sdb *reports.AllStats, bytes *heap.MinMax[int64, string], topN int) {
 	sdb.Finalize()
 
 	heapFormatter[string]{}.formatTotals(sdb.Prefix, os.Stdout)
 
-	banner(os.Stdout, "=", "Usage by top %v matched refixes\n", topN)
+	banner(os.Stdout, "=", "Usage by top %v matched prefixes\n", topN)
 	heapFormatter[string]{}.formatHeaps(sdb.Prefix, os.Stdout, func(v string) string { return v }, topN)
 
 	banner(os.Stdout, "=", "Bytes used by matched files\n")

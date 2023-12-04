@@ -447,3 +447,16 @@ func (pi *T) newIDScan(id uint32, userID bool, idms idMaps) (IDSanner, error) {
 	}
 	return &idmapScanner{sc: newIdMapScanner(idms[idm]), entries: pi.entries}, nil
 }
+
+type Named struct {
+	T
+	name string
+}
+
+func (pi Named) Name() string {
+	return pi.name
+}
+
+func NewNamed(name string, pi T) Named {
+	return Named{name: name, T: pi}
+}
