@@ -65,33 +65,28 @@ commands:
     summary: find files matching the specified criteria
     arguments:
      - <prefix>
-     - <expr>...
+     - <expression>...
 
   - name: stats
     summary: compute and display statistics from the database
     commands:
       - name: compute
-        summary: compute all statistics based on the current state of the database and store the results in the database
+        summary: compute all statistics based on the current state of the database and store the results in the database.
         arguments:
           - <prefix>
+		  - <expression>...
+
       - name: aggregate
-        summary: display aggregated/tatal stats
+        summary: display or compute aggregated/total stats
         arguments:
           - <prefix>
-      - name: user
-        summary: summarize file count and disk usage on a per user basis
-        arguments:
-          - <prefix>
-          - '[user]...'
-      - name: group
-        summary: summarize file count and disk usage on a per group basis
-        arguments:
-          - <prefix>
-          - '[group]...'
+		  - <expression>...
+
       - name: list
         summary: list the available stats
         arguments:
           - <prefix>
+
       - name: erase
         summary: erase the stats stored in the database
         arguments:
