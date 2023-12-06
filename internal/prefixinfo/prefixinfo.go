@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"time"
 
+	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/file"
 	"cloudeng.io/file/diskusage"
 )
@@ -317,13 +318,13 @@ func (pi *T) finalize() error {
 // using the supplied calculator to determine on-disk raw storage usage.
 // Note that the size of the prefix itself is not included in the returned
 // PrefixBytes but rather is included in the PrefixBytes for its parent prefix.
-func (pi *T) ComputeStats(calculator diskusage.Calculator) (totals Stats, userStats, groupStats StatsList, err error) {
+func (pi *T) ComputeStats(calculator diskusage.Calculator, expr boolexpr.T) (totals Stats, userStats, groupStats StatsList, err error) {
 	if !pi.finalized {
 		err = fmt.Errorf("prefix info not finalized")
 		return
 	}
-	userStats = pi.computeStatsForIDMapOrFiles(pi.userIDMap, pi.userID, calculator)
-	groupStats = pi.computeStatsForIDMapOrFiles(pi.groupIDMap, pi.groupID, calculator)
+	userStats = pi.computeStatsForIDMapOrFiles(pi.userIDMap, pi.userID, calculator, expr)
+	groupStats = pi.computeStatsForIDMapOrFiles(pi.groupIDMap, pi.groupID, calculator, expr)
 	for _, us := range userStats {
 		totals.Bytes += us.Bytes
 		totals.Files += us.Files
@@ -334,25 +335,29 @@ func (pi *T) ComputeStats(calculator diskusage.Calculator) (totals Stats, userSt
 	return
 }
 
-func (pi *T) computeStatsForIDMapOrFiles(idms idMaps, defaultID uint32, calculator diskusage.Calculator) []Stats {
+func (pi *T) computeStatsForIDMapOrFiles(idms idMaps, defaultID uint32, calculator diskusage.Calculator, expr boolexpr.T) []Stats {
 	if len(idms) == 0 {
 		var stats Stats
 		stats.ID = defaultID
 		for _, fi := range pi.entries {
-			pi.updateStats(&stats, fi, calculator)
+			pi.updateStats(&stats, fi, calculator, expr)
 		}
 		return []Stats{stats}
 	}
 	stats := make([]Stats, 0, len(idms))
 	for _, idm := range idms {
-		if s, ok := pi.computeStatsForID(idm, calculator); ok {
+		if s, ok := pi.computeStatsForID(idm, calculator, expr); ok {
 			stats = append(stats, s)
 		}
 	}
 	return stats
 }
 
-func (pi *T) updateStats(s *Stats, fi file.Info, calculator diskusage.Calculator) {
+func (pi *T) updateStats(s *Stats, fi file.Info, calculator diskusage.Calculator, expr boolexpr.T) {
+	uid, gid := pi.UserGroupInfo(fi)
+	if !expr.Eval(boolexpr.NewFileInfoUserGroup(fi, uid, gid)) {
+		return
+	}
 	if fi.IsDir() {
 		s.Prefixes++
 		s.PrefixBytes += fi.Size()
@@ -363,14 +368,14 @@ func (pi *T) updateStats(s *Stats, fi file.Info, calculator diskusage.Calculator
 	}
 }
 
-func (pi *T) computeStatsForID(idm idMap, calculator diskusage.Calculator) (Stats, bool) {
+func (pi *T) computeStatsForID(idm idMap, calculator diskusage.Calculator, expr boolexpr.T) (Stats, bool) {
 	var stats Stats
 	stats.ID = idm.ID
 	sc := newIdMapScanner(idm)
 	found := false
 	for sc.next() {
 		fi := pi.entries[sc.pos()]
-		pi.updateStats(&stats, fi, calculator)
+		pi.updateStats(&stats, fi, calculator, expr)
 		found = true
 	}
 	return stats, found

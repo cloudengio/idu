@@ -11,11 +11,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"cloudeng.io/algo/container/heap"
 	"cloudeng.io/cmd/idu/internal"
+	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/database"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/internal/reports"
@@ -41,11 +43,10 @@ func loadStats(filename string) (statsFileFormat, error) {
 	return stats, nil
 }
 
-func saveStats(filename, softlink string, stats statsFileFormat) error {
-	if len(filename) == 0 {
-		filename = stats.Date.Format(time.DateTime)
-	}
-	filename = strings.TrimSuffix(filename, ".idustats") + ".idustats"
+func saveStats(dir string, stats statsFileFormat) error {
+	basename := stats.Date.Format(time.DateTime)
+	basename = strings.TrimSuffix(basename, ".idustats") + ".idustats"
+	filename := filepath.Join(dir, basename)
 	buf := &bytes.Buffer{}
 	if err := gob.NewEncoder(buf).Encode(stats); err != nil {
 		return err
@@ -53,11 +54,9 @@ func saveStats(filename, softlink string, stats statsFileFormat) error {
 	if err := os.WriteFile(filename, buf.Bytes(), 0660); err != nil {
 		return err
 	}
-	if len(softlink) == 0 {
-		return nil
-	}
-	os.Remove(softlink)
-	return os.Symlink(filename, softlink)
+	sl := filepath.Join(dir, "latest.idustats")
+	os.Remove(sl)
+	return os.Symlink(basename, sl)
 }
 
 type statsCmds struct {
@@ -69,16 +68,20 @@ type StatsFlags struct {
 }
 
 type computeFlags struct {
-	ComputeN         int    `subcmd:"n,2000,number of top entries to compute"`
-	Progress         bool   `subcmd:"progress,false,show progress"`
-	SaveAs           string `subcmd:"save-as,,'save files to the specified filename, otherwise the current date and time will be used as the filename'"`
-	CreateLatestLink string `subcmd:"create-link,latest.idustats,create a soft-link to the stats file created"`
+	ComputeN int    `subcmd:"n,2000,number of top entries to compute"`
+	Progress bool   `subcmd:"progress,false,show progress"`
+	StatsDir string `subcmd:"stats-dir,stats,'directory that stats files are written to'"`
 }
 
 type viewFlags struct {
 	StatsFlags
 	User  string `subcmd:"user,,display stats for the specified user"`
 	Group string `subcmd:"group,,display stats for the specified group"`
+	Info  bool   `subcmd:"info,false,display metadata for the stats file"`
+}
+
+type extractFlags struct {
+	StatsDir string `subcmd:"stats-dir,stats,'directory that stats files are written to'"`
 }
 
 type userFlags struct {
@@ -100,7 +103,12 @@ type eraseFlags struct {
 func (st *statsCmds) compute(ctx context.Context, values interface{}, args []string) error {
 	cf := values.(*computeFlags)
 
-	expr, err := createExpr(args[1:])
+	parser := boolexpr.NewParser(globalUserManager.uidForName, globalUserManager.gidForName)
+
+	expr, err := boolexpr.CreateExpr(parser, args[1:])
+	if err != nil {
+		return err
+	}
 
 	ctx, cfg, rdb, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
 	if err != nil {
@@ -111,7 +119,7 @@ func (st *statsCmds) compute(ctx context.Context, values interface{}, args []str
 		fmt.Printf("warning: computing and storing stats for %v and not for %v\n", cfg.Prefix, args[0])
 	}
 
-	sdb, err := st.computeStats(ctx, rdb, cfg.Prefix, cfg.Calculator(), cf.ComputeN, cf.Progress)
+	sdb, err := st.computeStats(ctx, rdb, expr, cfg.Prefix, cfg.Calculator(), cf.ComputeN, cf.Progress)
 	if err != nil {
 		rdb.Close(ctx)
 		return err
@@ -125,28 +133,60 @@ func (st *statsCmds) compute(ctx context.Context, values interface{}, args []str
 		Expression: expr.String(),
 		Stats:      sdb,
 	}
-	return saveStats(cf.SaveAs, cf.CreateLatestLink, stats)
+	return saveStats(cf.StatsDir, stats)
 }
 
-func (st *statsCmds) computeStats(ctx context.Context, db database.DB, prefix string, calc diskusage.Calculator, topN int, progress bool) (*reports.AllStats, error) {
+func (st *statsCmds) extract(ctx context.Context, values interface{}, args []string) error {
+	ef := values.(*extractFlags)
+	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
+	if err != nil {
+		return err
+	}
+	defer db.Close(ctx)
+
+	var from time.Time
+	to := time.Now()
+	return db.VisitStats(ctx, from, to,
+		func(_ context.Context, when time.Time, detail []byte) bool {
+			var sdb reports.AllStats
+			if err := gob.NewDecoder(bytes.NewBuffer(detail)).Decode(&sdb); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to decode stats for %v: %v\n", when, err)
+				return false
+			}
+			stats := statsFileFormat{
+				Prefix:     args[0],
+				Date:       when,
+				Expression: "",
+				Stats:      &sdb,
+			}
+			if err := saveStats(ef.StatsDir, stats); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to save stats for %v: %v\n", when, err)
+			}
+			return true
+		})
+}
+
+func (st *statsCmds) computeStats(ctx context.Context, db database.DB, expr boolexpr.T, prefix string, calc diskusage.Calculator, topN int, progress bool) (*reports.AllStats, error) {
 
 	hasStorabeBytes := calc.String() != "identity"
 	sdb := reports.NewAllStats(prefix, hasStorabeBytes, topN)
 	n := 0
 	err := db.Stream(ctx, prefix, func(_ context.Context, k string, v []byte) {
+		if progress && (n != 0 && n%1000 == 0) {
+			fmt.Printf("processed % 10v entries\n", fmtCount(int64(n)))
+		}
+		n++
+
 		var pi prefixinfo.T
 		if err := pi.UnmarshalBinary(v); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to unmarshal value for %v: %v\n", k, err)
 			return
 		}
-		if err := sdb.Update(k, pi, calc); err != nil {
+		if err := sdb.Update(k, pi, calc, expr); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to compute stats for %v: %v\n", k, err)
 			return
 		}
-		if progress && (n != 0 && n%1000 == 0) {
-			fmt.Printf("processed % 10v entries\n", fmtCount(int64(n)))
-		}
-		n++
+
 	})
 	fmt.Printf("processed % 10v entries\n", fmtCount(int64(n)))
 	sdb.Finalize()
@@ -162,6 +202,13 @@ func (st *statsCmds) view(ctx context.Context, values interface{}, args []string
 	stats, err := loadStats(args[0])
 	if err != nil {
 		return err
+	}
+
+	if af.Info {
+		fmt.Printf("Date       : %v\n", stats.Date)
+		fmt.Printf("Prefix     : %v\n", stats.Prefix)
+		fmt.Printf("Expression : %v\n", stats.Expression)
+		fmt.Println()
 	}
 
 	sdb := stats.Stats

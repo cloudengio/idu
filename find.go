@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"cloudeng.io/cmd/idu/internal"
+	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/errors"
 )
@@ -23,14 +24,16 @@ type findCmds struct{}
 
 type findHandler struct {
 	sep  string
-	expr iduExpr
+	expr boolexpr.T
 	long bool
 }
 
 func (fc *findCmds) find(ctx context.Context, values interface{}, args []string) error {
 	ff := values.(*findFlags)
 
-	expr, err := createExpr(args[1:])
+	parser := boolexpr.NewParser(globalUserManager.uidForName, globalUserManager.gidForName)
+
+	expr, err := boolexpr.CreateExpr(parser, args[1:])
 	if err != nil {
 		return err
 	}
@@ -64,7 +67,7 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 		}
 		for _, fi := range pi.InfoList() {
 			uid, gid := pi.UserGroupInfo(fi)
-			fid := fileWithID{Info: fi, uid: uid, gid: gid}
+			fid := boolexpr.NewFileInfoUserGroup(fi, uid, gid)
 			n := fid.Name()
 			if expr.Eval(fid) {
 				if ff.Long {

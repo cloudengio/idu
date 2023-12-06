@@ -6,6 +6,7 @@ package reports
 
 import (
 	"cloudeng.io/algo/container/heap"
+	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/file/diskusage"
 )
@@ -229,8 +230,8 @@ func (s *AllStats) Finalize() {
 	}
 }
 
-func (s *AllStats) Update(prefix string, pi prefixinfo.T, calc diskusage.Calculator) error {
-	totals, users, groups, err := pi.ComputeStats(calc)
+func (s *AllStats) Update(prefix string, pi prefixinfo.T, calc diskusage.Calculator, expr boolexpr.T) error {
+	totals, users, groups, err := pi.ComputeStats(calc, expr)
 	if err != nil {
 		return err
 	}

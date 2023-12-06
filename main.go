@@ -86,6 +86,10 @@ commands:
         arguments:
           - <filename>
 
+      - name: extract-from-db
+        summary: extract the statistics stored in the database and save them to a file.
+        arguments:
+          - <prefix>
   - name: reports
     summary: generate and manage reports
     commands:
@@ -149,6 +153,7 @@ func cli() *subcmd.CommandSetYAML {
 	cmdSet.Set("stats", "compute").MustRunner(statsCmd.compute, &computeFlags{})
 
 	cmdSet.Set("stats", "view").MustRunner(statsCmd.view, &viewFlags{})
+	cmdSet.Set("stats", "extract-from-db").MustRunner(statsCmd.extract, &extractFlags{})
 
 	reportsCmds := &reportCmds{}
 	cmdSet.Set("reports", "generate").MustRunner(reportsCmds.generate, &reportsFlags{})
