@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"cloudeng.io/cmd/idu/internal/reports"
+	"cloudeng.io/cmd/idu/internal/usernames"
 	"cloudeng.io/errors"
 	"golang.org/x/exp/maps"
 )
@@ -153,12 +154,12 @@ func (rf *reportFilenames) summary(file string) string {
 }
 
 func (rf *reportFilenames) user(uid uint32) string {
-	un := globalUserManager.nameForUID(uid)
+	un := usernames.Manager.NameForUID(uid)
 	return filepath.Join(rf.usersDir(), un+rf.ext)
 }
 
 func (rf *reportFilenames) group(gid uint32) string {
-	un := globalUserManager.nameForGID(gid)
+	un := usernames.Manager.NameForGID(gid)
 	return filepath.Join(rf.groupsDir(), un+rf.ext)
 }
 
@@ -206,13 +207,13 @@ func writeReportFiles(sdb *reports.AllStats,
 	}
 
 	userMerged := sdb.ByUser.Merge(topN)
-	userdata := idFormatter(userMerged, globalUserManager.nameForUID)
+	userdata := idFormatter(userMerged, usernames.Manager.NameForUID)
 	if err := os.WriteFile(filenames.summary("user"), userdata, 0600); err != nil {
 		return err
 	}
 
 	groupMerged := sdb.ByGroup.Merge(topN)
-	groupdata := idFormatter(groupMerged, globalUserManager.nameForGID)
+	groupdata := idFormatter(groupMerged, usernames.Manager.NameForGID)
 	if err := os.WriteFile(filenames.summary("group"), groupdata, 0600); err != nil {
 		return err
 	}

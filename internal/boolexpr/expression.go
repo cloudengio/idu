@@ -10,19 +10,20 @@ import (
 	"fmt"
 	"strings"
 
+	"cloudeng.io/cmd/idu/internal/usernames"
 	"cloudeng.io/cmdutil/boolexpr"
 	"cloudeng.io/file"
 	"cloudeng.io/file/matcher"
 )
 
-func NewParser(uidMapper, gidMapper func(name string) (uint32, error)) *boolexpr.Parser {
+func NewParser() *boolexpr.Parser {
 	parser := matcher.New()
 	parser.RegisterOperand("user",
 		func(_, v string) boolexpr.Operand {
-			return NewUID("user", v, uidMapper)
+			return NewUID("user", v, usernames.Manager.UIDForName)
 		})
 	parser.RegisterOperand("group", func(_, v string) boolexpr.Operand {
-		return NewGID("group", v, uidMapper)
+		return NewGID("group", v, usernames.Manager.GIDForName)
 	})
 	return parser
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"cloudeng.io/cmd/idu/internal/reports"
+	"cloudeng.io/cmd/idu/internal/usernames"
 	"golang.org/x/exp/maps"
 )
 
@@ -204,23 +205,33 @@ func (md *markdownReports) initTemplates() {
 	if md.created {
 		return
 	}
+	nameForUID := usernames.Manager.NameForUID
+	nameForGID := usernames.Manager.NameForGID
 	md.toc = template.Must(tpl("toc").Parse(mdTOC))
 	md.totals = template.Must(tpl("totals").Parse(mdTotals))
 	md.prefixes = template.Must(tpl("prefixes").Parse(mdPrefixes))
 	md.lists = template.Must(tpl("userGroupLists").Funcs(
 		template.FuncMap{
-			"fmtUID": globalUserManager.nameForUID,
-			"fmtGID": globalUserManager.nameForGID,
+			"fmtUID": nameForUID,
+			"fmtGID": nameForGID,
 		}).Parse(mdListUsersAndGroups))
 
-	md.byUsers = template.Must(tpl("users").Funcs(template.FuncMap{"fmtID": globalUserManager.nameForUID}).Parse(mdByUsersGroupsTemplate))
-	md.byGroups = template.Must(tpl("groups").Funcs(template.FuncMap{"fmtID": globalUserManager.nameForUID}).Parse(mdByUsersGroupsTemplate))
+	md.byUsers = template.Must(tpl("users").
+		Funcs(template.FuncMap{"fmtID": nameForUID}).
+		Parse(mdByUsersGroupsTemplate))
+
+	md.byGroups = template.Must(tpl("groups").
+		Funcs(template.FuncMap{"fmtID": nameForGID}).
+		Parse(mdByUsersGroupsTemplate))
+
 	md.perUsers = template.Must(tpl("users").Funcs(
-		template.FuncMap{"fmtID": globalUserManager.nameForUID}).
+		template.FuncMap{"fmtID": nameForUID}).
 		Parse(mdPerUsersGroupsTemplate))
+
 	md.perGroups = template.Must(tpl("users").Funcs(
-		template.FuncMap{"fmtID": globalUserManager.nameForGID}).
+		template.FuncMap{"fmtID": nameForGID}).
 		Parse(mdPerUsersGroupsTemplate))
+
 	md.created = true
 }
 

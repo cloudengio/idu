@@ -31,7 +31,7 @@ type findHandler struct {
 func (fc *findCmds) find(ctx context.Context, values interface{}, args []string) error {
 	ff := values.(*findFlags)
 
-	parser := boolexpr.NewParser(globalUserManager.uidForName, globalUserManager.gidForName)
+	parser := boolexpr.NewParser()
 
 	expr, err := boolexpr.CreateExpr(parser, args[1:])
 	if err != nil {

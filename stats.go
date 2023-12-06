@@ -21,6 +21,7 @@ import (
 	"cloudeng.io/cmd/idu/internal/database"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/internal/reports"
+	"cloudeng.io/cmd/idu/internal/usernames"
 	"cloudeng.io/file/diskusage"
 )
 
@@ -103,7 +104,7 @@ type eraseFlags struct {
 func (st *statsCmds) compute(ctx context.Context, values interface{}, args []string) error {
 	cf := values.(*computeFlags)
 
-	parser := boolexpr.NewParser(globalUserManager.uidForName, globalUserManager.gidForName)
+	parser := boolexpr.NewParser()
 
 	expr, err := boolexpr.CreateExpr(parser, args[1:])
 	if err != nil {
@@ -215,11 +216,11 @@ func (st *statsCmds) view(ctx context.Context, values interface{}, args []string
 	when := stats.Date
 
 	if len(af.User) != 0 {
-		return st.userOrGroup(ctx, af, stats, af.User, globalUserManager.uidForName)
+		return st.userOrGroup(ctx, af, stats, af.User, usernames.Manager.UIDForName)
 	}
 
 	if len(af.Group) != 0 {
-		return st.userOrGroup(ctx, af, stats, af.Group, globalUserManager.gidForName)
+		return st.userOrGroup(ctx, af, stats, af.Group, usernames.Manager.GIDForName)
 	}
 
 	heapFormatter[string]{}.formatTotals(sdb.Prefix, os.Stdout)
@@ -228,10 +229,12 @@ func (st *statsCmds) view(ctx context.Context, values interface{}, args []string
 	heapFormatter[string]{}.formatHeaps(sdb.Prefix, os.Stdout, func(v string) string { return v }, af.DisplayN)
 
 	banner(os.Stdout, "=", "\nUsage by top %v users as of: %v\n", af.DisplayN, when)
-	heapFormatter[uint32]{}.formatHeaps(sdb.ByUser, os.Stdout, globalUserManager.nameForUID, af.DisplayN)
+	heapFormatter[uint32]{}.formatHeaps(sdb.ByUser, os.Stdout,
+		usernames.Manager.NameForUID, af.DisplayN)
 
 	banner(os.Stdout, "=", "\nUsage by top %v groups as of: %v\n", af.DisplayN, when)
-	heapFormatter[uint32]{}.formatHeaps(sdb.ByGroup, os.Stdout, globalUserManager.nameForGID, af.DisplayN)
+	heapFormatter[uint32]{}.formatHeaps(sdb.ByGroup, os.Stdout,
+		usernames.Manager.NameForGID, af.DisplayN)
 	return nil
 }
 
@@ -258,7 +261,7 @@ func (st *statsCmds) userOrGroup(ctx context.Context, af *viewFlags, stats stats
 	}
 
 	banner(os.Stdout, "=", "Usage by %v as of: %v\n", name, when)
-	st.formatPerIDStats(sdb.PerUser, os.Stdout, globalUserManager.nameForUID, map[uint32]bool{id: true}, af.DisplayN)
+	st.formatPerIDStats(sdb.PerUser, os.Stdout, usernames.Manager.NameForUID, map[uint32]bool{id: true}, af.DisplayN)
 	return nil
 }
 
