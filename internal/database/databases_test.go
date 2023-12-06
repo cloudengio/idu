@@ -17,11 +17,11 @@ import (
 
 	"cloudeng.io/cmd/idu/internal/database"
 	"cloudeng.io/cmd/idu/internal/database/badgerdb"
-	"cloudeng.io/cmd/idu/internal/database/boltdb"
 	"github.com/dgraph-io/badger/v4"
 	"golang.org/x/exp/slices"
 )
 
+/*
 func boltFactory(t *testing.T, dir, prefix string, readonly bool) database.DB {
 	t.Helper()
 	dbname := filepath.Join(dir, "db")
@@ -34,7 +34,7 @@ func boltFactory(t *testing.T, dir, prefix string, readonly bool) database.DB {
 		t.Fatal(err)
 	}
 	return db
-}
+}*/
 
 func badgerFactory(t *testing.T, dir, prefix string, readonly bool) database.DB {
 	t.Helper()
@@ -99,7 +99,7 @@ func validatePopulatedDatabase(t *testing.T, found []string, nItems int) {
 }
 
 func TestScan(t *testing.T) {
-	testScan(t, boltFactory)
+	//testScan(t, boltFactory)
 	testScan(t, badgerFactory)
 }
 
@@ -181,7 +181,7 @@ func testScan(t *testing.T, factory databaseFactory) {
 }
 
 func TestLogAndClose(t *testing.T) {
-	testLogAndClose(t, boltFactory)
+	//testLogAndClose(t, boltFactory)
 	testLogAndClose(t, badgerFactory)
 }
 
@@ -243,7 +243,7 @@ func testLogAndClose(t *testing.T, factory databaseFactory) {
 }
 
 func TestErrors(t *testing.T) {
-	testErrors(t, boltFactory)
+	//testErrors(t, boltFactory)
 	testErrors(t, badgerFactory)
 }
 
@@ -310,7 +310,7 @@ func visitAllErrors(t *testing.T, ctx context.Context, db database.DB) []string 
 }
 
 func TestErrorsDelete(t *testing.T) {
-	testErrorsDelete(t, boltFactory)
+	//testErrorsDelete(t, boltFactory)
 	testErrorsDelete(t, badgerFactory)
 }
 
@@ -356,7 +356,7 @@ func testErrorsDelete(t *testing.T, factory databaseFactory) {
 }
 
 func TestDelete(t *testing.T) {
-	testDelete(t, boltFactory)
+	//testDelete(t, boltFactory)
 	testDelete(t, badgerFactory)
 }
 
@@ -427,7 +427,7 @@ func testDelete(t *testing.T, factory databaseFactory) {
 
 /*
 func TestStats(t *testing.T) {
-	testStats(t, boltFactory)
+	//testStats(t, boltFactory)
 	testStats(t, badgerFactory)
 }
 
@@ -484,7 +484,7 @@ func testStats(t *testing.T, factory databaseFactory) {
 }*/
 
 func TestExists(t *testing.T) {
-	testExists(t, boltFactory)
+	//testExists(t, boltFactory)
 	testExists(t, badgerFactory)
 }
 

@@ -51,6 +51,7 @@ type DB interface {
 	// DeleteErrors deletes all errors that have the specified prefix.
 	DeleteErrors(ctx context.Context, prefix string) error
 
+	// Deprecated: will be removed shortly.
 	SaveStats(ctx context.Context, when time.Time, value []byte) error
 	LastStats(ctx context.Context) (time.Time, []byte, error)
 	VisitStats(ctx context.Context, start, stop time.Time,
@@ -94,4 +95,10 @@ type DB interface {
 
 	// Close closes the database.
 	Close(context.Context) error
+
+	RegisterHardlink(ctx context.Context, key []byte, filename string) error
+
+	DeleteHardlink(ctx context.Context, key []byte, filename string) error
+
+	IsHardLink(ctx context.Context, filename string) (key []byte, err error)
 }
