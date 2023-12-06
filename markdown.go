@@ -7,7 +7,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/gob"
 	"os"
 	"text/template"
 	"time"
@@ -24,7 +23,7 @@ func tpl(name string) *template.Template {
 }
 
 const mdTOC = `
-# Filesystem Usage Reports for {{.Prefix}}
+# Filesystem Usage Reports for {{.Prefix}} {{.Expression}}
 
 ## Contents
 
@@ -225,24 +224,26 @@ func (md *markdownReports) initTemplates() {
 	md.created = true
 }
 
-func (md *markdownReports) generateReports(ctx context.Context, rf *reportsFlags, prefix string, when time.Time, filenames *reportFilenames, data []byte) error {
+func (md *markdownReports) generateReports(ctx context.Context, rf *reportsFlags, filenames *reportFilenames, stats statsFileFormat) error {
 	md.initTemplates()
-	var sdb reports.AllStats
-	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&sdb); err != nil {
-		return err
-	}
+
+	prefix := stats.Prefix
+	when := stats.Date
+	sdb := stats.Stats
 	out := &bytes.Buffer{}
 
 	// TOC & user/group links
 
 	if err := md.toc.Execute(out, struct {
-		Prefix string
-		TopN   int
-		When   string
+		Prefix     string
+		Expression string
+		TopN       int
+		When       string
 	}{
-		Prefix: prefix,
-		TopN:   rf.Markdown,
-		When:   when.Format(time.RFC3339),
+		Prefix:     prefix,
+		Expression: stats.Expression,
+		TopN:       rf.Markdown,
+		When:       when.Format(time.RFC3339),
 	}); err != nil {
 		return err
 	}

@@ -44,10 +44,13 @@ var (
 )
 
 var commands = `name: idu
-summary: analyze disk usage using a database for incremental updates
+summary: analyze disk usage using a database for incremental updates. Many of the commands accept an expression that is used to restrict which prefixes/directories and files are processed.
 commands:
+  - name: expression-syntax
+    summary: display the syntax for the expression language supported by commands such as analyze, find etc.
+
   - name: analyze
-    summary: analyze the file system to build a database of file counts, disk usage etc
+    summary: analyze the file system to build a database of file metadata etc
     arguments:
       - <prefix>
 
@@ -62,7 +65,7 @@ commands:
       - <prefix>
 
   - name: find
-    summary: find files matching the specified criteria
+    summary: find prefixes/files in the database that match the supplied expression
     arguments:
      - <prefix>
      - <expression>...
@@ -71,35 +74,26 @@ commands:
     summary: compute and display statistics from the database
     commands:
       - name: compute
-        summary: compute all statistics based on the current state of the database and store the results in the database.
+        summary: compute all statistics based on the current state of the database and
+                 save the results to a file. The results can be viewed using the
+				 stats view command
         arguments:
           - <prefix>
-		  - <expression>...
+          - <expression>...
 
-      - name: aggregate
-        summary: display or compute aggregated/total stats
+      - name: view
+        summary: view the statistics stored in a file created using the compute command
         arguments:
-          - <prefix>
-		  - <expression>...
-
-      - name: list
-        summary: list the available stats
-        arguments:
-          - <prefix>
-
-      - name: erase
-        summary: erase the stats stored in the database
-        arguments:
-          - <prefix>
-
+          - <filename>
 
   - name: reports
     summary: generate and manage reports
     commands:
       - name: generate
-        summary:  generate reports in a variety of formats, including tsv, json and markdown
+        summary:  generate reports in a variety of formats, including tsv, json and markdown from the statistics stored in the specified file.
         arguments:
-          - <prefix>
+          - <filename>
+          - ...
 
       - name: locate
         summary: locate the last n sets of reports in a given directory as a json array of filenames. This is intended to be used by other scripts that analyze the reports.
@@ -141,6 +135,9 @@ func init() {
 func cli() *subcmd.CommandSetYAML {
 	cmdSet := subcmd.MustFromYAML(commands)
 
+	expr := &exprCmd{}
+	cmdSet.Set("expression-syntax").MustRunner(expr.explain, &struct{}{})
+
 	analyzer := &analyzeCmd{}
 	cmdSet.Set("analyze").MustRunner(analyzer.analyze, &analyzeFlags{})
 
@@ -150,11 +147,8 @@ func cli() *subcmd.CommandSetYAML {
 
 	statsCmd := &statsCmds{}
 	cmdSet.Set("stats", "compute").MustRunner(statsCmd.compute, &computeFlags{})
-	cmdSet.Set("stats", "aggregate").MustRunner(statsCmd.aggregate, &aggregateFlags{})
-	cmdSet.Set("stats", "user").MustRunner(statsCmd.user, &userFlags{})
-	cmdSet.Set("stats", "group").MustRunner(statsCmd.group, &groupFlags{})
-	cmdSet.Set("stats", "list").MustRunner(statsCmd.list, &listStatsFlags{})
-	cmdSet.Set("stats", "erase").MustRunner(statsCmd.erase, &eraseFlags{})
+
+	cmdSet.Set("stats", "view").MustRunner(statsCmd.view, &viewFlags{})
 
 	reportsCmds := &reportCmds{}
 	cmdSet.Set("reports", "generate").MustRunner(reportsCmds.generate, &reportsFlags{})

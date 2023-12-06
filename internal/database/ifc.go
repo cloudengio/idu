@@ -51,10 +51,10 @@ type DB interface {
 	// DeleteErrors deletes all errors that have the specified prefix.
 	DeleteErrors(ctx context.Context, prefix string) error
 
-	SaveStats(ctx context.Context, when time.Time, value []byte) error
-	LastStats(ctx context.Context) (time.Time, []byte, error)
-	VisitStats(ctx context.Context, start, stop time.Time,
-		visitor func(ctx context.Context, when time.Time, value []byte) bool) error
+	//SaveStats(ctx context.Context, when time.Time, value []byte) error
+	//LastStats(ctx context.Context) (time.Time, []byte, error)
+	//VisitStats(ctx context.Context, start, stop time.Time,
+	//	visitor func(ctx context.Context, when time.Time, value []byte) bool) error
 
 	// SetBatch is like Set but allows for batching of concurrent calls to
 	// SetBatch. It should only be used when called from multiple goroutines.

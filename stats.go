@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"cloudeng.io/algo/container/heap"
@@ -21,6 +22,44 @@ import (
 	"cloudeng.io/file/diskusage"
 )
 
+type statsFileFormat struct {
+	Prefix     string
+	Date       time.Time
+	Expression string
+	Stats      *reports.AllStats
+}
+
+func loadStats(filename string) (statsFileFormat, error) {
+	buf, err := os.ReadFile(filename)
+	if err != nil {
+		return statsFileFormat{}, err
+	}
+	var stats statsFileFormat
+	if err := gob.NewDecoder(bytes.NewBuffer(buf)).Decode(&stats); err != nil {
+		return statsFileFormat{}, err
+	}
+	return stats, nil
+}
+
+func saveStats(filename, softlink string, stats statsFileFormat) error {
+	if len(filename) == 0 {
+		filename = stats.Date.Format(time.DateTime)
+	}
+	filename = strings.TrimSuffix(filename, ".idustats") + ".idustats"
+	buf := &bytes.Buffer{}
+	if err := gob.NewEncoder(buf).Encode(stats); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filename, buf.Bytes(), 0660); err != nil {
+		return err
+	}
+	if len(softlink) == 0 {
+		return nil
+	}
+	os.Remove(softlink)
+	return os.Symlink(filename, softlink)
+}
+
 type statsCmds struct {
 }
 
@@ -30,12 +69,16 @@ type StatsFlags struct {
 }
 
 type computeFlags struct {
-	ComputeN int  `subcmd:"n,2000,number of top entries to compute"`
-	Progress bool `subcmd:"progress,false,show progress"`
+	ComputeN         int    `subcmd:"n,2000,number of top entries to compute"`
+	Progress         bool   `subcmd:"progress,false,show progress"`
+	SaveAs           string `subcmd:"save-as,,'save files to the specified filename, otherwise the current date and time will be used as the filename'"`
+	CreateLatestLink string `subcmd:"create-link,latest.idustats,create a soft-link to the stats file created"`
 }
 
-type aggregateFlags struct {
+type viewFlags struct {
 	StatsFlags
+	User  string `subcmd:"user,,display stats for the specified user"`
+	Group string `subcmd:"group,,display stats for the specified group"`
 }
 
 type userFlags struct {
@@ -54,49 +97,10 @@ type eraseFlags struct {
 	Force bool `subcmd:"force,false,force deletion of all stats"`
 }
 
-func (st *statsCmds) list(ctx context.Context, values interface{}, args []string) error {
-	lf := values.(*listStatsFlags)
-	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
-	if err != nil {
-		return err
-	}
-	defer db.Close(ctx)
-
-	from, to, set, err := lf.TimeRangeFlags.FromTo()
-	if err != nil {
-		return err
-	}
-	if set {
-		return db.VisitStats(ctx, from, to,
-			func(_ context.Context, when time.Time, detail []byte) bool {
-				fmt.Printf("%v: size: %v\n", when, fmtSize(int64(len(detail))))
-				return true
-			})
-	}
-
-	when, detail, err := db.LastStats(ctx)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("%v: size: %v\n", when, fmtSize(int64(len(detail))))
-	return nil
-}
-
-func (st *statsCmds) erase(ctx context.Context, values interface{}, args []string) error {
-	ef := values.(*eraseFlags)
-	if !ef.Force {
-		return fmt.Errorf("use --force to erase all stats")
-	}
-	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], false)
-	if err != nil {
-		return err
-	}
-	defer db.Close(ctx)
-	return db.Clear(ctx, false, false, true)
-}
-
 func (st *statsCmds) compute(ctx context.Context, values interface{}, args []string) error {
 	cf := values.(*computeFlags)
+
+	expr, err := createExpr(args[1:])
 
 	ctx, cfg, rdb, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
 	if err != nil {
@@ -107,12 +111,6 @@ func (st *statsCmds) compute(ctx context.Context, values interface{}, args []str
 		fmt.Printf("warning: computing and storing stats for %v and not for %v\n", cfg.Prefix, args[0])
 	}
 
-	_, when, _, err := rdb.LastLog(ctx)
-	if err != nil {
-		rdb.Close(ctx)
-		return fmt.Errorf("error readling latest log entry: %v", err)
-	}
-
 	sdb, err := st.computeStats(ctx, rdb, cfg.Prefix, cfg.Calculator(), cf.ComputeN, cf.Progress)
 	if err != nil {
 		rdb.Close(ctx)
@@ -121,17 +119,13 @@ func (st *statsCmds) compute(ctx context.Context, values interface{}, args []str
 	rdb.Close(ctx)
 
 	// Save stats.
-	buf := &bytes.Buffer{}
-	if err := gob.NewEncoder(buf).Encode(sdb); err != nil {
-		return err
+	stats := statsFileFormat{
+		Prefix:     args[0],
+		Date:       time.Now(),
+		Expression: expr.String(),
+		Stats:      sdb,
 	}
-	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, cfg.Prefix, false)
-	if err != nil {
-		return err
-	}
-	defer db.Close(ctx)
-
-	return db.SaveStats(ctx, when, buf.Bytes())
+	return saveStats(cf.SaveAs, cf.CreateLatestLink, stats)
 }
 
 func (st *statsCmds) computeStats(ctx context.Context, db database.DB, prefix string, calc diskusage.Calculator, topN int, progress bool) (*reports.AllStats, error) {
@@ -159,36 +153,28 @@ func (st *statsCmds) computeStats(ctx context.Context, db database.DB, prefix st
 	return sdb, err
 }
 
-func (st *statsCmds) getOrComputeStats(ctx context.Context, prefix string, n int, progress bool) (time.Time, *reports.AllStats, error) {
-	ctx, cfg, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, prefix, true)
-	if err != nil {
-		return time.Time{}, nil, err
-	}
-	defer db.Close(ctx)
-	if cfg.Prefix == prefix {
-		var sdb reports.AllStats
-		var buf []byte
-		when, buf, err := db.LastStats(ctx)
-		if err != nil {
-			return time.Time{}, nil, err
-		}
-		if err := gob.NewDecoder(bytes.NewBuffer(buf)).Decode(&sdb); err != nil {
-			return time.Time{}, nil, err
-		}
-		return when, &sdb, nil
+func (st *statsCmds) view(ctx context.Context, values interface{}, args []string) error {
+	af := values.(*viewFlags)
+	if len(af.User) != 0 && len(af.Group) != 0 {
+		return fmt.Errorf("only one of --user or --group may be specified")
 	}
 
-	// Compute stats.
-	sdb, err := st.computeStats(ctx, db, prefix, cfg.Calculator(), n, progress)
-	return time.Now(), sdb, err
-}
-
-func (st *statsCmds) aggregate(ctx context.Context, values interface{}, args []string) error {
-	af := values.(*aggregateFlags)
-	when, sdb, err := st.getOrComputeStats(ctx, args[0], af.DisplayN, af.Progress)
+	stats, err := loadStats(args[0])
 	if err != nil {
 		return err
 	}
+
+	sdb := stats.Stats
+	when := stats.Date
+
+	if len(af.User) != 0 {
+		return st.userOrGroup(ctx, af, stats, af.User, globalUserManager.uidForName)
+	}
+
+	if len(af.Group) != 0 {
+		return st.userOrGroup(ctx, af, stats, af.Group, globalUserManager.gidForName)
+	}
+
 	heapFormatter[string]{}.formatTotals(sdb.Prefix, os.Stdout)
 
 	banner(os.Stdout, "=", "Usage by top %v Prefixes as of: %v\n", af.DisplayN, when)
@@ -215,33 +201,17 @@ func idmap(ids []string, mapper func(string) (uint32, error)) (map[uint32]bool, 
 	return idm, nil
 }
 
-func (st *statsCmds) user(ctx context.Context, values interface{}, args []string) error {
-	uf := values.(*userFlags)
-	when, sdb, err := st.getOrComputeStats(ctx, args[0], uf.DisplayN, uf.Progress)
-	if err != nil {
-		return err
-	}
-	ids, err := idmap(args[1:], globalUserManager.uidForName)
-	if err != nil {
-		return err
-	}
-	banner(os.Stdout, "=", "Usage by users (top %v items per user) as of: %v\n", uf.DisplayN, when)
-	st.formatPerIDStats(sdb.PerUser, os.Stdout, globalUserManager.nameForUID, ids, uf.DisplayN)
-	return nil
-}
+func (st *statsCmds) userOrGroup(ctx context.Context, af *viewFlags, stats statsFileFormat, name string, mapper func(string) (uint32, error)) error {
+	sdb := stats.Stats
+	when := stats.Date
 
-func (st *statsCmds) group(ctx context.Context, values interface{}, args []string) error {
-	gf := values.(*groupFlags)
-	when, sdb, err := st.getOrComputeStats(ctx, args[0], gf.DisplayN, gf.Progress)
+	id, err := mapper(name)
 	if err != nil {
 		return err
 	}
-	ids, err := idmap(args[1:], globalUserManager.gidForName)
-	if err != nil {
-		return err
-	}
-	banner(os.Stdout, "=", "Usage by groups (top %v items per group) as of: %v\n", gf.DisplayN, when)
-	st.formatPerIDStats(sdb.PerGroup, os.Stdout, globalUserManager.nameForGID, ids, gf.DisplayN)
+
+	banner(os.Stdout, "=", "Usage by %v as of: %v\n", name, when)
+	st.formatPerIDStats(sdb.PerUser, os.Stdout, globalUserManager.nameForUID, map[uint32]bool{id: true}, af.DisplayN)
 	return nil
 }
 

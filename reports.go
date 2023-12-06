@@ -5,7 +5,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -14,90 +16,97 @@ import (
 	"sort"
 	"time"
 
-	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/errors"
 	"golang.org/x/exp/maps"
 )
 
 type reportsFlags struct {
-	internal.TimeRangeFlags
 	ReportDir string `subcmd:"report-dir,reports,directory to write reports to"`
 	TSV       int    `subcmd:"tsv,100,'generate tsv reports with the requested number of entries, 0 for none'"`
 	Markdown  int    `subcmd:"markdown,20,'generate markdown reports with the requested number of entries, 0 for none'"`
 	JSON      int    `subcmd:"json,100,'generate json reports with the requested number of entries, 0 for none'"`
 }
 
-type reportCmds struct{}
+type reportCmds struct {
+	statsData []byte
+}
 
 func (rc *reportCmds) generate(ctx context.Context, values interface{}, args []string) error {
 	rf := values.(*reportsFlags)
-	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
-	if err != nil {
-		return err
-	}
-	defer db.Close(ctx)
-	from, to, set, err := rf.TimeRangeFlags.FromTo()
-	if err != nil {
-		return err
-	}
 	if err := os.MkdirAll(rf.ReportDir, 0770); err != nil {
 		return err
 	}
-	if set {
-		var errs errors.M
-		err = db.VisitStats(ctx, from, to,
-			func(_ context.Context, when time.Time, data []byte) bool {
-				if err := rc.generateReports(ctx, rf, args[0], when, data); err != nil {
-					errs.Append(err)
-					return false
-				}
-				return true
-			})
-		errs.Append(err)
-		return errs.Err()
+	errs := &errors.M{}
+	for _, filename := range args {
+		data, err := os.ReadFile(filename)
+		if err != nil {
+			errs.Append(err)
+			continue
+		}
+		rc.statsData = data
+		if err := rc.generateReports(ctx, rf); err != nil {
+			errs.Append(err)
+			continue
+		}
 	}
-
-	when, data, err := db.LastStats(ctx)
-	if err != nil {
-		return err
-	}
-	return rc.generateReports(ctx, rf, args[0], when, data)
+	return errs.Err()
 }
 
-func (rc *reportCmds) generateReports(ctx context.Context, rf *reportsFlags, prefix string, when time.Time, data []byte) error {
+// Need to recreate stats for every report as the topN values are
+// removed from the heaps as they are used.
+func (rc *reportCmds) getStats() (statsFileFormat, error) {
+	var stats statsFileFormat
+	if err := gob.NewDecoder(bytes.NewBuffer(rc.statsData)).Decode(&stats); err != nil {
+		return statsFileFormat{}, err
+	}
+	return stats, nil
+}
+
+func (rc *reportCmds) generateReports(ctx context.Context, rf *reportsFlags) error {
 	if rf.TSV == 0 && rf.JSON == 0 && rf.Markdown == 0 {
 		return fmt.Errorf("no report requested, please specify one of --tsv, --json or --markdown")
 	}
 	var filenames *reportFilenames
-	var err error
 	if rf.TSV > 0 {
-		filenames, err = newReportFilenames(rf.ReportDir, when, ".tsv")
+		stats, err := rc.getStats()
+		if err != nil {
+			return err
+		}
+		filenames, err = newReportFilenames(rf.ReportDir, stats.Date, ".tsv")
 		if err != nil {
 			return err
 		}
 		tr := &tsvReports{}
-		if err := tr.generateReports(ctx, rf, when, filenames, data); err != nil {
+		if err := tr.generateReports(ctx, rf, filenames, stats); err != nil {
 			return err
 		}
 	}
 	if rf.JSON > 0 {
-		filenames, err = newReportFilenames(rf.ReportDir, when, ".json")
+		stats, err := rc.getStats()
+		if err != nil {
+			return err
+		}
+		filenames, err = newReportFilenames(rf.ReportDir, stats.Date, ".json")
 		if err != nil {
 			return err
 		}
 		jr := &jsonReports{}
-		if err := jr.generateReports(ctx, rf, when, filenames, data); err != nil {
+		if err := jr.generateReports(ctx, rf, filenames, stats); err != nil {
 			return err
 		}
 	}
 	if rf.Markdown > 0 {
-		filenames, err = newReportFilenames(rf.ReportDir, when, ".md")
+		stats, err := rc.getStats()
+		if err != nil {
+			return err
+		}
+		filenames, err = newReportFilenames(rf.ReportDir, stats.Date, ".md")
 		if err != nil {
 			return err
 		}
 		mdr := &markdownReports{}
-		if err := mdr.generateReports(ctx, rf, prefix, when, filenames, data); err != nil {
+		if err := mdr.generateReports(ctx, rf, filenames, stats); err != nil {
 			return err
 		}
 	}

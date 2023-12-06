@@ -77,7 +77,7 @@ func populateDatabase(t *testing.T, db database.DB, nItems int) {
 	if err := <-ch; err != nil {
 		t.Fatal(err)
 	}
-	db.SaveStats(ctx, time.Now(), []byte("stats"))
+	//db.SaveStats(ctx, time.Now(), []byte("stats"))
 	db.LogError(ctx, "/a/01", time.Now(), []byte("error"))
 	db.Log(ctx, time.Now(), time.Now(), []byte("log"))
 	db.Close(ctx)
@@ -425,6 +425,7 @@ func testDelete(t *testing.T, factory databaseFactory) {
 	}
 }
 
+/*
 func TestStats(t *testing.T) {
 	testStats(t, boltFactory)
 	testStats(t, badgerFactory)
@@ -480,7 +481,7 @@ func testStats(t *testing.T, factory databaseFactory) {
 	if got, want := scanTimes, times; !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
-}
+}*/
 
 func TestExists(t *testing.T) {
 	testExists(t, boltFactory)

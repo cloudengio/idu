@@ -41,15 +41,12 @@ type PerIDStats struct {
 // - the top N values for/per each statistic by user/group
 // - the topN user/groups by each statistic
 type AllStats struct {
-	// Any expression used to determine the set of
-	// prefixes/directories that the stats were computed for.
-	FindExpression string
-	MaxN           int
-	Prefix         *Heaps[string]
-	PerUser        PerIDStats
-	PerGroup       PerIDStats
-	ByUser         *Heaps[uint32]
-	ByGroup        *Heaps[uint32]
+	MaxN     int
+	Prefix   *Heaps[string]
+	PerUser  PerIDStats
+	PerGroup PerIDStats
+	ByUser   *Heaps[uint32]
+	ByGroup  *Heaps[uint32]
 
 	userTotals  map[uint32]prefixinfo.Stats
 	groupTotals map[uint32]prefixinfo.Stats
