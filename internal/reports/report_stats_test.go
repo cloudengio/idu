@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"cloudeng.io/algo/container/heap"
+	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/file"
@@ -63,13 +64,13 @@ func (ts *testStats) update(bytes, storageBytes, files, prefixes, prefixBytes in
 	ts.prefixBytes += prefixBytes
 }
 
-func computeStats(t *testing.T, sdb *reports.AllStats, calc diskusage.Calculator, keys []string, pis ...prefixinfo.T) {
+func computeStats(t *testing.T, sdb *reports.AllStats, calc diskusage.Calculator, keys []string, expr boolexpr.T, pis ...prefixinfo.T) {
 	for i, pi := range pis {
 		k := keys[i]
 		if err := pi.Finalize(); err != nil {
 			t.Fatal(err)
 		}
-		if err := sdb.Update(k, pi, calc); err != nil {
+		if err := sdb.Update(k, pi, calc, expr); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -199,7 +200,7 @@ func TestReportStatsSingleID(t *testing.T) {
 		}
 
 		sdb := reports.NewAllStats("test", true, 5)
-		computeStats(t, sdb, calc, pikeys, pis...)
+		computeStats(t, sdb, calc, pikeys, boolexpr.T{}, pis...)
 
 		compareIDs(t, sdb.PerUser.ByPrefix, tc.uid)
 		compareIDs(t, sdb.PerGroup.ByPrefix, tc.gid)
@@ -304,7 +305,7 @@ func TestReportStatsMultipleIDs(t *testing.T) {
 	}
 
 	sdb := reports.NewAllStats("test", true, 5)
-	computeStats(t, sdb, calc, pikeys, pis...)
+	computeStats(t, sdb, calc, pikeys, boolexpr.T{}, pis...)
 
 	compareHeapTotals(t, sdb.Prefix, totals)
 

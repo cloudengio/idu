@@ -52,23 +52,23 @@ type Database struct {
 }
 
 var (
-	logPrefix          = "__log__"
-	errorPrefix        = "__errors_"
-	statsPrefix        = "__stats__"
-	hardlinksPrefix    = "__hl__"
-	hardlinksRevPrefix = "__hlr__"
+	logPrefix   = "__log__"
+	errorPrefix = "__errors_"
+	statsPrefix = "__stats__"
 )
 
 func isBucket(key []byte) bool {
 	if key[0] != '_' || key[1] != '_' {
 		return false
 	}
-	for _, b := range []string{
-		logPrefix, errorPrefix, statsPrefix, hardlinksPrefix, hardlinksRevPrefix,
-	} {
-		if bytes.HasPrefix(key, []byte(b)) {
-			return true
-		}
+	if bytes.HasPrefix(key, []byte(logPrefix)) {
+		return true
+	}
+	if bytes.HasPrefix(key, []byte(errorPrefix)) {
+		return true
+	}
+	if bytes.HasPrefix(key, []byte(statsPrefix)) {
+		return true
 	}
 	return false
 }
@@ -526,16 +526,4 @@ func (db *Database) Clear(_ context.Context, logs, errors, stats bool) error {
 	}
 
 	return nil
-}
-
-func (db *Database) RegisterHardlink(ctx context.Context, key []byte, filename string) error {
-	return nil
-}
-
-func (db *Database) DeleteHardlink(ctx context.Context, key []byte, filename string) error {
-	return nil
-}
-
-func (db *Database) IsHardLink(ctx context.Context, filename string) (key []byte, err error) {
-	return nil, nil
 }
