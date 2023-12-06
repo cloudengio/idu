@@ -22,12 +22,6 @@ type findFlags struct {
 
 type findCmds struct{}
 
-type findHandler struct {
-	sep  string
-	expr boolexpr.T
-	long bool
-}
-
 func (fc *findCmds) find(ctx context.Context, values interface{}, args []string) error {
 	ff := values.(*findFlags)
 

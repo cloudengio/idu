@@ -52,7 +52,7 @@ func saveStats(dir string, stats statsFileFormat) error {
 	if err := gob.NewEncoder(buf).Encode(stats); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filename, buf.Bytes(), 0660); err != nil {
+	if err := os.WriteFile(filename, buf.Bytes(), 0660); err != nil { //nolint:gosec
 		return err
 	}
 	sl := filepath.Join(dir, "latest.idustats")
@@ -83,22 +83,6 @@ type viewFlags struct {
 
 type extractFlags struct {
 	StatsDir string `subcmd:"stats-dir,stats,'directory that stats files are written to'"`
-}
-
-type userFlags struct {
-	StatsFlags
-}
-
-type groupFlags struct {
-	StatsFlags
-}
-
-type listStatsFlags struct {
-	internal.TimeRangeFlags
-}
-
-type eraseFlags struct {
-	Force bool `subcmd:"force,false,force deletion of all stats"`
 }
 
 func (st *statsCmds) compute(ctx context.Context, values interface{}, args []string) error {
@@ -236,19 +220,6 @@ func (st *statsCmds) view(ctx context.Context, values interface{}, args []string
 	heapFormatter[uint32]{}.formatHeaps(sdb.ByGroup, os.Stdout,
 		usernames.Manager.NameForGID, af.DisplayN)
 	return nil
-}
-
-func idmap(ids []string, mapper func(string) (uint32, error)) (map[uint32]bool, error) {
-	idm := make(map[uint32]bool)
-	for _, a := range ids {
-		id, err := mapper(a)
-		if err != nil {
-			return nil, fmt.Errorf("unrecoginised id: %v", a)
-		}
-		idm[id] = true
-
-	}
-	return idm, nil
 }
 
 func (st *statsCmds) userOrGroup(ctx context.Context, af *viewFlags, stats statsFileFormat, name string, mapper func(string) (uint32, error)) error {

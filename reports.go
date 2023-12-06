@@ -64,17 +64,25 @@ func (rc *reportCmds) getStats() (statsFileFormat, error) {
 	return stats, nil
 }
 
+func (rc *reportCmds) statsFor(rf *reportsFlags, suffix string) (statsFileFormat, *reportFilenames, error) {
+	stats, err := rc.getStats()
+	if err != nil {
+		return statsFileFormat{}, nil, err
+	}
+	filenames, err := newReportFilenames(rf.ReportDir, stats.Date, ".tsv")
+	if err != nil {
+		return statsFileFormat{}, nil, err
+	}
+	return stats, filenames, nil
+}
+
 func (rc *reportCmds) generateReports(ctx context.Context, rf *reportsFlags) error {
 	if rf.TSV == 0 && rf.JSON == 0 && rf.Markdown == 0 {
 		return fmt.Errorf("no report requested, please specify one of --tsv, --json or --markdown")
 	}
 	var filenames *reportFilenames
 	if rf.TSV > 0 {
-		stats, err := rc.getStats()
-		if err != nil {
-			return err
-		}
-		filenames, err = newReportFilenames(rf.ReportDir, stats.Date, ".tsv")
+		stats, filenames, err := rc.statsFor(rf, ".tsv")
 		if err != nil {
 			return err
 		}
@@ -84,11 +92,7 @@ func (rc *reportCmds) generateReports(ctx context.Context, rf *reportsFlags) err
 		}
 	}
 	if rf.JSON > 0 {
-		stats, err := rc.getStats()
-		if err != nil {
-			return err
-		}
-		filenames, err = newReportFilenames(rf.ReportDir, stats.Date, ".json")
+		stats, filenames, err := rc.statsFor(rf, ".json")
 		if err != nil {
 			return err
 		}
@@ -98,11 +102,7 @@ func (rc *reportCmds) generateReports(ctx context.Context, rf *reportsFlags) err
 		}
 	}
 	if rf.Markdown > 0 {
-		stats, err := rc.getStats()
-		if err != nil {
-			return err
-		}
-		filenames, err = newReportFilenames(rf.ReportDir, stats.Date, ".md")
+		stats, filenames, err := rc.statsFor(rf, ".md")
 		if err != nil {
 			return err
 		}

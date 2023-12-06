@@ -232,6 +232,26 @@ func TestReportStatsSingleID(t *testing.T) {
 			compareHeap(t, tcid.h.Prefixes, 10, []int64{totals.prefixes}, tcid.id)
 			compareHeap(t, tcid.h.PrefixBytes, 10, []int64{totals.prefixBytes}, tcid.id)
 		}
+
+		sdb = reports.NewAllStats("test", true, 5)
+		expr, err := boolexpr.CreateExpr(boolexpr.NewParser(), []string{"user=33"})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		zeroes := testStats{}
+		for i := 0; i < len(nf); i++ {
+			pikeys = append(pikeys, fmt.Sprintf("p%v", i))
+			totals.update(0, 0, 0, 0, 0)
+		}
+		computeStats(t, sdb, calc, pikeys, expr, pis...)
+		for _, h := range []*reports.Heaps[string]{
+			sdb.Prefix,
+			sdb.PerUser.ByPrefix[tc.uid],
+			sdb.PerGroup.ByPrefix[tc.gid],
+		} {
+			compareHeapTotals(t, h, zeroes)
+		}
 	}
 }
 
@@ -268,7 +288,6 @@ func TestReportStatsMultipleIDs(t *testing.T) {
 			uids = append(uids, nuid)
 			gids = append(gids, ngid)
 		}
-
 	}
 
 	// Compute the totals.
