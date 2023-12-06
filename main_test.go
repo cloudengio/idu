@@ -71,7 +71,7 @@ func TestHelp(t *testing.T) {
 	}
 	out, _ = runIDU("help", "analyze") // will return exit status 1 for help.
 
-	err = containsAnyOf(out, "Usage of command analyze: analyze the file system to build a database of file counts, disk usage etc",
+	err = containsAnyOf(out, "Usage of command analyze: analyze the file system to build a database of directory and file metadata.",
 		"analyze [--progress=true --show-defaults=false --slow-scan-duration=10s] <prefix>")
 	if err != nil {
 		t.Fatal(err)

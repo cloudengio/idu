@@ -97,6 +97,7 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fs filewalk.FS, af *analyz
 		fs:       fs,
 		pt:       pt,
 		slowScan: af.SlowScans,
+		linkDB:   newLinkDB(),
 	}
 
 	w.lsi = asyncstat.New(fs,
@@ -121,6 +122,14 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fs filewalk.FS, af *analyz
 	errs.Append(walker.Walk(ctx, args[0]))
 	pcancel() // cancel progress tracker.
 	wg.Wait()
+
+	for fsid, hls := range w.linkDB.links {
+		for ino, p := range hls {
+			if len(p) > 1 {
+				fmt.Printf("HardLinks: %0x: %v: %v\n", fsid, ino, p)
+			}
+		}
+	}
 	errs.Append(alz.summarizeAndLog(ctx, sdb, pt, start))
 	return errs.Squash(context.Canceled)
 }
@@ -165,6 +174,7 @@ type walker struct {
 	pt       *progressTracker
 	slowScan time.Duration
 	lsi      *asyncstat.T
+	linkDB   *linkDB
 }
 
 type prefixState struct {
@@ -306,6 +316,11 @@ func (w *walker) Contents(ctx context.Context, state *prefixState, prefix string
 	children, all, err := w.lsi.Process(ctx, prefix, contents)
 	if err != nil {
 		w.dbLogErr(ctx, prefix, []byte(err.Error()))
+	}
+	for _, c := range all {
+		if ok, existing := w.linkDB.addLink(prefix, c); ok {
+			fmt.Printf("HL: %v\n", existing)
+		}
 	}
 	state.nfiles += int64(len(all) - len(children))
 	state.nchildren += int64(len(children))

@@ -50,12 +50,12 @@ commands:
     summary: display the syntax for the expression language supported by commands such as analyze, find etc.
 
   - name: analyze
-    summary: analyze the file system to build a database of file metadata etc
+    summary: analyze the file system to build a database of directory and file metadata.
     arguments:
       - <prefix>
 
   - name: logs
-    summary: list the log of past operations stored in the database
+    summary: list the log of past operations stored in the database.
     arguments:
       - <prefix>
 
@@ -65,24 +65,24 @@ commands:
       - <prefix>
 
   - name: find
-    summary: find prefixes/files in the database that match the supplied expression
+    summary: find prefixes/files in the database that match the supplied expression.
     arguments:
      - <prefix>
      - <expression>...
 
   - name: stats
-    summary: compute and display statistics from the database
+    summary: compute and display statistics from the database.
     commands:
       - name: compute
         summary: compute all statistics based on the current state of the database and
                  save the results to a file. The results can be viewed using the
-				 stats view command
+				 stats view command.
         arguments:
           - <prefix>
           - <expression>...
 
       - name: view
-        summary: view the statistics stored in a file created using the compute command
+        summary: view the statistics stored in a file created using the compute command.
         arguments:
           - <filename>
 
@@ -91,7 +91,7 @@ commands:
         arguments:
           - <prefix>
   - name: reports
-    summary: generate and manage reports
+    summary: generate and manage reports.
     commands:
       - name: generate
         summary:  generate reports in a variety of formats, including tsv, json and markdown from the statistics stored in the specified file.
@@ -105,10 +105,10 @@ commands:
           - <report-directory>
 
   - name: config
-    summary: describe the current configuration
+    summary: describe the current configuration.
 
   - name: database
-    summary: database management commands
+    summary: database management commands.
     commands:
     - name: locate
       summary: display the location of the database
