@@ -62,7 +62,6 @@ func populateDatabase(t *testing.T, db database.DB, nItems int) {
 	if err := <-ch; err != nil {
 		t.Fatal(err)
 	}
-	//db.SaveStats(ctx, time.Now(), []byte("stats"))
 	db.LogError(ctx, "/a/01", time.Now(), []byte("error"))
 	db.Log(ctx, time.Now(), time.Now(), []byte("log"))
 	db.Close(ctx)
