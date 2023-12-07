@@ -339,8 +339,12 @@ func (pi *T) computeStatsForIDMapOrFiles(idms idMaps, defaultID uint32, calculat
 	if len(idms) == 0 {
 		var stats Stats
 		stats.ID = defaultID
+		var found bool
 		for _, fi := range pi.entries {
-			pi.updateStats(&stats, fi, calculator, expr)
+			found = pi.updateStats(&stats, fi, calculator, expr)
+		}
+		if !found {
+			return nil
 		}
 		return []Stats{stats}
 	}
@@ -353,10 +357,10 @@ func (pi *T) computeStatsForIDMapOrFiles(idms idMaps, defaultID uint32, calculat
 	return stats
 }
 
-func (pi *T) updateStats(s *Stats, fi file.Info, calculator diskusage.Calculator, expr boolexpr.T) {
+func (pi *T) updateStats(s *Stats, fi file.Info, calculator diskusage.Calculator, expr boolexpr.T) bool {
 	uid, gid := pi.UserGroupInfo(fi)
 	if !expr.Eval(boolexpr.NewFileInfoUserGroup(fi, uid, gid)) {
-		return
+		return false
 	}
 	if fi.IsDir() {
 		s.Prefixes++
@@ -366,6 +370,7 @@ func (pi *T) updateStats(s *Stats, fi file.Info, calculator diskusage.Calculator
 		s.StorageBytes += calculator.Calculate(fi.Size())
 		s.Bytes += fi.Size()
 	}
+	return true
 }
 
 func (pi *T) computeStatsForID(idm idMap, calculator diskusage.Calculator, expr boolexpr.T) (Stats, bool) {
@@ -375,8 +380,9 @@ func (pi *T) computeStatsForID(idm idMap, calculator diskusage.Calculator, expr 
 	found := false
 	for sc.next() {
 		fi := pi.entries[sc.pos()]
-		pi.updateStats(&stats, fi, calculator, expr)
-		found = true
+		if pi.updateStats(&stats, fi, calculator, expr) {
+			found = true
+		}
 	}
 	return stats, found
 }
