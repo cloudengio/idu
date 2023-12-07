@@ -3,11 +3,11 @@ module cloudeng.io/cmd/idu
 go 1.21
 
 require (
-	cloudeng.io/algo v0.0.0-20231205162401-e17bf4b2dbb2
-	cloudeng.io/cmdutil v0.0.0-20231205162401-e17bf4b2dbb2
+	cloudeng.io/algo v0.0.0-20231206231221-b8bcbd8e57af
+	cloudeng.io/cmdutil v0.0.0-20231206231221-b8bcbd8e57af
 	cloudeng.io/errors v0.0.9
 	cloudeng.io/file v0.0.0-20231206231221-b8bcbd8e57af
-	cloudeng.io/os v0.0.0-20231205162401-e17bf4b2dbb2
+	cloudeng.io/os v0.0.0-20231206231221-b8bcbd8e57af
 	cloudeng.io/path v0.0.8
 	cloudeng.io/sync v0.0.8
 	github.com/cosnicolaou/pudge v1.0.6
@@ -22,7 +22,7 @@ require (
 )
 
 require (
-	cloudeng.io/sys v0.0.0-20231205162401-e17bf4b2dbb2 // indirect
+	cloudeng.io/sys v0.0.0-20231206231221-b8bcbd8e57af // indirect
 	cloudeng.io/text v0.0.11 // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
