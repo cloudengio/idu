@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"cloudeng.io/algo/container/heap"
+	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/file"
@@ -63,13 +64,13 @@ func (ts *testStats) update(bytes, storageBytes, files, prefixes, prefixBytes in
 	ts.prefixBytes += prefixBytes
 }
 
-func computeStats(t *testing.T, sdb *reports.AllStats, calc diskusage.Calculator, keys []string, pis ...prefixinfo.T) {
+func computeStats(t *testing.T, sdb *reports.AllStats, calc diskusage.Calculator, keys []string, expr boolexpr.T, pis ...prefixinfo.T) {
 	for i, pi := range pis {
 		k := keys[i]
 		if err := pi.Finalize(); err != nil {
 			t.Fatal(err)
 		}
-		if err := sdb.Update(k, pi, calc); err != nil {
+		if err := sdb.Update(k, pi, calc, expr); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -199,7 +200,7 @@ func TestReportStatsSingleID(t *testing.T) {
 		}
 
 		sdb := reports.NewAllStats("test", true, 5)
-		computeStats(t, sdb, calc, pikeys, pis...)
+		computeStats(t, sdb, calc, pikeys, boolexpr.T{}, pis...)
 
 		compareIDs(t, sdb.PerUser.ByPrefix, tc.uid)
 		compareIDs(t, sdb.PerGroup.ByPrefix, tc.gid)
@@ -231,6 +232,28 @@ func TestReportStatsSingleID(t *testing.T) {
 			compareHeap(t, tcid.h.Prefixes, 10, []int64{totals.prefixes}, tcid.id)
 			compareHeap(t, tcid.h.PrefixBytes, 10, []int64{totals.prefixBytes}, tcid.id)
 		}
+
+		sdb = reports.NewAllStats("test", true, 5)
+		expr, err := boolexpr.CreateExpr(boolexpr.NewParser(), []string{"user=33"})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		zeroes := testStats{}
+		for i := 0; i < len(nf); i++ {
+			pikeys = append(pikeys, fmt.Sprintf("p%v", i))
+			totals.update(0, 0, 0, 0, 0)
+		}
+		computeStats(t, sdb, calc, pikeys, expr, pis...)
+		for _, h := range []*reports.Heaps[string]{
+			sdb.Prefix,
+			sdb.PerUser.ByPrefix[tc.uid],
+			sdb.PerGroup.ByPrefix[tc.gid],
+		} {
+			if h != nil {
+				compareHeapTotals(t, h, zeroes)
+			}
+		}
 	}
 }
 
@@ -243,7 +266,6 @@ func cloneIDDetails(d map[uint32][]testStats) map[uint32][]testStats {
 }
 
 func TestReportStatsMultipleIDs(t *testing.T) {
-	calc := times2{}
 	var uid, gid uint32 = 100, 2
 
 	nf, nd := []int{2, 6, 9, 7, 3, 10, 5}, []int{2, 7, 5, 3, 10, 6, 4}
@@ -267,7 +289,6 @@ func TestReportStatsMultipleIDs(t *testing.T) {
 			uids = append(uids, nuid)
 			gids = append(gids, ngid)
 		}
-
 	}
 
 	// Compute the totals.
@@ -303,8 +324,73 @@ func TestReportStatsMultipleIDs(t *testing.T) {
 			func(i, j int) bool { return prefixedOrdered[id][i].prefixes > prefixedOrdered[id][j].prefixes })
 	}
 
+	testAllIDs(t, pikeys, pis, totals, uids, gids, perIDTotals, sizeOrdered, fileOrdered, prefixedOrdered)
+
+	testIDExpr(t, pikeys, pis, uids, gids, perIDTotals, sizeOrdered, fileOrdered, prefixedOrdered)
+}
+
+func testSingleID(t *testing.T, expr boolexpr.T, group bool, pikeys []string, pis []prefixinfo.T, id uint32, perIDTotal testStats, sizeOrdered, fileOrdered, prefixedOrdered []testStats) {
+	calc := times2{}
+
 	sdb := reports.NewAllStats("test", true, 5)
-	computeStats(t, sdb, calc, pikeys, pis...)
+
+	computeStats(t, sdb, calc, pikeys, expr, pis...)
+	compareHeapTotals(t, sdb.Prefix, perIDTotal)
+
+	comparePerIDTotals(t, sdb.PerUser, perIDTotal)
+	comparePerIDTotals(t, sdb.PerGroup, perIDTotal)
+
+	so, fo, po := sizeOrdered, fileOrdered, prefixedOrdered
+
+	var h *reports.Heaps[string]
+	if group {
+		compareIDs(t, sdb.PerGroup.ByPrefix, id)
+		h = sdb.PerGroup.ByPrefix[id]
+	} else {
+		compareIDs(t, sdb.PerUser.ByPrefix, id)
+		h = sdb.PerUser.ByPrefix[id]
+	}
+
+	if len(so) == 1 {
+		compareHeap(t, h.Bytes, 3, []int64{so[0].bytes}, so[0].prefix)
+		compareHeap(t, h.StorageBytes, 3, []int64{so[0].storageBytes}, so[0].prefix)
+		compareHeap(t, h.Files, 3, []int64{fo[0].files}, fo[0].prefix)
+		compareHeap(t, h.Prefixes, 10, []int64{po[0].prefixes}, po[0].prefix)
+		compareHeap(t, h.PrefixBytes, 10, []int64{po[0].prefixBytes}, po[0].prefix)
+	} else {
+		compareHeap(t, h.Bytes, 3, []int64{so[0].bytes, so[1].bytes}, so[0].prefix, so[1].prefix)
+		compareHeap(t, h.StorageBytes, 3, []int64{so[0].storageBytes, so[1].storageBytes}, so[0].prefix, so[1].prefix)
+		compareHeap(t, h.Files, 3, []int64{fo[0].files, fo[1].files}, fo[0].prefix, fo[1].prefix)
+		compareHeap(t, h.Prefixes, 10, []int64{po[0].prefixes, po[1].prefixes}, po[0].prefix, po[1].prefix)
+		compareHeap(t, h.PrefixBytes, 10, []int64{po[0].prefixBytes, po[1].prefixBytes}, po[0].prefix, po[1].prefix)
+	}
+}
+
+func testIDExpr(t *testing.T, pikeys []string, pis []prefixinfo.T, uids, gids []uint32, perIDTotals map[uint32]testStats, sizeOrdered, fileOrdered, prefixedOrdered map[uint32][]testStats) {
+	parser := boolexpr.NewParser()
+
+	for _, uid := range uids {
+		expr, err := boolexpr.CreateExpr(parser, []string{fmt.Sprintf("user=%d", uid)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		testSingleID(t, expr, false, pikeys, pis, uid, perIDTotals[uid], sizeOrdered[uid], fileOrdered[uid], prefixedOrdered[uid])
+	}
+
+	for _, gid := range gids {
+		expr, err := boolexpr.CreateExpr(parser, []string{fmt.Sprintf("group=%d", gid)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		testSingleID(t, expr, true, pikeys, pis, gid, perIDTotals[gid], sizeOrdered[gid], fileOrdered[gid], prefixedOrdered[gid])
+	}
+}
+
+func testAllIDs(t *testing.T, pikeys []string, pis []prefixinfo.T, totals testStats, uids, gids []uint32, perIDTotals map[uint32]testStats, sizeOrdered, fileOrdered, prefixedOrdered map[uint32][]testStats) {
+	calc := times2{}
+
+	sdb := reports.NewAllStats("test", true, 5)
+	computeStats(t, sdb, calc, pikeys, boolexpr.T{}, pis...)
 
 	compareHeapTotals(t, sdb.Prefix, totals)
 

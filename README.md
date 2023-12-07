@@ -102,9 +102,9 @@ Common usage is as follows:
 ```sh
 $ idu analyze /projects/yourshared-project/
 $ idu errors /projects/yourshared-project/
-$ idu stats compute /projects/yourshared-project/
-$ idu stats aggregate /projects/yourshared-project/
-$ idu reports generate /projects/yourshared-project/
+$ idu stats compute --stats-dir=./stats /projects/yourshared-project/
+$ idu stats view ./stats/latest.idustats
+$ idu reports generate ./stats/latest.idustats
 ```
 
 As `idu` runs it will print various statistics that follow its progress. `idu`
@@ -115,21 +115,17 @@ which are also written to the database, by running `idu errors` as show above. N
 that errors are common and most often due to permissions problems; `idu` records errors and leaves it to the user to decide whether they are relevant or not; for
 example is a lot of disk usage behind an inaccessible due to permissions path?
 
-```stats compute <prefix>``` will compute stats for the entire database and store
-them in the database. ```stats aggregate <prefix>``` can be used to
-read the stats from the database, or to recompute stats for a portion of the database.
+```stats compute <prefix>``` will compute stats from the database and store
+them in a timestamped file in ```--stats-dir``` (it will create a soft-link, ```latest.idustats``` to the file producted). ```stats view <idustats-file>``` can be used to
+read the stats from the database and print them to stdout. ```reports generate <idustats-file>``` will generate a markdown report of the stats and write it to stdout.
+
+
+Per-user or per-group statistics can be viewed as follows:
 
 ```sh
-$ idu stats compute /projects/yourshared-project/  # stores the stats in the database
-$ idu stats aggregate /projects/yourshared-project/ # reads the stats from the database
-$ idu stats aggregate /projects/yourshared-project/a/subtree/of/interest # recompute stats for a portion of the database
+$ idu stats view --user=<user> <idustats-file>
+$ idu stats view --group=<group> <idustats-file>
 ```
-
-Per-user or per-group statistics can be computed as follows:
-
-```sh
-$ idu stats user /projects/yourshared-project/ <user>...
-$ idu stats group /projects/yourshared-project/ <group>...
 ```
 
 

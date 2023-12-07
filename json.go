@@ -7,22 +7,15 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/gob"
 	"encoding/json"
-	"fmt"
-	"time"
 
 	"cloudeng.io/cmd/idu/internal/reports"
 )
 
 type jsonReports struct{}
 
-func (jr *jsonReports) generateReports(ctx context.Context, rf *reportsFlags, when time.Time, filenames *reportFilenames, data []byte) error {
-	var sdb reports.AllStats
-	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&sdb); err != nil {
-		return fmt.Errorf("failed to decode stats: %v", err)
-	}
-	return writeReportFiles(&sdb, filenames, jr.formatMerged, jr.formatUserGroupMerged, rf.TSV)
+func (jr *jsonReports) generateReports(ctx context.Context, rf *reportsFlags, filenames *reportFilenames, stats statsFileFormat) error {
+	return writeReportFiles(stats.Stats, filenames, jr.formatMerged, jr.formatUserGroupMerged, rf.JSON)
 }
 
 func (jr *jsonReports) formatMerged(merged map[string]reports.MergedStats) []byte {

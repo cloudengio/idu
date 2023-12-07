@@ -81,6 +81,7 @@ func openBadgerDB(ctx context.Context, cfg config.Prefix, readonly bool) (databa
 	opts := badgerdbOptions(readonly)
 	bopts := badger.DefaultOptions(cfg.Database)
 	bopts = bopts.WithLogger(&badgerLogger{})
+	bopts = bopts.WithLoggingLevel(badger.ERROR)
 	opts = append(opts, badgerdb.WithBadgerOptions(bopts))
 	return badgerdb.Open(cfg.Database, opts...)
 }

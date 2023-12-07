@@ -8,10 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
-	"encoding/gob"
-	"fmt"
 	"strconv"
-	"time"
 
 	"cloudeng.io/cmd/idu/internal/reports"
 )
@@ -19,12 +16,8 @@ import (
 type tsvReports struct {
 }
 
-func (tr *tsvReports) generateReports(ctx context.Context, rf *reportsFlags, when time.Time, filenames *reportFilenames, data []byte) error {
-	var sdb reports.AllStats
-	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&sdb); err != nil {
-		return fmt.Errorf("failed to decode stats: %v", err)
-	}
-	return writeReportFiles(&sdb, filenames, tr.formatMerged, tr.formatUserGroupMerged, rf.TSV)
+func (tr *tsvReports) generateReports(ctx context.Context, rf *reportsFlags, filenames *reportFilenames, stats statsFileFormat) error {
+	return writeReportFiles(stats.Stats, filenames, tr.formatMerged, tr.formatUserGroupMerged, rf.TSV)
 }
 
 func (tr *tsvReports) formatMerged(merged map[string]reports.MergedStats) []byte {

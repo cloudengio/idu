@@ -11,15 +11,54 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"cloudeng.io/algo/container/heap"
 	"cloudeng.io/cmd/idu/internal"
+	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/database"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/internal/reports"
+	"cloudeng.io/cmd/idu/internal/usernames"
 	"cloudeng.io/file/diskusage"
 )
+
+type statsFileFormat struct {
+	Prefix     string
+	Date       time.Time
+	Expression string
+	Stats      *reports.AllStats
+}
+
+func loadStats(filename string) (statsFileFormat, error) {
+	buf, err := os.ReadFile(filename)
+	if err != nil {
+		return statsFileFormat{}, err
+	}
+	var stats statsFileFormat
+	if err := gob.NewDecoder(bytes.NewBuffer(buf)).Decode(&stats); err != nil {
+		return statsFileFormat{}, err
+	}
+	return stats, nil
+}
+
+func saveStats(dir string, stats statsFileFormat) error {
+	basename := stats.Date.Format(time.DateTime)
+	basename = strings.TrimSuffix(basename, ".idustats") + ".idustats"
+	filename := filepath.Join(dir, basename)
+	buf := &bytes.Buffer{}
+	if err := gob.NewEncoder(buf).Encode(stats); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filename, buf.Bytes(), 0660); err != nil { //nolint:gosec
+		return err
+	}
+	sl := filepath.Join(dir, "latest.idustats")
+	os.Remove(sl)
+	return os.Symlink(basename, sl)
+}
 
 type statsCmds struct {
 }
@@ -30,73 +69,31 @@ type StatsFlags struct {
 }
 
 type computeFlags struct {
-	ComputeN int  `subcmd:"n,2000,number of top entries to compute"`
-	Progress bool `subcmd:"progress,false,show progress"`
+	ComputeN int    `subcmd:"n,2000,number of top entries to compute"`
+	Progress bool   `subcmd:"progress,false,show progress"`
+	StatsDir string `subcmd:"stats-dir,stats,'directory that stats files are written to'"`
 }
 
-type aggregateFlags struct {
+type viewFlags struct {
 	StatsFlags
+	User  string `subcmd:"user,,display stats for the specified user"`
+	Group string `subcmd:"group,,display stats for the specified group"`
+	Info  bool   `subcmd:"info,false,display metadata for the stats file"`
 }
 
-type userFlags struct {
-	StatsFlags
-}
-
-type groupFlags struct {
-	StatsFlags
-}
-
-type listStatsFlags struct {
-	internal.TimeRangeFlags
-}
-
-type eraseFlags struct {
-	Force bool `subcmd:"force,false,force deletion of all stats"`
-}
-
-func (st *statsCmds) list(ctx context.Context, values interface{}, args []string) error {
-	lf := values.(*listStatsFlags)
-	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
-	if err != nil {
-		return err
-	}
-	defer db.Close(ctx)
-
-	from, to, set, err := lf.TimeRangeFlags.FromTo()
-	if err != nil {
-		return err
-	}
-	if set {
-		return db.VisitStats(ctx, from, to,
-			func(_ context.Context, when time.Time, detail []byte) bool {
-				fmt.Printf("%v: size: %v\n", when, fmtSize(int64(len(detail))))
-				return true
-			})
-	}
-
-	when, detail, err := db.LastStats(ctx)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("%v: size: %v\n", when, fmtSize(int64(len(detail))))
-	return nil
-}
-
-func (st *statsCmds) erase(ctx context.Context, values interface{}, args []string) error {
-	ef := values.(*eraseFlags)
-	if !ef.Force {
-		return fmt.Errorf("use --force to erase all stats")
-	}
-	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], false)
-	if err != nil {
-		return err
-	}
-	defer db.Close(ctx)
-	return db.Clear(ctx, false, false, true)
+type extractFlags struct {
+	StatsDir string `subcmd:"stats-dir,stats,'directory that stats files are written to'"`
 }
 
 func (st *statsCmds) compute(ctx context.Context, values interface{}, args []string) error {
 	cf := values.(*computeFlags)
+
+	parser := boolexpr.NewParser()
+
+	expr, err := boolexpr.CreateExpr(parser, args[1:])
+	if err != nil {
+		return err
+	}
 
 	ctx, cfg, rdb, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
 	if err != nil {
@@ -107,13 +104,7 @@ func (st *statsCmds) compute(ctx context.Context, values interface{}, args []str
 		fmt.Printf("warning: computing and storing stats for %v and not for %v\n", cfg.Prefix, args[0])
 	}
 
-	_, when, _, err := rdb.LastLog(ctx)
-	if err != nil {
-		rdb.Close(ctx)
-		return fmt.Errorf("error readling latest log entry: %v", err)
-	}
-
-	sdb, err := st.computeStats(ctx, rdb, cfg.Prefix, cfg.Calculator(), cf.ComputeN, cf.Progress)
+	sdb, err := st.computeStats(ctx, rdb, expr, cfg.Prefix, cfg.Calculator(), cf.ComputeN, cf.Progress)
 	if err != nil {
 		rdb.Close(ctx)
 		return err
@@ -121,127 +112,127 @@ func (st *statsCmds) compute(ctx context.Context, values interface{}, args []str
 	rdb.Close(ctx)
 
 	// Save stats.
-	buf := &bytes.Buffer{}
-	if err := gob.NewEncoder(buf).Encode(sdb); err != nil {
-		return err
+	stats := statsFileFormat{
+		Prefix:     args[0],
+		Date:       time.Now(),
+		Expression: expr.String(),
+		Stats:      sdb,
 	}
-	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, cfg.Prefix, false)
+	return saveStats(cf.StatsDir, stats)
+}
+
+func (st *statsCmds) extract(ctx context.Context, values interface{}, args []string) error {
+	ef := values.(*extractFlags)
+	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
 	if err != nil {
 		return err
 	}
 	defer db.Close(ctx)
 
-	return db.SaveStats(ctx, when, buf.Bytes())
+	var from time.Time
+	to := time.Now()
+	return db.VisitStats(ctx, from, to,
+		func(_ context.Context, when time.Time, detail []byte) bool {
+			var sdb reports.AllStats
+			if err := gob.NewDecoder(bytes.NewBuffer(detail)).Decode(&sdb); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to decode stats for %v: %v\n", when, err)
+				return false
+			}
+			stats := statsFileFormat{
+				Prefix:     args[0],
+				Date:       when,
+				Expression: "",
+				Stats:      &sdb,
+			}
+			if err := saveStats(ef.StatsDir, stats); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to save stats for %v: %v\n", when, err)
+			}
+			return true
+		})
 }
 
-func (st *statsCmds) computeStats(ctx context.Context, db database.DB, prefix string, calc diskusage.Calculator, topN int, progress bool) (*reports.AllStats, error) {
+func (st *statsCmds) computeStats(ctx context.Context, db database.DB, expr boolexpr.T, prefix string, calc diskusage.Calculator, topN int, progress bool) (*reports.AllStats, error) {
 
 	hasStorabeBytes := calc.String() != "identity"
 	sdb := reports.NewAllStats(prefix, hasStorabeBytes, topN)
 	n := 0
 	err := db.Stream(ctx, prefix, func(_ context.Context, k string, v []byte) {
+		if progress && (n != 0 && n%1000 == 0) {
+			fmt.Printf("processed % 10v entries\n", fmtCount(int64(n)))
+		}
+		n++
+
 		var pi prefixinfo.T
 		if err := pi.UnmarshalBinary(v); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to unmarshal value for %v: %v\n", k, err)
 			return
 		}
-		if err := sdb.Update(k, pi, calc); err != nil {
+		if err := sdb.Update(k, pi, calc, expr); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to compute stats for %v: %v\n", k, err)
 			return
 		}
-		if progress && (n != 0 && n%1000 == 0) {
-			fmt.Printf("processed % 10v entries\n", fmtCount(int64(n)))
-		}
-		n++
+
 	})
 	fmt.Printf("processed % 10v entries\n", fmtCount(int64(n)))
 	sdb.Finalize()
 	return sdb, err
 }
 
-func (st *statsCmds) getOrComputeStats(ctx context.Context, prefix string, n int, progress bool) (time.Time, *reports.AllStats, error) {
-	ctx, cfg, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, prefix, true)
-	if err != nil {
-		return time.Time{}, nil, err
-	}
-	defer db.Close(ctx)
-	if cfg.Prefix == prefix {
-		var sdb reports.AllStats
-		var buf []byte
-		when, buf, err := db.LastStats(ctx)
-		if err != nil {
-			return time.Time{}, nil, err
-		}
-		if err := gob.NewDecoder(bytes.NewBuffer(buf)).Decode(&sdb); err != nil {
-			return time.Time{}, nil, err
-		}
-		return when, &sdb, nil
+func (st *statsCmds) view(ctx context.Context, values interface{}, args []string) error {
+	af := values.(*viewFlags)
+	if len(af.User) != 0 && len(af.Group) != 0 {
+		return fmt.Errorf("only one of --user or --group may be specified")
 	}
 
-	// Compute stats.
-	sdb, err := st.computeStats(ctx, db, prefix, cfg.Calculator(), n, progress)
-	return time.Now(), sdb, err
-}
-
-func (st *statsCmds) aggregate(ctx context.Context, values interface{}, args []string) error {
-	af := values.(*aggregateFlags)
-	when, sdb, err := st.getOrComputeStats(ctx, args[0], af.DisplayN, af.Progress)
+	stats, err := loadStats(args[0])
 	if err != nil {
 		return err
 	}
+
+	if af.Info {
+		fmt.Printf("Date       : %v\n", stats.Date)
+		fmt.Printf("Prefix     : %v\n", stats.Prefix)
+		fmt.Printf("Expression : %v\n", stats.Expression)
+		fmt.Println()
+	}
+
+	sdb := stats.Stats
+	when := stats.Date
+
+	if len(af.User) != 0 {
+		return st.userOrGroup(ctx, af, stats, af.User, usernames.Manager.UIDForName)
+	}
+
+	if len(af.Group) != 0 {
+		return st.userOrGroup(ctx, af, stats, af.Group, usernames.Manager.GIDForName)
+	}
+
 	heapFormatter[string]{}.formatTotals(sdb.Prefix, os.Stdout)
 
 	banner(os.Stdout, "=", "Usage by top %v Prefixes as of: %v\n", af.DisplayN, when)
 	heapFormatter[string]{}.formatHeaps(sdb.Prefix, os.Stdout, func(v string) string { return v }, af.DisplayN)
 
 	banner(os.Stdout, "=", "\nUsage by top %v users as of: %v\n", af.DisplayN, when)
-	heapFormatter[uint32]{}.formatHeaps(sdb.ByUser, os.Stdout, globalUserManager.nameForUID, af.DisplayN)
+	heapFormatter[uint32]{}.formatHeaps(sdb.ByUser, os.Stdout,
+		usernames.Manager.NameForUID, af.DisplayN)
 
 	banner(os.Stdout, "=", "\nUsage by top %v groups as of: %v\n", af.DisplayN, when)
-	heapFormatter[uint32]{}.formatHeaps(sdb.ByGroup, os.Stdout, globalUserManager.nameForGID, af.DisplayN)
+	heapFormatter[uint32]{}.formatHeaps(sdb.ByGroup, os.Stdout,
+		usernames.Manager.NameForGID, af.DisplayN)
 	return nil
 }
 
-func idmap(ids []string, mapper func(string) (uint32, error)) (map[uint32]bool, error) {
-	idm := make(map[uint32]bool)
-	for _, a := range ids {
-		id, err := mapper(a)
-		if err != nil {
-			return nil, fmt.Errorf("unrecoginised id: %v", a)
-		}
-		idm[id] = true
+func (st *statsCmds) userOrGroup(ctx context.Context, af *viewFlags, stats statsFileFormat, name string, mapper func(string) (uint32, error)) error {
+	sdb := stats.Stats
+	when := stats.Date
 
+	id, err := mapper(name)
+	if err != nil {
+		return err
 	}
-	return idm, nil
-}
 
-func (st *statsCmds) user(ctx context.Context, values interface{}, args []string) error {
-	uf := values.(*userFlags)
-	when, sdb, err := st.getOrComputeStats(ctx, args[0], uf.DisplayN, uf.Progress)
-	if err != nil {
-		return err
-	}
-	ids, err := idmap(args[1:], globalUserManager.uidForName)
-	if err != nil {
-		return err
-	}
-	banner(os.Stdout, "=", "Usage by users (top %v items per user) as of: %v\n", uf.DisplayN, when)
-	st.formatPerIDStats(sdb.PerUser, os.Stdout, globalUserManager.nameForUID, ids, uf.DisplayN)
-	return nil
-}
-
-func (st *statsCmds) group(ctx context.Context, values interface{}, args []string) error {
-	gf := values.(*groupFlags)
-	when, sdb, err := st.getOrComputeStats(ctx, args[0], gf.DisplayN, gf.Progress)
-	if err != nil {
-		return err
-	}
-	ids, err := idmap(args[1:], globalUserManager.gidForName)
-	if err != nil {
-		return err
-	}
-	banner(os.Stdout, "=", "Usage by groups (top %v items per group) as of: %v\n", gf.DisplayN, when)
-	st.formatPerIDStats(sdb.PerGroup, os.Stdout, globalUserManager.nameForGID, ids, gf.DisplayN)
+	banner(os.Stdout, "=", "Usage by %v as of: %v\n", name, when)
+	st.formatPerIDStats(sdb.PerUser, os.Stdout, usernames.Manager.NameForUID, map[uint32]bool{id: true}, af.DisplayN)
 	return nil
 }
 

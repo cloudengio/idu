@@ -121,6 +121,7 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fs filewalk.FS, af *analyz
 	errs.Append(walker.Walk(ctx, args[0]))
 	pcancel() // cancel progress tracker.
 	wg.Wait()
+
 	errs.Append(alz.summarizeAndLog(ctx, sdb, pt, start))
 	return errs.Squash(context.Canceled)
 }

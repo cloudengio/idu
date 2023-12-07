@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/file"
 )
@@ -203,7 +204,7 @@ func TestStats(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		totals, us, gs, err := pi.ComputeStats(times2{})
+		totals, us, gs, err := pi.ComputeStats(times2{}, boolexpr.T{})
 		if err != nil {
 			t.Fatal(err)
 		}

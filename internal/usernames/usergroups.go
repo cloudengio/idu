@@ -2,7 +2,7 @@
 // Use of this source code is governed by the Apache-2.0
 // license that can be found in the LICENSE file.
 
-package main
+package usernames
 
 import (
 	"fmt"
@@ -11,15 +11,15 @@ import (
 	"cloudeng.io/os/userid"
 )
 
-type userManager struct {
+type IDManager struct {
 	idmanager *userid.IDManager
 }
 
-var globalUserManager = userManager{
+var Manager = IDManager{
 	idmanager: userid.NewIDManager(),
 }
 
-func (um *userManager) nameForUID(uid uint32) string {
+func (um *IDManager) NameForUID(uid uint32) string {
 	u := fmt.Sprintf("%d", uid)
 	info, err := um.idmanager.LookupUser(u)
 	if err == nil {
@@ -28,7 +28,7 @@ func (um *userManager) nameForUID(uid uint32) string {
 	return u
 }
 
-func (um *userManager) uidForName(name string) (uint32, error) {
+func (um *IDManager) UIDForName(name string) (uint32, error) {
 	info, err := um.idmanager.LookupUser(name)
 	if err == nil {
 		name = info.UID
@@ -37,7 +37,7 @@ func (um *userManager) uidForName(name string) (uint32, error) {
 	return uint32(id), err
 }
 
-func (um *userManager) gidForName(name string) (uint32, error) {
+func (um *IDManager) GIDForName(name string) (uint32, error) {
 	grp, err := um.idmanager.LookupGroup(name)
 	if err == nil {
 		name = grp.Gid
@@ -46,7 +46,7 @@ func (um *userManager) gidForName(name string) (uint32, error) {
 	return uint32(id), err
 }
 
-func (um *userManager) nameForGID(gid uint32) string {
+func (um *IDManager) NameForGID(gid uint32) string {
 	g := fmt.Sprintf("%d", gid)
 	grp, err := um.idmanager.LookupGroup(g)
 	if err == nil {

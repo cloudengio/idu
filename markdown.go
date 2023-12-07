@@ -7,12 +7,12 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/gob"
 	"os"
 	"text/template"
 	"time"
 
 	"cloudeng.io/cmd/idu/internal/reports"
+	"cloudeng.io/cmd/idu/internal/usernames"
 	"golang.org/x/exp/maps"
 )
 
@@ -24,7 +24,7 @@ func tpl(name string) *template.Template {
 }
 
 const mdTOC = `
-# Filesystem Usage Reports for {{.Prefix}}
+# Filesystem Usage Reports for {{.Prefix}} {{.Expression}}
 
 ## Contents
 
@@ -205,44 +205,56 @@ func (md *markdownReports) initTemplates() {
 	if md.created {
 		return
 	}
+	nameForUID := usernames.Manager.NameForUID
+	nameForGID := usernames.Manager.NameForGID
 	md.toc = template.Must(tpl("toc").Parse(mdTOC))
 	md.totals = template.Must(tpl("totals").Parse(mdTotals))
 	md.prefixes = template.Must(tpl("prefixes").Parse(mdPrefixes))
 	md.lists = template.Must(tpl("userGroupLists").Funcs(
 		template.FuncMap{
-			"fmtUID": globalUserManager.nameForUID,
-			"fmtGID": globalUserManager.nameForGID,
+			"fmtUID": nameForUID,
+			"fmtGID": nameForGID,
 		}).Parse(mdListUsersAndGroups))
 
-	md.byUsers = template.Must(tpl("users").Funcs(template.FuncMap{"fmtID": globalUserManager.nameForUID}).Parse(mdByUsersGroupsTemplate))
-	md.byGroups = template.Must(tpl("groups").Funcs(template.FuncMap{"fmtID": globalUserManager.nameForUID}).Parse(mdByUsersGroupsTemplate))
+	md.byUsers = template.Must(tpl("users").
+		Funcs(template.FuncMap{"fmtID": nameForUID}).
+		Parse(mdByUsersGroupsTemplate))
+
+	md.byGroups = template.Must(tpl("groups").
+		Funcs(template.FuncMap{"fmtID": nameForGID}).
+		Parse(mdByUsersGroupsTemplate))
+
 	md.perUsers = template.Must(tpl("users").Funcs(
-		template.FuncMap{"fmtID": globalUserManager.nameForUID}).
+		template.FuncMap{"fmtID": nameForUID}).
 		Parse(mdPerUsersGroupsTemplate))
+
 	md.perGroups = template.Must(tpl("users").Funcs(
-		template.FuncMap{"fmtID": globalUserManager.nameForGID}).
+		template.FuncMap{"fmtID": nameForGID}).
 		Parse(mdPerUsersGroupsTemplate))
+
 	md.created = true
 }
 
-func (md *markdownReports) generateReports(ctx context.Context, rf *reportsFlags, prefix string, when time.Time, filenames *reportFilenames, data []byte) error {
+func (md *markdownReports) generateReports(ctx context.Context, rf *reportsFlags, filenames *reportFilenames, stats statsFileFormat) error {
 	md.initTemplates()
-	var sdb reports.AllStats
-	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(&sdb); err != nil {
-		return err
-	}
+
+	prefix := stats.Prefix
+	when := stats.Date
+	sdb := stats.Stats
 	out := &bytes.Buffer{}
 
 	// TOC & user/group links
 
 	if err := md.toc.Execute(out, struct {
-		Prefix string
-		TopN   int
-		When   string
+		Prefix     string
+		Expression string
+		TopN       int
+		When       string
 	}{
-		Prefix: prefix,
-		TopN:   rf.Markdown,
-		When:   when.Format(time.RFC3339),
+		Prefix:     prefix,
+		Expression: stats.Expression,
+		TopN:       rf.Markdown,
+		When:       when.Format(time.RFC3339),
 	}); err != nil {
 		return err
 	}

@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"time"
 
+	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/file"
 	"cloudeng.io/file/diskusage"
 )
@@ -317,13 +318,13 @@ func (pi *T) finalize() error {
 // using the supplied calculator to determine on-disk raw storage usage.
 // Note that the size of the prefix itself is not included in the returned
 // PrefixBytes but rather is included in the PrefixBytes for its parent prefix.
-func (pi *T) ComputeStats(calculator diskusage.Calculator) (totals Stats, userStats, groupStats StatsList, err error) {
+func (pi *T) ComputeStats(calculator diskusage.Calculator, expr boolexpr.T) (totals Stats, userStats, groupStats StatsList, err error) {
 	if !pi.finalized {
 		err = fmt.Errorf("prefix info not finalized")
 		return
 	}
-	userStats = pi.computeStatsForIDMapOrFiles(pi.userIDMap, pi.userID, calculator)
-	groupStats = pi.computeStatsForIDMapOrFiles(pi.groupIDMap, pi.groupID, calculator)
+	userStats = pi.computeStatsForIDMapOrFiles(pi.userIDMap, pi.userID, calculator, expr)
+	groupStats = pi.computeStatsForIDMapOrFiles(pi.groupIDMap, pi.groupID, calculator, expr)
 	for _, us := range userStats {
 		totals.Bytes += us.Bytes
 		totals.Files += us.Files
@@ -334,25 +335,33 @@ func (pi *T) ComputeStats(calculator diskusage.Calculator) (totals Stats, userSt
 	return
 }
 
-func (pi *T) computeStatsForIDMapOrFiles(idms idMaps, defaultID uint32, calculator diskusage.Calculator) []Stats {
+func (pi *T) computeStatsForIDMapOrFiles(idms idMaps, defaultID uint32, calculator diskusage.Calculator, expr boolexpr.T) []Stats {
 	if len(idms) == 0 {
 		var stats Stats
 		stats.ID = defaultID
+		var found bool
 		for _, fi := range pi.entries {
-			pi.updateStats(&stats, fi, calculator)
+			found = pi.updateStats(&stats, fi, calculator, expr)
+		}
+		if !found {
+			return nil
 		}
 		return []Stats{stats}
 	}
 	stats := make([]Stats, 0, len(idms))
 	for _, idm := range idms {
-		if s, ok := pi.computeStatsForID(idm, calculator); ok {
+		if s, ok := pi.computeStatsForID(idm, calculator, expr); ok {
 			stats = append(stats, s)
 		}
 	}
 	return stats
 }
 
-func (pi *T) updateStats(s *Stats, fi file.Info, calculator diskusage.Calculator) {
+func (pi *T) updateStats(s *Stats, fi file.Info, calculator diskusage.Calculator, expr boolexpr.T) bool {
+	uid, gid := pi.UserGroupInfo(fi)
+	if !expr.Eval(boolexpr.NewFileInfoUserGroup(fi, uid, gid)) {
+		return false
+	}
 	if fi.IsDir() {
 		s.Prefixes++
 		s.PrefixBytes += fi.Size()
@@ -361,17 +370,19 @@ func (pi *T) updateStats(s *Stats, fi file.Info, calculator diskusage.Calculator
 		s.StorageBytes += calculator.Calculate(fi.Size())
 		s.Bytes += fi.Size()
 	}
+	return true
 }
 
-func (pi *T) computeStatsForID(idm idMap, calculator diskusage.Calculator) (Stats, bool) {
+func (pi *T) computeStatsForID(idm idMap, calculator diskusage.Calculator, expr boolexpr.T) (Stats, bool) {
 	var stats Stats
 	stats.ID = idm.ID
 	sc := newIdMapScanner(idm)
 	found := false
 	for sc.next() {
 		fi := pi.entries[sc.pos()]
-		pi.updateStats(&stats, fi, calculator)
-		found = true
+		if pi.updateStats(&stats, fi, calculator, expr) {
+			found = true
+		}
 	}
 	return stats, found
 }
@@ -448,6 +459,9 @@ func (pi *T) newIDScan(id uint32, userID bool, idms idMaps) (IDSanner, error) {
 	return &idmapScanner{sc: newIdMapScanner(idms[idm]), entries: pi.entries}, nil
 }
 
+// Named represents a PrefixInfo that has a name associated with it
+// and also a NumEntries() method that returns the number of entries
+// in the prefix.
 type Named struct {
 	T
 	name string
@@ -455,6 +469,10 @@ type Named struct {
 
 func (pi Named) Name() string {
 	return pi.name
+}
+
+func (pi Named) NumEntries() int64 {
+	return int64(len(pi.entries))
 }
 
 func NewNamed(name string, pi T) Named {
