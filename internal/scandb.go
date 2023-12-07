@@ -16,7 +16,6 @@ import (
 	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/cmd/idu/internal/database"
 	"cloudeng.io/cmd/idu/internal/database/badgerdb"
-	"cloudeng.io/cmd/idu/internal/database/boltdb"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"github.com/dgraph-io/badger/v4"
 )
@@ -58,18 +57,6 @@ func (l *badgerLogger) Debugf(f string, a ...interface{}) {
 	logDB(context.Background(), slog.LevelWarn, "badger", "msg", m)
 }
 
-func boltdbOptions(readonly bool, opts ...boltdb.Option) []boltdb.Option {
-	if readonly {
-		opts = append(opts, boltdb.ReadOnly())
-	}
-	return opts
-}
-
-func openBoltDB(ctx context.Context, cfg config.Prefix, readonly bool) (database.DB, error) {
-	opts := boltdbOptions(readonly, boltdb.WithTimeout(10*time.Second))
-	return boltdb.Open(cfg.Database, opts...)
-}
-
 func badgerdbOptions(readonly bool, opts ...badgerdb.Option) []badgerdb.Option {
 	if readonly {
 		opts = append(opts, badgerdb.ReadOnly())
@@ -88,10 +75,6 @@ func openBadgerDB(ctx context.Context, cfg config.Prefix, readonly bool) (databa
 
 func UseBadgerDB() {
 	databaseFactory = openBadgerDB
-}
-
-func UseBoltDB() {
-	databaseFactory = openBoltDB
 }
 
 var databaseFactory = openBadgerDB

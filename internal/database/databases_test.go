@@ -17,24 +17,9 @@ import (
 
 	"cloudeng.io/cmd/idu/internal/database"
 	"cloudeng.io/cmd/idu/internal/database/badgerdb"
-	"cloudeng.io/cmd/idu/internal/database/boltdb"
 	"github.com/dgraph-io/badger/v4"
 	"golang.org/x/exp/slices"
 )
-
-func boltFactory(t *testing.T, dir, prefix string, readonly bool) database.DB {
-	t.Helper()
-	dbname := filepath.Join(dir, "db")
-	opts := []boltdb.Option{}
-	if readonly {
-		opts = append(opts, boltdb.ReadOnly())
-	}
-	db, err := boltdb.Open(dbname, opts...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return db
-}
 
 func badgerFactory(t *testing.T, dir, prefix string, readonly bool) database.DB {
 	t.Helper()
@@ -77,7 +62,6 @@ func populateDatabase(t *testing.T, db database.DB, nItems int) {
 	if err := <-ch; err != nil {
 		t.Fatal(err)
 	}
-	db.SaveStats(ctx, time.Now(), []byte("stats"))
 	db.LogError(ctx, "/a/01", time.Now(), []byte("error"))
 	db.Log(ctx, time.Now(), time.Now(), []byte("log"))
 	db.Close(ctx)
@@ -99,7 +83,6 @@ func validatePopulatedDatabase(t *testing.T, found []string, nItems int) {
 }
 
 func TestScan(t *testing.T) {
-	testScan(t, boltFactory)
 	testScan(t, badgerFactory)
 }
 
@@ -181,7 +164,6 @@ func testScan(t *testing.T, factory databaseFactory) {
 }
 
 func TestLogAndClose(t *testing.T) {
-	testLogAndClose(t, boltFactory)
 	testLogAndClose(t, badgerFactory)
 }
 
@@ -243,7 +225,6 @@ func testLogAndClose(t *testing.T, factory databaseFactory) {
 }
 
 func TestErrors(t *testing.T) {
-	testErrors(t, boltFactory)
 	testErrors(t, badgerFactory)
 }
 
@@ -310,7 +291,6 @@ func visitAllErrors(t *testing.T, ctx context.Context, db database.DB) []string 
 }
 
 func TestErrorsDelete(t *testing.T) {
-	testErrorsDelete(t, boltFactory)
 	testErrorsDelete(t, badgerFactory)
 }
 
@@ -356,7 +336,6 @@ func testErrorsDelete(t *testing.T, factory databaseFactory) {
 }
 
 func TestDelete(t *testing.T) {
-	testDelete(t, boltFactory)
 	testDelete(t, badgerFactory)
 }
 
@@ -425,65 +404,7 @@ func testDelete(t *testing.T, factory databaseFactory) {
 	}
 }
 
-func TestStats(t *testing.T) {
-	testStats(t, boltFactory)
-	testStats(t, badgerFactory)
-}
-
-func testStats(t *testing.T, factory databaseFactory) {
-	ctx := context.Background()
-	prefix := "/filesytem-prefix"
-	tmpdir := t.TempDir()
-	db := factory(t, tmpdir, prefix, false)
-	defer db.Close(ctx)
-
-	t1, _ := time.Parse(time.RFC3339, "2023-08-10T10:00:02-08:00")
-	t2, _ := time.Parse(time.RFC3339, "2023-08-11T10:00:02-08:00")
-	times := []time.Time{t1, t2}
-	payloads := []string{"foo", "bar"}
-	for i, stats := range payloads {
-		if err := db.SaveStats(ctx, times[i], []byte(stats)); err != nil {
-			t.Errorf("got %v, want nil", err)
-		}
-	}
-
-	when, stats, err := db.LastStats(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if got, want := string(stats), "bar"; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-
-	if got, want := when, times[1]; !got.Equal(when) {
-		t.Errorf("got %v, want %v", got, want)
-	}
-
-	scanTimes := []time.Time{}
-	scanPayloads := []string{}
-	err = db.VisitStats(ctx, time.Time{}, time.Now(),
-		func(_ context.Context, when time.Time, detail []byte) bool {
-			scanPayloads = append(scanPayloads, string(detail))
-			scanTimes = append(scanTimes, when)
-			return true
-		})
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if got, want := scanPayloads, payloads; !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v, want %v", got, want)
-	}
-
-	if got, want := scanTimes, times; !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v, want %v", got, want)
-	}
-}
-
 func TestExists(t *testing.T) {
-	testExists(t, boltFactory)
 	testExists(t, badgerFactory)
 }
 

@@ -125,8 +125,6 @@ type GlobalFlags struct {
 	Stderr      bool                  `subcmd:"stderr,false,write log messages to stderr"`
 	HTTP        string                `subcmd:"http,,set to a port to enable http serving of /debug/vars and profiling"`
 	GCPercent   int                   `subcmd:"gcpercent,50,value to use for runtime/debug.SetGCPercent"`
-	UseBadgerDB bool                  `subcmd:"use-badger-db,true,use badgerdb instead of boltdb"`
-	UseBoltDB   bool                  `subcmd:"use-bolt-db,false,use boltdb instead of badgerdb"`
 }
 
 func init() {
@@ -226,18 +224,7 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 		go http.Serve(ln, nil) //nolint:gosec
 	}
 
-	db := 0
-	if globalFlags.UseBadgerDB {
-		internal.UseBadgerDB()
-		db++
-	}
-	if globalFlags.UseBoltDB {
-		internal.UseBoltDB()
-		db++
-	}
-	if db != 1 {
-		return fmt.Errorf("must specify exactly one of use-badger-db or use-bolt-db")
-	}
+	internal.UseBadgerDB()
 
 	internal.Verbosity = slog.Level(globalFlags.Verbose)
 	internal.LogDir = globalFlags.LogDir
