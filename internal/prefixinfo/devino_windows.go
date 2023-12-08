@@ -14,6 +14,6 @@ func devino(fi file.Info) (uint64, uint64) {
 	return 0, 0, false
 }
 
-func syscallStat(uid, gid uint32, dev, ino uint64) any {
-	return &userInfo{uid: uid, gid: gid}
+func SysInfo(uid, gid uint32, dev, ino uint64) any {
+	return &sysinfo{uid: uid, gid: gid, dev: dev, ino: ino}
 }

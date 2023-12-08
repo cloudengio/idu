@@ -24,7 +24,7 @@ import (
 )
 
 func newInfo(name string, size int64, mode fs.FileMode, modTime time.Time, uid, gid uint32) file.Info {
-	return file.NewInfo(name, size, mode, modTime, prefixinfo.SysUserGroupID(uid, gid))
+	return file.NewInfo(name, size, mode, modTime, prefixinfo.SysInfo(uid, gid, 0, 0))
 }
 
 func createPrefixInfo(t *testing.T, uid, gid uint32, name string, contents ...[]file.Info) prefixinfo.T {

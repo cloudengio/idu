@@ -92,7 +92,7 @@ func TestdataIDCombinationsDirs(modTime time.Time, uid, gid uint32, inode uint64
 }
 
 func TestdataNewInfo(name string, size int64, mode fs.FileMode, modTime time.Time, uid, gid uint32, device, inode uint64) file.Info {
-	return file.NewInfo(name, size, mode, modTime, syscallStat(uid, gid, device, inode))
+	return file.NewInfo(name, size, mode, modTime, SysInfo(uid, gid, device, inode))
 }
 
 func TestdataNewPrefixInfo(t *testing.T, name string, size int64, mode fs.FileMode, modTime time.Time, uid, gid uint32, dev, inode uint64) T {
@@ -110,20 +110,4 @@ func IDsFromStats(s StatsList) []uint32 {
 		r = append(r, st.ID)
 	}
 	return r
-}
-
-func SetDevInode(pi *T, dev, ino uint64) {
-	pi.device = dev
-	pi.inodes = make([]uint64, len(pi.entries))
-	for i := range pi.entries {
-		pi.inodes[i] = ino + uint64(i)
-	}
-}
-
-func GetDev(pi T) uint64 {
-	return pi.device
-}
-
-func GetInodes(pi T) []uint64 {
-	return pi.inodes
 }

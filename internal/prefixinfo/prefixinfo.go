@@ -123,6 +123,19 @@ func (pi T) PrefixesOnly() file.InfoList {
 	return fi
 }
 
+// Device returns the id for the underlying storage device for this prefix
+// and all of its children.
+func (pi T) Device() uint64 {
+	return pi.device
+}
+
+// Inodes returns the inodes for the contents of this prefix. It can
+// only be called after Finalize() has been called or after unmarshaling
+// a previously finalized PrefixInfo.
+func (pi T) Inodes() []uint64 {
+	return pi.inodes
+}
+
 func (pi *T) MarshalBinary() ([]byte, error) {
 	var buf bytes.Buffer
 	buf.Grow(1000)
