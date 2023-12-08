@@ -15,5 +15,5 @@ func devino(fi file.Info) (uint64, uint64, bool) {
 }
 
 func SysInfo(uid, gid uint32, dev, ino uint64) any {
-	return &sysinfo{uid: uid, gid: gid}
+	return &sysInfo{uid: uid, gid: gid}
 }
