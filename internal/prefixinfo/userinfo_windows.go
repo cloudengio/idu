@@ -15,7 +15,7 @@ type sysInfo struct {
 }
 
 func userGroupID(fi file.Info) (userID, groupID uint32, ok bool) {
-	if u, ok := fi.Sys().(*userInfo); ok {
+	if u, ok := fi.Sys().(*sysInfo); ok {
 		return u.uid, u.gid, true
 	}
 	// TODO: implement user/group in some form for windows, for now just
