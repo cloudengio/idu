@@ -22,7 +22,3 @@ func userGroupID(fi file.Info) (userID, groupID uint32, ok bool) {
 	// pretend that the user and group are 0
 	return 0, 0, true
 }
-
-func SysUserGroupID(uid, gid uint32) any {
-	return &userInfo{uid: uid, gid: gid}
-}

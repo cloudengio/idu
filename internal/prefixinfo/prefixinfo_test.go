@@ -98,7 +98,7 @@ func TestBinaryEncoding(t *testing.T) {
 	modTime := time.Now().Truncate(0)
 	var uid, gid uint32 = 100, 2
 
-	ug00, ug10, ug01, ug11, ugOther := prefixinfo.TestdataIDCombinationsFiles(modTime, uid, gid)
+	ug00, ug10, ug01, ug11, ugOther := prefixinfo.TestdataIDCombinationsFiles(modTime, uid, gid, 100)
 
 	for _, tc := range []struct {
 		fi           []file.Info
@@ -111,16 +111,12 @@ func TestBinaryEncoding(t *testing.T) {
 		{ug11, []string{"0"}, []string{"0"}, []string{"1"}, []string{"1"}},
 		{ugOther, []string{}, []string{}, []string{"0", "1"}, []string{"0", "1"}},
 	} {
-		pi := prefixinfo.TestdataNewPrefixInfo(t, "dir", 1, 0700, modTime, uid, gid)
+		pi := prefixinfo.TestdataNewPrefixInfo(t, "dir", 1, 0700, modTime, uid, gid, 33, 200)
 		pi.AppendInfoList(tc.fi)
 		if err := pi.Finalize(); err != nil {
 			t.Fatal(err)
 		}
-		expectedInodes := make([]uint64, len(tc.fi))
-		for i := range tc.fi {
-			expectedInodes[i] = uint64(100 + i)
-		}
-		prefixinfo.SetDevInode(&pi, 33, 100)
+		expectedInodes := prefixinfo.GetInodes(pi)
 		for _, fn := range []prefixinfo.RoundTripper{
 			prefixinfo.GobRoundTrip, prefixinfo.BinaryRoundTrip,
 		} {
@@ -177,8 +173,8 @@ func TestStats(t *testing.T) {
 	modTime := time.Now().Truncate(0)
 	var uid, gid uint32 = 100, 2
 
-	ug00, ug10, ug01, ug11, ugOther := prefixinfo.TestdataIDCombinationsFiles(modTime, uid, gid)
-	ug00d, ug10d, ug01d, ug11d, ugOtherd := prefixinfo.TestdataIDCombinationsDirs(modTime, uid, gid)
+	ug00, ug10, ug01, ug11, ugOther := prefixinfo.TestdataIDCombinationsFiles(modTime, uid, gid, 100)
+	ug00d, ug10d, ug01d, ug11d, ugOtherd := prefixinfo.TestdataIDCombinationsDirs(modTime, uid, gid, 200)
 
 	perUserStats := []prefixinfo.StatsList{
 		{{uid, 2, 2, 3, 6, 3}},
@@ -207,7 +203,7 @@ func TestStats(t *testing.T) {
 		{ug11, ug11d, []uint32{uid, uid + 1}, []uint32{gid, gid + 1}, 3},
 		{ugOther, ugOtherd, []uint32{uid + 1}, []uint32{gid + 1}, 4},
 	} {
-		pi := prefixinfo.TestdataNewPrefixInfo(t, "dir", 1, 0700, modTime, uid, gid)
+		pi := prefixinfo.TestdataNewPrefixInfo(t, "dir", 1, 0700, modTime, uid, gid, 33, 100)
 		pi.AppendInfoList(tc.fi)
 		pi.AppendInfoList(tc.fd)
 		if err := pi.Finalize(); err != nil {
@@ -264,5 +260,4 @@ func TestStats(t *testing.T) {
 			t.Errorf("got %v, want %v", got, want)
 		}
 	}
-
 }

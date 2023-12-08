@@ -19,3 +19,7 @@ func devino(fi file.Info) (uint64, uint64, bool) {
 	}
 	return uint64(st.Dev), st.Ino, true
 }
+
+func syscallStat(uid, gid uint32, dev, ino uint64) any {
+	return &syscall.Stat_t{Uid: uid, Gid: gid, Dev: int32(dev), Ino: ino}
+}

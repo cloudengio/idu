@@ -99,7 +99,7 @@ func TestCreateIDMaps(t *testing.T) {
 	modTime := time.Now().Truncate(0)
 
 	var uid, gid uint32 = 100, 1
-	ug00, ug10, ug01, ug11, ugOther := TestdataIDCombinationsFiles(modTime, uid, gid)
+	ug00, ug10, ug01, ug11, ugOther := TestdataIDCombinationsFiles(modTime, uid, gid, 0)
 
 	for i, tc := range []struct {
 		fi                   []file.Info
@@ -125,7 +125,7 @@ func TestCreateIDMaps(t *testing.T) {
 			[]uint32{uid + 1, uid + 1}, []uint32{gid + 1, gid + 1},
 			[]uint32{uid + 1, uid + 1}, []uint32{gid + 1, gid + 1}},
 	} {
-		info := file.NewInfo("dir", 1, 0700, time.Now().Truncate(0), SysUserGroupID(uid, gid))
+		info := TestdataNewInfo("dir", 1, 0700, time.Now().Truncate(0), uid, gid, 0, 0)
 		pi, err := New(info)
 		if err != nil {
 			t.Fatal(err)
