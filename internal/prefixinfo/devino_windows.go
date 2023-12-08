@@ -10,8 +10,8 @@ import (
 	"cloudeng.io/file"
 )
 
-func devino(fi file.Info) (uint64, uint64) {
-	return 0, 0, false
+func devino(fi file.Info) (uint64, uint64, bool) {
+	return 0, 0, true
 }
 
 func SysInfo(uid, gid uint32, dev, ino uint64) any {
