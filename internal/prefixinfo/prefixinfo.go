@@ -24,27 +24,36 @@ import (
 type T struct {
 	userID     uint32
 	groupID    uint32
+	device     uint64
+	inode      uint64
 	size       int64
 	mode       fs.FileMode
 	modTime    time.Time
 	entries    file.InfoList // files and prefixes only
+	inodes     []uint64
 	userIDMap  idMaps
 	groupIDMap idMaps
 	finalized  bool
 }
 
 // New creates a new PrefixInfo for the supplied file.Info. It will
-// determine the uid and gid from the supplied file.Info assuming that it
-// was created by a call to LStat or Stat rather than being obtained
+// determine the uid, gid, device and inode from the supplied file.Info assuming
+// that it was created by a call to LStat or Stat rather than being obtained
 // from the database.
 func New(info file.Info) (T, error) {
 	uid, gid, ok := UserGroup(info)
 	if !ok {
 		return T{}, fmt.Errorf("no user/group info for %v", info.Name())
 	}
+	dev, ino, ok := devino(info)
+	if !ok {
+		return T{}, fmt.Errorf("no device/inode info for %v", info.Name())
+	}
 	return T{
 		userID:  uid,
 		groupID: gid,
+		device:  dev,
+		inode:   ino,
 		size:    info.Size(),
 		modTime: info.ModTime(),
 		mode:    info.Mode(),
@@ -130,7 +139,7 @@ func (pi *T) AppendBinary(buf *bytes.Buffer) error {
 
 	var storage [128]byte
 	data := storage[:0]
-	data = append(data, 0x1)                              // version
+	data = append(data, 0x2)                              // version
 	data = binary.AppendVarint(data, pi.size)             // user id
 	data = binary.AppendUvarint(data, uint64(pi.userID))  // user id
 	data = binary.AppendUvarint(data, uint64(pi.groupID)) // groupd id
@@ -142,7 +151,9 @@ func (pi *T) AppendBinary(buf *bytes.Buffer) error {
 	}
 	data = binary.AppendVarint(data, int64(len(out)))
 	data = append(data, out...)
-	buf.Write(data)
+	if _, err := buf.Write(data); err != nil {
+		return err
+	}
 
 	pi.userIDMap.appendBinary(buf)  // user id map
 	pi.groupIDMap.appendBinary(buf) // group id map
@@ -150,6 +161,13 @@ func (pi *T) AppendBinary(buf *bytes.Buffer) error {
 	if err := pi.entries.AppendBinary(buf); err != nil { // files+prefixes
 		return err
 	}
+
+	data = storage[:0]
+	data = binary.AppendUvarint(data, pi.device) // pi.device
+	for _, ino := range pi.inodes {
+		data = binary.AppendUvarint(data, ino) // inodes
+	}
+	_, err = buf.Write(data)
 	return err
 }
 
@@ -159,8 +177,8 @@ func (pi *T) UnmarshalBinary(data []byte) error {
 	}
 	version := data[0]
 
-	if version != 0x1 {
-		return fmt.Errorf("PrefixInfo: invalid version of binary encoding: got %x, want %x", data[0], 01)
+	if version != 0x1 && version != 0x2 {
+		return fmt.Errorf("PrefixInfo: invalid version of binary encoding: got %x, want %x..%x", data[0], 01, 02)
 	}
 	var n int
 	data = data[1:]                  // version
@@ -192,9 +210,18 @@ func (pi *T) UnmarshalBinary(data []byte) error {
 	if err != nil {
 		return err
 	}
-	pi.entries, _, err = file.DecodeBinaryInfoList(data) // files
+	pi.entries, data, err = file.DecodeBinaryInfoList(data) // files
 	if err != nil {
 		return err
+	}
+	if version >= 0x2 {
+		pi.device, n = binary.Uvarint(data)
+		data = data[n:]
+		pi.inodes = make([]uint64, len(pi.entries))
+		for i := range pi.inodes {
+			pi.inodes[i], n = binary.Uvarint(data)
+			data = data[n:]
+		}
 	}
 	return pi.finalize()
 }
@@ -271,7 +298,7 @@ func (pi *T) validateIDMaps() error {
 	return nil
 }
 
-func (pi *T) finalizePerFileUserGroupInfo() {
+func (pi *T) finalizePerFileInfo() {
 	if len(pi.userIDMap) == 0 && len(pi.groupIDMap) == 0 {
 		// All files have the same info as the prefix.
 		for i := range pi.entries {
@@ -287,29 +314,38 @@ func (pi *T) finalizePerFileUserGroupInfo() {
 		if len(pi.groupIDMap) > 0 {
 			gid, _ = pi.groupIDMap.idForPos(i)
 		}
-		pi.SetUserGroupFile(&pi.entries[i], uid, gid)
+		pi.SetUserInfo(&pi.entries[i], uid, gid)
+	}
+}
+
+func (pi *T) createInodes() {
+	pi.inodes = make([]uint64, len(pi.entries))
+	for i := range pi.entries {
+		_, ino, _ := devino(pi.entries[i])
+		pi.inodes[i] = ino
 	}
 }
 
 // Finalize must be called after all files, entries etc have been added to
 // the PrefixInfo and will build the per-file user and group mappings.
 // Finalize must be called before marshaling a PrefixInfo and consequently
-// an unmashaled PrefixInfo will be finalized by the unmarsahling code.
+// an unmarshaled PrefixInfo will be finalized by the unmarshaling code.
 func (pi *T) Finalize() error {
 	if pi.finalized {
 		return nil
 	}
 	pi.createIDMaps()
+	pi.createInodes()
 	return pi.finalize()
 }
 
 // called by unmarshal to finalize the prefix info but without
-// creating new idmaps.
+// creating new idmaps and inode list.
 func (pi *T) finalize() error {
 	if err := pi.validateIDMaps(); err != nil {
 		return err
 	}
-	pi.finalizePerFileUserGroupInfo()
+	pi.finalizePerFileInfo()
 	pi.finalized = true
 	return nil
 }

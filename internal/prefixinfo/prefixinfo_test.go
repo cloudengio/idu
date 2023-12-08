@@ -91,7 +91,6 @@ func cmpInfoList(t *testing.T, npi prefixinfo.T, got, want file.InfoList) {
 		if got, want := g.Mode(), want[i].Mode(); got != want {
 			t.Errorf("got %v, want %v", got, want)
 		}
-
 	}
 }
 
@@ -117,6 +116,11 @@ func TestBinaryEncoding(t *testing.T) {
 		if err := pi.Finalize(); err != nil {
 			t.Fatal(err)
 		}
+		expectedInodes := make([]uint64, len(tc.fi))
+		for i := range tc.fi {
+			expectedInodes[i] = uint64(100 + i)
+		}
+		prefixinfo.SetDevInode(&pi, 33, 100)
 		for _, fn := range []prefixinfo.RoundTripper{
 			prefixinfo.GobRoundTrip, prefixinfo.BinaryRoundTrip,
 		} {
@@ -151,6 +155,12 @@ func TestBinaryEncoding(t *testing.T) {
 
 			scanAndMatchGroups(t, &pi, gid+1, tc.gid1s)
 
+			if got, want := prefixinfo.GetDev(npi), uint64(33); got != want {
+				t.Errorf("got %v, want %v", got, want)
+			}
+			if got, want := prefixinfo.GetInodes(npi), expectedInodes; !slices.Equal(got, want) {
+				t.Errorf("got %v, want %v", got, want)
+			}
 		}
 	}
 }

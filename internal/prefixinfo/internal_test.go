@@ -111,3 +111,19 @@ func IDsFromStats(s StatsList) []uint32 {
 	}
 	return r
 }
+
+func SetDevInode(pi *T, dev, ino uint64) {
+	pi.device = dev
+	pi.inodes = make([]uint64, len(pi.entries))
+	for i := range pi.entries {
+		pi.inodes[i] = ino + uint64(i)
+	}
+}
+
+func GetDev(pi T) uint64 {
+	return pi.device
+}
+
+func GetInodes(pi T) []uint64 {
+	return pi.inodes
+}
