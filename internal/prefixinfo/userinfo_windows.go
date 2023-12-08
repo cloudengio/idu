@@ -10,7 +10,7 @@ import (
 	"cloudeng.io/file"
 )
 
-type userInfo struct {
+type sysInfo struct {
 	uid, gid uint32
 }
 
