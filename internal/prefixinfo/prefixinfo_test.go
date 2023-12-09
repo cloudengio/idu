@@ -91,7 +91,6 @@ func cmpInfoList(t *testing.T, npi prefixinfo.T, got, want file.InfoList) {
 		if got, want := g.Mode(), want[i].Mode(); got != want {
 			t.Errorf("got %v, want %v", got, want)
 		}
-
 	}
 }
 
@@ -99,7 +98,7 @@ func TestBinaryEncoding(t *testing.T) {
 	modTime := time.Now().Truncate(0)
 	var uid, gid uint32 = 100, 2
 
-	ug00, ug10, ug01, ug11, ugOther := prefixinfo.TestdataIDCombinationsFiles(modTime, uid, gid)
+	ug00, ug10, ug01, ug11, ugOther := prefixinfo.TestdataIDCombinationsFiles(modTime, uid, gid, 100)
 
 	for _, tc := range []struct {
 		fi           []file.Info
@@ -112,11 +111,13 @@ func TestBinaryEncoding(t *testing.T) {
 		{ug11, []string{"0"}, []string{"0"}, []string{"1"}, []string{"1"}},
 		{ugOther, []string{}, []string{}, []string{"0", "1"}, []string{"0", "1"}},
 	} {
-		pi := prefixinfo.TestdataNewPrefixInfo(t, "dir", 1, 0700, modTime, uid, gid)
+		pi := prefixinfo.TestdataNewPrefixInfo(t, "dir", 1, 0700, modTime, uid, gid, 33, 200)
 		pi.AppendInfoList(tc.fi)
 		if err := pi.Finalize(); err != nil {
 			t.Fatal(err)
 		}
+		expectedDevice := pi.Device()
+		expectedInodes := pi.Inodes()
 		for _, fn := range []prefixinfo.RoundTripper{
 			prefixinfo.GobRoundTrip, prefixinfo.BinaryRoundTrip,
 		} {
@@ -151,6 +152,12 @@ func TestBinaryEncoding(t *testing.T) {
 
 			scanAndMatchGroups(t, &pi, gid+1, tc.gid1s)
 
+			if got, want := npi.Device(), expectedDevice; got != want {
+				t.Errorf("got %v, want %v", got, want)
+			}
+			if got, want := npi.Inodes(), expectedInodes; !slices.Equal(got, want) {
+				t.Errorf("got %v, want %v", got, want)
+			}
 		}
 	}
 }
@@ -167,8 +174,8 @@ func TestStats(t *testing.T) {
 	modTime := time.Now().Truncate(0)
 	var uid, gid uint32 = 100, 2
 
-	ug00, ug10, ug01, ug11, ugOther := prefixinfo.TestdataIDCombinationsFiles(modTime, uid, gid)
-	ug00d, ug10d, ug01d, ug11d, ugOtherd := prefixinfo.TestdataIDCombinationsDirs(modTime, uid, gid)
+	ug00, ug10, ug01, ug11, ugOther := prefixinfo.TestdataIDCombinationsFiles(modTime, uid, gid, 100)
+	ug00d, ug10d, ug01d, ug11d, ugOtherd := prefixinfo.TestdataIDCombinationsDirs(modTime, uid, gid, 200)
 
 	perUserStats := []prefixinfo.StatsList{
 		{{uid, 2, 2, 3, 6, 3}},
@@ -197,7 +204,7 @@ func TestStats(t *testing.T) {
 		{ug11, ug11d, []uint32{uid, uid + 1}, []uint32{gid, gid + 1}, 3},
 		{ugOther, ugOtherd, []uint32{uid + 1}, []uint32{gid + 1}, 4},
 	} {
-		pi := prefixinfo.TestdataNewPrefixInfo(t, "dir", 1, 0700, modTime, uid, gid)
+		pi := prefixinfo.TestdataNewPrefixInfo(t, "dir", 1, 0700, modTime, uid, gid, 33, 100)
 		pi.AppendInfoList(tc.fi)
 		pi.AppendInfoList(tc.fd)
 		if err := pi.Finalize(); err != nil {
@@ -254,5 +261,4 @@ func TestStats(t *testing.T) {
 			t.Errorf("got %v, want %v", got, want)
 		}
 	}
-
 }

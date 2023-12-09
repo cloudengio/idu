@@ -26,11 +26,11 @@ func (pi *T) UserGroupInfo(fi file.Info) (userID, groupID uint32) {
 	return u, g
 }
 
-func (pi *T) SetUserGroupFile(fi *file.Info, userID, groupID uint32) {
+func (pi *T) SetUserInfo(fi *file.Info, userID, groupID uint32) {
 	if pi.userID == userID && pi.groupID == groupID {
 		fi.SetSys(nil)
 	}
-	fi.SetSys(userinfo{userID, groupID})
+	fi.SetSys(userinfo{uid: userID, gid: groupID})
 }
 
 func UserGroup(fi file.Info) (userID, groupID uint32, ok bool) {

@@ -10,19 +10,15 @@ import (
 	"cloudeng.io/file"
 )
 
-type userInfo struct {
+type sysInfo struct {
 	uid, gid uint32
 }
 
 func userGroupID(fi file.Info) (userID, groupID uint32, ok bool) {
-	if u, ok := fi.Sys().(*userInfo); ok {
+	if u, ok := fi.Sys().(*sysInfo); ok {
 		return u.uid, u.gid, true
 	}
 	// TODO: implement user/group in some form for windows, for now just
 	// pretend that the user and group are 0
 	return 0, 0, true
-}
-
-func SysUserGroupID(uid, gid uint32) any {
-	return &userInfo{uid: uid, gid: gid}
 }
