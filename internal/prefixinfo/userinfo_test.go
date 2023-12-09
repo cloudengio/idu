@@ -30,7 +30,7 @@ func TestUserInfo(t *testing.T) {
 
 	pi := T{userID: 1, groupID: 2}
 
-	uid, gid := pi.UserGroupInfo(fi)
+	uid, gid, _, _ := pi.SysInfo(fi)
 	ouid, ogid := os.Getuid(), os.Getgid()
 	if ouid == -1 {
 		// Windows returns uid and gid as -1
@@ -44,9 +44,10 @@ func TestUserInfo(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
-	pi.SetUserInfo(&fi, 600, 6)
+	fi.SetSys(NewSysInfo(600, 6, 33, 44))
 
-	uid, gid = pi.UserGroupInfo(fi)
+	uid, gid, dev, ino := pi.SysInfo(fi)
+
 	if got, want := uid, uint32(600); got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
@@ -55,4 +56,11 @@ func TestUserInfo(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
+	if got, want := dev, uint64(33); got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
+	if got, want := ino, uint64(44); got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
 }

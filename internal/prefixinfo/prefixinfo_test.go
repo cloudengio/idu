@@ -113,11 +113,8 @@ func TestBinaryEncoding(t *testing.T) {
 	} {
 		pi := prefixinfo.TestdataNewPrefixInfo(t, "dir", 1, 0700, modTime, uid, gid, 33, 200)
 		pi.AppendInfoList(tc.fi)
-		if err := pi.Finalize(); err != nil {
-			t.Fatal(err)
-		}
-		expectedDevice := pi.Device()
-		expectedInodes := pi.Inodes()
+
+		expectedDevice, _ := pi.DevIno()
 		for _, fn := range []prefixinfo.RoundTripper{
 			prefixinfo.GobRoundTrip, prefixinfo.BinaryRoundTrip,
 		} {
@@ -152,11 +149,23 @@ func TestBinaryEncoding(t *testing.T) {
 
 			scanAndMatchGroups(t, &pi, gid+1, tc.gid1s)
 
-			if got, want := npi.Device(), expectedDevice; got != want {
+			dev, ino := npi.DevIno()
+			if got, want := dev, expectedDevice; got != want {
 				t.Errorf("got %v, want %v", got, want)
 			}
-			if got, want := npi.Inodes(), expectedInodes; !slices.Equal(got, want) {
+			if got, want := ino, uint64(200); got != want {
 				t.Errorf("got %v, want %v", got, want)
+			}
+
+			for _, fi := range npi.InfoList() {
+				_, _, dev, ino := pi.SysInfo(fi)
+				if got, want := dev, expectedDevice; got != want {
+					t.Errorf("got %v, want %v", got, want)
+				}
+				if got, want := ino, uint64(100); got != want {
+					t.Errorf("got %v, want %v", got, want)
+				}
+
 			}
 		}
 	}
@@ -207,9 +216,6 @@ func TestStats(t *testing.T) {
 		pi := prefixinfo.TestdataNewPrefixInfo(t, "dir", 1, 0700, modTime, uid, gid, 33, 100)
 		pi.AppendInfoList(tc.fi)
 		pi.AppendInfoList(tc.fd)
-		if err := pi.Finalize(); err != nil {
-			t.Fatal(err)
-		}
 
 		totals, us, gs, err := pi.ComputeStats(times2{}, boolexpr.T{})
 		if err != nil {
