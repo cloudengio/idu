@@ -27,7 +27,7 @@ func TestBatch(t *testing.T) {
 	mc := bdb.MaxBatchCount()
 	t.Logf("max batch count: %v", mc)
 	for i := int64(0); i < (mc*2)+3; i++ {
-		db.SetBatch(ctx, fmt.Sprintf("/%08v", i), []byte(fmt.Sprintf("%08v", i)))
+		db.Set(ctx, fmt.Sprintf("/%08v", i), []byte(fmt.Sprintf("%08v", i)), true)
 	}
 	if err := db.Close(ctx); err != nil {
 		t.Fatal(err)
