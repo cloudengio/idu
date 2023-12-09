@@ -26,7 +26,7 @@ func getSysInfo(fi file.Info) (uid, gid uint32, dev, ino uint64, ok bool) {
 
 // NewSysInfo is intended to be used by tests.
 func NewSysInfo(uid, gid uint32, dev, ino uint64) any {
-	return &syscall.Stat_t{Uid: uid, Gid: gid, Dev: int32(dev), Ino: ino}
+	return &syscall.Stat_t{Uid: uid, Gid: gid, Dev: dev, Ino: ino}
 }
 
 func (pi *T) SysInfo(fi file.Info) (userID, groupID uint32, dev, ino uint64) {

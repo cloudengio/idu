@@ -7,8 +7,6 @@
 package prefixinfo
 
 import (
-	"syscall"
-
 	"cloudeng.io/file"
 )
 
@@ -44,8 +42,6 @@ func (pi *T) SysInfo(fi file.Info) (userID, groupID uint32, dev, ino uint64) {
 		return pi.userID, pi.groupID, 0, uint64(s)
 	case idAndIno:
 		return s.uid, s.gid, pi.device, s.ino
-	case *syscall.Stat_t:
-		return s.Uid, s.Gid, uint64(s.Dev), s.Ino
 	}
 	return pi.userID, pi.groupID, 0, 0
 }
