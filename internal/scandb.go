@@ -176,7 +176,7 @@ func (sdb *scanDB) GetPrefixInfo(ctx context.Context, key string, pi *prefixinfo
 	buf := bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	defer bufPool.Put(buf)
-	if err := sdb.db.GetBuf(ctx, key, buf); err != nil {
+	if err := sdb.db.Get(ctx, key, buf); err != nil {
 		return false, err
 	}
 	if len(buf.Bytes()) == 0 {
@@ -190,7 +190,6 @@ func (sdb *scanDB) SetPrefixInfo(ctx context.Context, key string, unchanged bool
 	if unchanged {
 		return nil
 	}
-
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -202,7 +201,7 @@ func (sdb *scanDB) SetPrefixInfo(ctx context.Context, key string, unchanged bool
 	if err := pi.AppendBinary(buf); err != nil {
 		return err
 	}
-	return sdb.db.SetBatch(ctx, key, buf.Bytes())
+	return sdb.db.Set(ctx, key, buf.Bytes(), true)
 }
 
 func (sdb *scanDB) Close(ctx context.Context) error {
