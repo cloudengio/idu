@@ -60,7 +60,7 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 			}
 		}
 		for _, fi := range pi.InfoList() {
-			uid, gid := pi.UserGroupInfo(fi)
+			uid, gid, _, _ := pi.SysInfo(fi)
 			fid := boolexpr.NewFileInfoUserGroup(fi, uid, gid)
 			n := fid.Name()
 			if expr.Eval(fid) {

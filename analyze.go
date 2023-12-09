@@ -323,12 +323,6 @@ func (w *walker) Done(ctx context.Context, state *prefixState, prefix string, er
 		w.dbLogErr(ctx, prefix, []byte(err.Error()))
 	}
 
-	if err := state.current.Finalize(); err != nil {
-		internal.Log(ctx, internal.LogPrefix, "prefix done", "prefix", w.cfg.Prefix, "path", prefix, "error", err)
-		w.dbLogErr(ctx, prefix, []byte(err.Error()))
-		return err
-	}
-
 	defer func(state *prefixState) {
 		internal.Log(ctx, internal.LogPrefix, "prefix done",
 			"prefix", w.cfg.Prefix,

@@ -24,7 +24,7 @@ import (
 )
 
 func newInfo(name string, size int64, mode fs.FileMode, modTime time.Time, uid, gid uint32) file.Info {
-	return file.NewInfo(name, size, mode, modTime, prefixinfo.SysInfo(uid, gid, 0, 0))
+	return file.NewInfo(name, size, mode, modTime, prefixinfo.NewSysInfo(uid, gid, 0, 0))
 }
 
 func createPrefixInfo(t *testing.T, uid, gid uint32, name string, contents ...[]file.Info) prefixinfo.T {
@@ -36,9 +36,6 @@ func createPrefixInfo(t *testing.T, uid, gid uint32, name string, contents ...[]
 	}
 	for _, c := range contents {
 		pi.AppendInfoList(c)
-	}
-	if err := pi.Finalize(); err != nil {
-		t.Fatal(err)
 	}
 	return pi
 }
@@ -67,9 +64,6 @@ func (ts *testStats) update(bytes, storageBytes, files, prefixes, prefixBytes in
 func computeStats(t *testing.T, sdb *reports.AllStats, calc diskusage.Calculator, keys []string, expr boolexpr.T, pis ...prefixinfo.T) {
 	for i, pi := range pis {
 		k := keys[i]
-		if err := pi.Finalize(); err != nil {
-			t.Fatal(err)
-		}
 		if err := sdb.Update(k, pi, calc, expr); err != nil {
 			t.Fatal(err)
 		}
