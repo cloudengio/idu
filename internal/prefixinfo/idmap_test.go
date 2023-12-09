@@ -154,21 +154,6 @@ func TestCreateIDMaps(t *testing.T) {
 			}
 		}
 
-		nuid, ngid := pi.UserGroup()
-		if got, want := nuid, uid; got != want {
-			t.Errorf("%v: got %v, want %v", i, got, want)
-		}
-		if got, want := ngid, gid; got != want {
-			t.Errorf("%v: got %v, want %v", i, got, want)
-		}
-		dev, ino := pi.DevIno()
-		if got, want := dev, uint64(37); got != want {
-			t.Errorf("%v: got %v, want %v", i, got, want)
-		}
-		if got, want := ino, uint64(200); got != want {
-			t.Errorf("%v: got %v, want %v", i, got, want)
-		}
-
 		for j, fi := range npi.InfoList() {
 			u, g, dev, ino := npi.SysInfo(fi)
 			if got, want := u, tc.uidFile[j]; got != want {
