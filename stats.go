@@ -81,10 +81,6 @@ type viewFlags struct {
 	Info  bool   `subcmd:"info,false,display metadata for the stats file"`
 }
 
-type extractFlags struct {
-	StatsDir string `subcmd:"stats-dir,stats,'directory that stats files are written to'"`
-}
-
 func (st *statsCmds) compute(ctx context.Context, values interface{}, args []string) error {
 	cf := values.(*computeFlags)
 

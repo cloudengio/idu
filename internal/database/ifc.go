@@ -42,9 +42,6 @@ type DB interface {
 	// its contents in the supplied bytes.Buffer.
 	Get(ctx context.Context, prefix string, buf *bytes.Buffer) error
 
-	// Delete deletes the specified entries.
-	//Delete(ctx context.Context, keys ...string) error
-
 	// DeletePrefix deletes all keys that have the specified prefix.
 	DeletePrefix(ctx context.Context, prefix string) error
 

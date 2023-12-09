@@ -153,7 +153,7 @@ func (db *Database) get(ctx context.Context, key []byte, buf *bytes.Buffer) erro
 		return err
 	}
 	err := db.bdb.View(func(tx *badger.Txn) error {
-		item, err := tx.Get([]byte(key))
+		item, err := tx.Get(key)
 		if err != nil {
 			if err == badger.ErrKeyNotFound {
 				return nil
