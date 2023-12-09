@@ -81,10 +81,6 @@ type viewFlags struct {
 	Info  bool   `subcmd:"info,false,display metadata for the stats file"`
 }
 
-type extractFlags struct {
-	StatsDir string `subcmd:"stats-dir,stats,'directory that stats files are written to'"`
-}
-
 func (st *statsCmds) compute(ctx context.Context, values interface{}, args []string) error {
 	cf := values.(*computeFlags)
 
@@ -119,36 +115,6 @@ func (st *statsCmds) compute(ctx context.Context, values interface{}, args []str
 		Stats:      sdb,
 	}
 	return saveStats(cf.StatsDir, stats)
-}
-
-func (st *statsCmds) extract(ctx context.Context, values interface{}, args []string) error {
-	ef := values.(*extractFlags)
-	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
-	if err != nil {
-		return err
-	}
-	defer db.Close(ctx)
-
-	var from time.Time
-	to := time.Now()
-	return db.VisitStats(ctx, from, to,
-		func(_ context.Context, when time.Time, detail []byte) bool {
-			var sdb reports.AllStats
-			if err := gob.NewDecoder(bytes.NewBuffer(detail)).Decode(&sdb); err != nil {
-				fmt.Fprintf(os.Stderr, "failed to decode stats for %v: %v\n", when, err)
-				return false
-			}
-			stats := statsFileFormat{
-				Prefix:     args[0],
-				Date:       when,
-				Expression: "",
-				Stats:      &sdb,
-			}
-			if err := saveStats(ef.StatsDir, stats); err != nil {
-				fmt.Fprintf(os.Stderr, "failed to save stats for %v: %v\n", when, err)
-			}
-			return true
-		})
 }
 
 func (st *statsCmds) computeStats(ctx context.Context, db database.DB, expr boolexpr.T, prefix string, calc diskusage.Calculator, topN int, progress bool) (*reports.AllStats, error) {

@@ -35,7 +35,7 @@ func (l *lister) errors(ctx context.Context, values interface{}, args []string) 
 	}
 	defer db.Close(ctx)
 	if ef.Erase {
-		return db.Clear(ctx, false, true, false)
+		return db.Clear(ctx, false, true)
 	}
 
 	return db.VisitErrors(ctx, args[0],
@@ -54,7 +54,7 @@ func (l *lister) logs(ctx context.Context, values interface{}, args []string) er
 	defer db.Close(ctx)
 
 	if lf.Erase {
-		return db.Clear(ctx, false, true, false)
+		return db.Clear(ctx, false, true)
 	}
 
 	from, to, _, err := lf.TimeRangeFlags.FromTo()

@@ -44,7 +44,7 @@ func populateDatabase(t *testing.T, db database.DB, nItems int) {
 	ctx := context.Background()
 	defer db.Close(ctx)
 	for i := 0; i < nItems; i++ {
-		if err := db.Set(ctx, fmt.Sprintf("/a/%02v", i), []byte(fmt.Sprintf("a%v", i))); err != nil {
+		if err := db.Set(ctx, fmt.Sprintf("/a/%02v", i), []byte(fmt.Sprintf("a%v", i)), false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -52,7 +52,7 @@ func populateDatabase(t *testing.T, db database.DB, nItems int) {
 	go func() {
 		defer close(ch)
 		for i := 0; i < nItems; i++ {
-			if err := db.SetBatch(ctx, fmt.Sprintf("/z/%02v", i), []byte(fmt.Sprintf("z%v", i))); err != nil {
+			if err := db.Set(ctx, fmt.Sprintf("/z/%02v", i), []byte(fmt.Sprintf("z%v", i)), true); err != nil {
 				ch <- err
 				return
 			}
@@ -120,7 +120,7 @@ func testScan(t *testing.T, factory databaseFactory) {
 	sort.Strings(found)
 	validatePopulatedDatabase(t, found, nItems)
 
-	// Scan can be ised to implement a range scan.
+	// Scan can be used to implement a range scan.
 	found = []string{}
 	err = db.Scan(ctx, "/z/03", func(_ context.Context, k string, v []byte) bool {
 		found = append(found, k+string(v))
@@ -352,7 +352,7 @@ func testDelete(t *testing.T, factory databaseFactory) {
 		keys = append(keys, fmt.Sprintf("/%03v", i))
 	}
 	for _, k := range keys {
-		if err := db.Set(ctx, k, []byte(k)); err != nil {
+		if err := db.Set(ctx, k, []byte(k), false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -369,28 +369,7 @@ func testDelete(t *testing.T, factory databaseFactory) {
 		return keys
 	}
 
-	left := []string{}
-	rmIdx := []int{27, 38, 41}
-	rmKeys := []string{}
-	for _, i := range rmIdx {
-		rmKeys = append(rmKeys, fmt.Sprintf("/%03v", i))
-	}
-
-	for i := 0; i < nItems; i++ {
-		if !slices.Contains(rmIdx, i) {
-			left = append(left, keys[i])
-		}
-	}
-
-	if err := db.Delete(ctx, rmKeys...); err != nil {
-		t.Fatal(err)
-	}
-
-	if got, want := scan(), left; !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v, want %v", got, want)
-	}
-
-	left = slices.Delete(left, 10, 20)
+	left := slices.Delete(keys, 10, 20)
 	if err := db.DeletePrefix(ctx, "/01"); err != nil {
 		t.Fatal(err)
 	}
@@ -399,9 +378,10 @@ func testDelete(t *testing.T, factory databaseFactory) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
-	if err := db.Delete(ctx, "notthere"); err != nil {
+	if err := db.DeletePrefix(ctx, "notthere"); err != nil {
 		t.Fatal(err)
 	}
+
 }
 
 func TestExists(t *testing.T) {
@@ -414,12 +394,12 @@ func testExists(t *testing.T, factory databaseFactory) {
 	tmpdir := t.TempDir()
 	db := factory(t, tmpdir, prefix, false)
 	defer db.Close(ctx)
-
-	k, err := db.Get(ctx, "/a/b/c")
+	var buf bytes.Buffer
+	err := db.Get(ctx, "/a/b/c", &buf)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if k != nil {
+	if k := buf.Bytes(); k != nil {
 		t.Errorf("got %v, want nil", k)
 	}
 }
