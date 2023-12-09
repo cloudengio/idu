@@ -254,7 +254,10 @@ func (db *Database) DeleteErrors(ctx context.Context, prefix string) error {
 
 var errScanDone = errors.New("scan done")
 
-func (db *Database) scanFrom(ctx context.Context, prefix []byte, visitor func(ctx context.Context, key string, val []byte) error) error {
+func (db *Database) scanFrom(ctx context.Context, bucket byte, prefix []byte, visitor func(ctx context.Context, key string, val []byte) error) error {
+	kb := keyForBucket(bucket, prefix)
+	defer bufPool.Put(kb)
+	prefix = kb.Bytes()
 	return db.bdb.View(func(tx *badger.Txn) error {
 		it := tx.NewIterator(badger.DefaultIteratorOptions)
 		defer it.Close()
@@ -263,7 +266,7 @@ func (db *Database) scanFrom(ctx context.Context, prefix []byte, visitor func(ct
 		} else {
 			it.Rewind()
 		}
-		for it.Seek(prefix); it.Valid(); it.Next() {
+		for ; it.Valid(); it.Next() {
 			item := it.Item()
 			k := item.Key()
 			err := item.Value(func(v []byte) error {
@@ -319,7 +322,7 @@ func (db *Database) scanTimeRange(ctx context.Context, bucket byte, start, stop 
 }
 
 func (db *Database) Scan(ctx context.Context, path string, visitor func(ctx context.Context, key string, val []byte) bool) error {
-	return db.scanFrom(ctx, []byte(path), func(ctx context.Context, key string, val []byte) error {
+	return db.scanFrom(ctx, prefixBucket, []byte(path), func(ctx context.Context, key string, val []byte) error {
 		if key[0] != prefixBucket {
 			return nil
 		}
@@ -332,7 +335,9 @@ func (db *Database) Scan(ctx context.Context, path string, visitor func(ctx cont
 
 func (db *Database) Stream(ctx context.Context, path string, visitor func(ctx context.Context, key string, val []byte)) error {
 	stream := db.bdb.NewStream()
-	stream.Prefix = []byte(path)
+	kb := keyForBucket(prefixBucket, []byte(path))
+	defer bufPool.Put(kb)
+	stream.Prefix = kb.Bytes()
 	stream.ChooseKey = func(item *badger.Item) bool {
 		return item.Key()[0] == prefixBucket
 	}
@@ -375,9 +380,7 @@ func (db *Database) LogError(ctx context.Context, key string, when time.Time, de
 
 func (db *Database) VisitErrors(ctx context.Context, key string,
 	visitor func(ctx context.Context, key string, when time.Time, detail []byte) bool) error {
-	kb := keyForBucket(errorBucket, []byte(key))
-	defer bufPool.Put(kb)
-	return db.scanFrom(ctx, kb.Bytes(), func(ctx context.Context, key string, val []byte) error {
+	return db.scanFrom(ctx, errorBucket, []byte(key), func(ctx context.Context, key string, val []byte) error {
 		if key[0] != errorBucket {
 			return errScanDone
 		}

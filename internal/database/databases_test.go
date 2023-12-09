@@ -68,8 +68,6 @@ func populateDatabase(t *testing.T, db database.DB, nItems int) {
 }
 
 func validatePopulatedDatabase(t *testing.T, found []string, nItems int) {
-	fmt.Printf("N ITEMS: %v\n", nItems)
-	fmt.Printf("found: %v - %v\n", len(found), found)
 	n, p := 0, "a"
 	for i := 0; i < nItems*2; i++ {
 		k, v := fmt.Sprintf("/%v/%02v", p, n), fmt.Sprintf("%v%v", p, n)
@@ -122,7 +120,7 @@ func testScan(t *testing.T, factory databaseFactory) {
 	sort.Strings(found)
 	validatePopulatedDatabase(t, found, nItems)
 
-	// Scan can be ised to implement a range scan.
+	// Scan can be used to implement a range scan.
 	found = []string{}
 	err = db.Scan(ctx, "/z/03", func(_ context.Context, k string, v []byte) bool {
 		found = append(found, k+string(v))

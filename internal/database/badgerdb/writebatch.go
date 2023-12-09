@@ -5,6 +5,8 @@
 package badgerdb
 
 import (
+	"slices"
+
 	"github.com/dgraph-io/badger/v4"
 )
 
@@ -25,9 +27,9 @@ func newWriteBatch(bdb *badger.DB) *writeBatch {
 }
 
 func (wb *writeBatch) set(key, value []byte) error {
-	v := make([]byte, len(value))
-	copy(v, value)
-	return wb.batch.Set(key, v)
+	k := slices.Clone(key)
+	v := slices.Clone(value)
+	return wb.batch.Set(k, v)
 }
 
 func (wb *writeBatch) flush() error {
