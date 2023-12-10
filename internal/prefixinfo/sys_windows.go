@@ -42,6 +42,8 @@ func (pi *T) SysInfo(fi file.Info) (userID, groupID uint32, dev, ino uint64) {
 		return pi.userID, pi.groupID, 0, uint64(s)
 	case idAndIno:
 		return s.uid, s.gid, pi.device, s.ino
+	case *sysinfo:
+		return s.uid, s.gid, s.dev, s.ino
 	}
 	return pi.userID, pi.groupID, 0, 0
 }
