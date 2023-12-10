@@ -25,7 +25,7 @@ func getSysInfo(fi file.Info) (uid, gid uint32, dev, ino uint64, ok bool) {
 
 func (pi *T) SysInfo(fi file.Info) (userID, groupID uint32, dev, ino uint64) {
 	if fi.Sys() == nil {
-		return pi.userID, pi.groupID, 0, 0
+		return pi.userID, pi.groupID, pi.device, 0
 	}
 	switch s := fi.Sys().(type) {
 	case inoOnly:
