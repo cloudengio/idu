@@ -30,10 +30,7 @@ func newInfo(name string, size int64, mode fs.FileMode, modTime time.Time, uid, 
 func createPrefixInfo(t *testing.T, uid, gid uint32, name string, contents ...[]file.Info) prefixinfo.T {
 	now := time.Now().Truncate(0)
 	info := newInfo(name, 3, 0700, now.Truncate(0), uid, gid)
-	pi, err := prefixinfo.New(info)
-	if err != nil {
-		t.Fatal(err)
-	}
+	pi := prefixinfo.New(info)
 	for _, c := range contents {
 		pi.AppendInfoList(c)
 	}

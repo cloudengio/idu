@@ -40,11 +40,8 @@ type T struct {
 // determine the uid, gid, device and inode from the supplied file.Info assuming
 // that it was created by a call to LStat or Stat rather than being obtained
 // from the database.
-func New(info file.Info) (T, error) {
-	uid, gid, dev, ino, ok := getSysInfo(info)
-	if !ok {
-		return T{}, fmt.Errorf("no system info available for %v", info.Name())
-	}
+func New(info file.Info) T {
+	uid, gid, dev, ino := getSysInfo(info)
 	return T{
 		userID:  uid,
 		groupID: gid,
@@ -53,7 +50,7 @@ func New(info file.Info) (T, error) {
 		size:    info.Size(),
 		modTime: info.ModTime(),
 		mode:    info.Mode(),
-	}, nil
+	}
 }
 
 func (pi *T) SetInfoList(entries file.InfoList) {

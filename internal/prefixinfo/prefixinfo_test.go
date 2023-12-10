@@ -111,7 +111,7 @@ func TestBinaryEncoding(t *testing.T) {
 		{ug11, []string{"0"}, []string{"0"}, []string{"1"}, []string{"1"}},
 		{ugOther, []string{}, []string{}, []string{"0", "1"}, []string{"0", "1"}},
 	} {
-		pi := prefixinfo.TestdataNewPrefixInfo(t, "dir", 1, 0700, modTime, uid, gid, 33, 200)
+		pi := prefixinfo.TestdataNewPrefixInfo("dir", 1, 0700, modTime, uid, gid, 33, 200)
 		pi.AppendInfoList(tc.fi)
 
 		expectedDevice, _ := pi.DevIno()
@@ -213,7 +213,7 @@ func TestStats(t *testing.T) {
 		{ug11, ug11d, []uint32{uid, uid + 1}, []uint32{gid, gid + 1}, 3},
 		{ugOther, ugOtherd, []uint32{uid + 1}, []uint32{gid + 1}, 4},
 	} {
-		pi := prefixinfo.TestdataNewPrefixInfo(t, "dir", 1, 0700, modTime, uid, gid, 33, 100)
+		pi := prefixinfo.TestdataNewPrefixInfo("dir", 1, 0700, modTime, uid, gid, 33, 100)
 		pi.AppendInfoList(tc.fi)
 		pi.AppendInfoList(tc.fd)
 

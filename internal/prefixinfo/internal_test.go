@@ -95,13 +95,8 @@ func TestdataNewInfo(name string, size int64, mode fs.FileMode, modTime time.Tim
 	return file.NewInfo(name, size, mode, modTime, NewSysInfo(uid, gid, device, inode))
 }
 
-func TestdataNewPrefixInfo(t *testing.T, name string, size int64, mode fs.FileMode, modTime time.Time, uid, gid uint32, dev, inode uint64) T {
-	fi := TestdataNewInfo(name, size, mode, modTime, uid, gid, dev, inode)
-	pi, err := New(fi)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return pi
+func TestdataNewPrefixInfo(name string, size int64, mode fs.FileMode, modTime time.Time, uid, gid uint32, dev, inode uint64) T {
+	return New(TestdataNewInfo(name, size, mode, modTime, uid, gid, dev, inode))
 }
 
 func IDsFromStats(s StatsList) []uint32 {
