@@ -207,12 +207,7 @@ func (w *walker) handlePrefix(ctx context.Context, state *prefixState, prefix st
 	}
 
 	// info was obtained via lstat/stat and hence will have uid/gid information.
-	current, err := prefixinfo.New(info)
-	if err != nil {
-		w.dbLogErr(ctx, prefix, []byte(err.Error()))
-		return true, false, err
-	}
-	state.current = current
+	state.current = prefixinfo.New(info)
 
 	ok, err := w.db.GetPrefixInfo(ctx, prefix, &state.existing)
 	if !ok {
@@ -321,12 +316,6 @@ func (w *walker) Done(ctx context.Context, state *prefixState, prefix string, er
 			"path", prefix,
 			"error", err)
 		w.dbLogErr(ctx, prefix, []byte(err.Error()))
-	}
-
-	if err := state.current.Finalize(); err != nil {
-		internal.Log(ctx, internal.LogPrefix, "prefix done", "prefix", w.cfg.Prefix, "path", prefix, "error", err)
-		w.dbLogErr(ctx, prefix, []byte(err.Error()))
-		return err
 	}
 
 	defer func(state *prefixState) {

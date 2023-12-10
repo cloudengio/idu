@@ -99,7 +99,7 @@ func TestCreateIDMaps(t *testing.T) {
 	modTime := time.Now().Truncate(0)
 
 	var uid, gid uint32 = 100, 1
-	ug00, ug10, ug01, ug11, ugOther := TestdataIDCombinationsFiles(modTime, uid, gid, 0)
+	ug00, ug10, ug01, ug11, ugOther := TestdataIDCombinationsFiles(modTime, uid, gid, 100)
 
 	for i, tc := range []struct {
 		fi                   []file.Info
@@ -125,15 +125,9 @@ func TestCreateIDMaps(t *testing.T) {
 			[]uint32{uid + 1, uid + 1}, []uint32{gid + 1, gid + 1},
 			[]uint32{uid + 1, uid + 1}, []uint32{gid + 1, gid + 1}},
 	} {
-		info := TestdataNewInfo("dir", 1, 0700, time.Now().Truncate(0), uid, gid, 0, 0)
-		pi, err := New(info)
-		if err != nil {
-			t.Fatal(err)
-		}
+		info := TestdataNewInfo("dir", 1, 0700, time.Now().Truncate(0), uid, gid, 37, 200)
+		pi := New(info)
 		pi.AppendInfoList(tc.fi)
-		if err := pi.Finalize(); err != nil {
-			t.Fatal(err)
-		}
 
 		npi := BinaryRoundTrip(t, &pi)
 
@@ -158,12 +152,48 @@ func TestCreateIDMaps(t *testing.T) {
 		}
 
 		for j, fi := range npi.InfoList() {
-			u, g := npi.UserGroupInfo(fi)
+			u, g, dev, ino := npi.SysInfo(fi)
 			if got, want := u, tc.uidFile[j]; got != want {
 				t.Errorf("%v: %v: got %v, want %v", i, j, got, want)
 			}
 			if got, want := g, tc.gidFile[j]; got != want {
 				t.Errorf("%v: %v: got %v, want %v", i, j, got, want)
+			}
+			if got, want := dev, uint64(37); got != want {
+				t.Errorf("%v: %v: got %v, want %v", i, j, got, want)
+			}
+			if got, want := ino, uint64(100); got != want {
+				t.Errorf("%v: %v: got %v, want %v", i, j, got, want)
+			}
+		}
+	}
+}
+
+func TestSysTypes(t *testing.T) {
+	var uid, gid uint32 = 100, 1
+	modTime := time.Now().Truncate(0)
+
+	info := TestdataNewInfo("dir", 1, 0700, modTime, uid, gid, 37, 200)
+	pi := New(info)
+	ug00, ug10, ug01, ug11, ugOther := TestdataIDCombinationsFiles(modTime, uid, gid, 100)
+
+	pi.AppendInfoList(ug00)
+	_, _, _, _ = ug01, ug10, ug11, ugOther
+
+	npi := BinaryRoundTrip(t, &pi)
+	for _, fi := range npi.InfoList() {
+		if _, ok := fi.Sys().(inoOnly); !ok {
+			t.Errorf("expected inoOnly, got %T", fi.Sys())
+		}
+	}
+
+	for _, tc := range [][]file.Info{ug10, ug01, ug11, ugOther} {
+		pi := New(info)
+		pi.AppendInfoList(tc)
+		npi := BinaryRoundTrip(t, &pi)
+		for _, fi := range npi.InfoList() {
+			if _, ok := fi.Sys().(idAndIno); !ok {
+				t.Errorf("expected idAndIno, got %T", fi.Sys())
 			}
 		}
 	}
