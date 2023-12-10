@@ -33,8 +33,9 @@ func TestUserInfo(t *testing.T) {
 	uid, gid, _, _ := pi.SysInfo(fi)
 	ouid, ogid := os.Getuid(), os.Getgid()
 	if ouid == -1 {
-		// Windows returns uid and gid as -1
-		ouid, ogid = 0, 0
+		// Windows returns uid and gid as -1, so this is really
+		// a pointless test on windows.
+		ouid, ogid = int(uid), int(gid)
 	}
 
 	if got, want := int(uid), ouid; got != want {

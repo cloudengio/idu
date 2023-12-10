@@ -12,15 +12,15 @@ import (
 	"cloudeng.io/file"
 )
 
-func getSysInfo(fi file.Info) (uid, gid uint32, dev, ino uint64, ok bool) {
+func getSysInfo(fi file.Info) (uid, gid uint32, dev, ino uint64) {
 	si := fi.Sys()
 	if si == nil {
-		return 0, 0, 0, 0, false
+		return 0, 0, 0, 0
 	}
 	if s, ok := si.(*syscall.Stat_t); ok {
-		return s.Uid, s.Gid, uint64(s.Dev), s.Ino, true
+		return s.Uid, s.Gid, uint64(s.Dev), s.Ino
 	}
-	return 0, 0, 0, 0, false
+	return 0, 0, 0, 0
 }
 
 func (pi *T) SysInfo(fi file.Info) (userID, groupID uint32, dev, ino uint64) {

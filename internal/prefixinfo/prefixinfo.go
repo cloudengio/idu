@@ -43,7 +43,7 @@ type T struct {
 func New(info file.Info) (T, error) {
 	uid, gid, dev, ino, ok := getSysInfo(info)
 	if !ok {
-		return T{}, fmt.Errorf("no system available info for %v", info.Name())
+		return T{}, fmt.Errorf("no system info available for %v", info.Name())
 	}
 	return T{
 		userID:  uid,

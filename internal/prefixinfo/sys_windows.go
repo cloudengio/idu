@@ -16,16 +16,16 @@ type sysinfo struct {
 	ino      uint64
 }
 
-func getSysInfo(fi file.Info) (uid, gid uint32, dev, ino uint64, ok bool) {
+func getSysInfo(fi file.Info) (uid, gid uint32, dev, ino uint64) {
 	si := fi.Sys()
 	if si == nil {
-		return 0, 0, 0, 0, false
+		return 0, 0, 0, 0
 	}
 	switch s := si.(type) {
 	case *sysinfo:
-		return s.uid, s.gid, s.dev, s.ino, true
+		return s.uid, s.gid, s.dev, s.ino
 	}
-	return 0, 0, 0, 0, false
+	return 0, 0, 0, 0
 }
 
 // NewSysInfo is intended to be used by tests.
