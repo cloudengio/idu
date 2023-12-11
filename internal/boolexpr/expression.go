@@ -51,18 +51,23 @@ func (m Matcher) Prefix(prefix string, info *prefixinfo.T) bool {
 	return m.Eval(named)
 }
 
-type withids struct {
-	pi *prefixinfo.T
+type withsys struct {
+	*prefixinfo.T
 	fi file.Info
 }
 
-func (w withids) UserGroup() (uid, gid uint32) {
-	uid, gid, _, _ = w.pi.SysInfo(w.fi)
+func (w withsys) UserGroup() (uid, gid uint32) {
+	uid, gid, _, _ = w.SysInfo(w.fi)
+	return
+}
+
+func (w withsys) DevIno() (dev, ino uint64) {
+	_, _, dev, ino = w.SysInfo(w.fi)
 	return
 }
 
 func (m Matcher) Entry(prefix string, info *prefixinfo.T, fi file.Info) bool {
-	return m.Eval(withids{info, fi})
+	return m.Eval(withsys{info, fi})
 }
 
 type AlwaysTrue struct{}
