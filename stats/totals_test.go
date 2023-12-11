@@ -7,6 +7,7 @@ package stats_test
 import (
 	"reflect"
 	"slices"
+	"sort"
 	"testing"
 	"time"
 
@@ -69,6 +70,9 @@ func TestTotals(t *testing.T) {
 
 		totals, us, gs := stats.ComputeTotals("", &pi, times2{}, boolexpr.AlwaysTrue{})
 
+		sort.Slice(us, func(i, j int) bool { return us[i].ID < us[j].ID })
+		sort.Slice(gs, func(i, j int) bool { return gs[i].ID < gs[j].ID })
+
 		if got, want := totals, (stats.Totals{Files: 2, Prefixes: 2, Bytes: 3, StorageBytes: 3 * 2, PrefixBytes: 3}); !reflect.DeepEqual(got, want) {
 			t.Errorf("got %#v, want %#v", got, want)
 		}
@@ -110,6 +114,7 @@ func TestTotals(t *testing.T) {
 		if got, want := IDsFromStats(us), tc.uids; !slices.Equal(got, want) {
 			t.Errorf("got %v, want %v", got, want)
 		}
+
 		if got, want := IDsFromStats(gs), tc.gids; !slices.Equal(got, want) {
 			t.Errorf("got %v, want %v", got, want)
 		}
