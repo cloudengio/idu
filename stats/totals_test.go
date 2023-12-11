@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"cloudeng.io/cmd/idu/internal/boolexpr"
-	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/internal/testutil"
 	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/file"
@@ -25,10 +24,6 @@ func (times2) Calculate(n int64) int64 { return n * 2 }
 func (times2) String() string {
 	return "plus10"
 }
-
-type alwaystrue struct{}
-
-func (alwaystrue) Eval(pi *prefixinfo.T, fi *file.Info) bool { return true }
 
 func TestTotals(t *testing.T) {
 	modTime := time.Now().Truncate(0)
