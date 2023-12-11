@@ -8,12 +8,11 @@ import (
 	"fmt"
 	"reflect"
 	"runtime"
-	"slices"
 	"testing"
 	"time"
 
-	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
+	"cloudeng.io/cmd/idu/internal/testutil"
 	"cloudeng.io/file"
 )
 
@@ -98,7 +97,7 @@ func TestBinaryEncoding(t *testing.T) {
 	modTime := time.Now().Truncate(0)
 	var uid, gid uint32 = 100, 2
 
-	ug00, ug10, ug01, ug11, ugOther := prefixinfo.TestdataIDCombinationsFiles(modTime, uid, gid, 100)
+	ug00, ug10, ug01, ug11, ugOther := testutil.TestdataIDCombinationsFiles(modTime, uid, gid, 100)
 
 	for _, tc := range []struct {
 		fi           []file.Info
@@ -111,7 +110,7 @@ func TestBinaryEncoding(t *testing.T) {
 		{ug11, []string{"0"}, []string{"0"}, []string{"1"}, []string{"1"}},
 		{ugOther, []string{}, []string{}, []string{"0", "1"}, []string{"0", "1"}},
 	} {
-		pi := prefixinfo.TestdataNewPrefixInfo("dir", 1, 0700, modTime, uid, gid, 33, 200)
+		pi := testutil.TestdataNewPrefixInfo("dir", 1, 0700, modTime, uid, gid, 33, 200)
 		pi.AppendInfoList(tc.fi)
 
 		expectedDevice, _ := pi.DevIno()
@@ -167,104 +166,6 @@ func TestBinaryEncoding(t *testing.T) {
 				}
 
 			}
-		}
-	}
-}
-
-type times2 struct{}
-
-func (times2) Calculate(n int64) int64 { return n * 2 }
-
-func (times2) String() string {
-	return "plus10"
-}
-
-func TestStats(t *testing.T) {
-	modTime := time.Now().Truncate(0)
-	var uid, gid uint32 = 100, 2
-
-	ug00, ug10, ug01, ug11, ugOther := prefixinfo.TestdataIDCombinationsFiles(modTime, uid, gid, 100)
-	ug00d, ug10d, ug01d, ug11d, ugOtherd := prefixinfo.TestdataIDCombinationsDirs(modTime, uid, gid, 200)
-
-	perUserStats := []prefixinfo.StatsList{
-		{{uid, 2, 2, 3, 6, 3}},
-		{{uid, 1, 1, 1, 2, 1}, {uid + 1, 1, 1, 2, 4, 2}},
-		{{uid, 2, 2, 3, 6, 3}},
-		{{uid, 1, 1, 1, 2, 1}, {uid + 1, 1, 1, 2, 4, 2}},
-		{{uid + 1, 2, 2, 3, 6, 3}},
-	}
-	perGroupStats := []prefixinfo.StatsList{
-		{{gid, 2, 2, 3, 6, 3}},
-		{{gid, 2, 2, 3, 6, 3}},
-		{{gid, 1, 1, 1, 2, 1}, {gid + 1, 1, 1, 2, 4, 2}},
-		{{gid, 1, 1, 1, 2, 1}, {gid + 1, 1, 1, 2, 4, 2}},
-		{{gid + 1, 2, 2, 3, 6, 3}},
-	}
-
-	for _, tc := range []struct {
-		fi         []file.Info
-		fd         []file.Info
-		uids, gids []uint32
-		perIDStats int
-	}{
-		{ug00, ug00d, []uint32{uid}, []uint32{gid}, 0},
-		{ug10, ug10d, []uint32{uid, uid + 1}, []uint32{gid}, 1},
-		{ug01, ug01d, []uint32{uid}, []uint32{gid, gid + 1}, 2},
-		{ug11, ug11d, []uint32{uid, uid + 1}, []uint32{gid, gid + 1}, 3},
-		{ugOther, ugOtherd, []uint32{uid + 1}, []uint32{gid + 1}, 4},
-	} {
-		pi := prefixinfo.TestdataNewPrefixInfo("dir", 1, 0700, modTime, uid, gid, 33, 100)
-		pi.AppendInfoList(tc.fi)
-		pi.AppendInfoList(tc.fd)
-
-		totals, us, gs, err := pi.ComputeStats(times2{}, boolexpr.T{})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if got, want := totals, (prefixinfo.Stats{Files: 2, Prefixes: 2, Bytes: 3, StorageBytes: 3 * 2, PrefixBytes: 3}); !reflect.DeepEqual(got, want) {
-			t.Errorf("got %#v, want %#v", got, want)
-		}
-
-		buf, err := totals.MarshalBinary()
-		if err != nil {
-			t.Fatal(err)
-		}
-		var nstats prefixinfo.Stats
-		if err := nstats.UnmarshalBinary(buf); err != nil {
-			t.Fatal(err)
-		}
-		if got, want := nstats, totals; !reflect.DeepEqual(got, want) {
-			t.Errorf("got %v, want %v", got, want)
-		}
-
-		for _, ugs := range []prefixinfo.StatsList{us, gs} {
-			var sum prefixinfo.Stats
-			for _, s := range ugs {
-				sum.Bytes += s.Bytes
-				sum.PrefixBytes += s.PrefixBytes
-				sum.Prefixes += s.Prefixes
-				sum.StorageBytes += s.StorageBytes
-				sum.Files += s.Files
-			}
-			if got, want := sum, totals; !reflect.DeepEqual(got, want) {
-				t.Errorf("got %v, want %v", got, want)
-			}
-		}
-
-		if got, want := us, perUserStats[tc.perIDStats]; !reflect.DeepEqual(got, want) {
-			t.Errorf("got %v, want %v", got, want)
-		}
-
-		if got, want := gs, perGroupStats[tc.perIDStats]; !reflect.DeepEqual(got, want) {
-			t.Errorf("got %v, want %v", got, want)
-		}
-
-		if got, want := prefixinfo.IDsFromStats(us), tc.uids; !slices.Equal(got, want) {
-			t.Errorf("got %v, want %v", got, want)
-		}
-		if got, want := prefixinfo.IDsFromStats(gs), tc.gids; !slices.Equal(got, want) {
-			t.Errorf("got %v, want %v", got, want)
 		}
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/internal/reports"
+	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/file"
 	"cloudeng.io/file/diskusage"
 	"golang.org/x/exp/maps"
@@ -29,7 +30,7 @@ func newInfo(name string, size int64, mode fs.FileMode, modTime time.Time, uid, 
 
 func createPrefixInfo(t *testing.T, uid, gid uint32, name string, contents ...[]file.Info) prefixinfo.T {
 	now := time.Now().Truncate(0)
-	info := newInfo(name, 3, 0700, now.Truncate(0), uid, gid)
+	info := newInfo(name, 3, fs.ModeDir|0700, now.Truncate(0), uid, gid)
 	pi := prefixinfo.New(info)
 	for _, c := range contents {
 		pi.AppendInfoList(c)
@@ -58,10 +59,10 @@ func (ts *testStats) update(bytes, storageBytes, files, prefixes, prefixBytes in
 	ts.prefixBytes += prefixBytes
 }
 
-func computeStats(t *testing.T, sdb *reports.AllStats, calc diskusage.Calculator, keys []string, expr boolexpr.T, pis ...prefixinfo.T) {
+func computeStats(t *testing.T, sdb *reports.AllStats, calc diskusage.Calculator, keys []string, match stats.Matcher, pis ...prefixinfo.T) {
 	for i, pi := range pis {
 		k := keys[i]
-		if err := sdb.Update(k, pi, calc, expr); err != nil {
+		if err := sdb.Update(k, pi, calc, match); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -162,6 +163,7 @@ func fib(n int) int64 {
 
 func TestReportStatsSingleID(t *testing.T) {
 
+	t.Fail()
 	calc := times2{}
 	var uid, gid uint32 = 100, 2
 
@@ -191,7 +193,7 @@ func TestReportStatsSingleID(t *testing.T) {
 		}
 
 		sdb := reports.NewAllStats("test", true, 5)
-		computeStats(t, sdb, calc, pikeys, boolexpr.T{}, pis...)
+		computeStats(t, sdb, calc, pikeys, boolexpr.AlwaysTrue{}, pis...)
 
 		compareIDs(t, sdb.PerUser.ByPrefix, tc.uid)
 		compareIDs(t, sdb.PerGroup.ByPrefix, tc.gid)
@@ -225,7 +227,7 @@ func TestReportStatsSingleID(t *testing.T) {
 		}
 
 		sdb = reports.NewAllStats("test", true, 5)
-		expr, err := boolexpr.CreateExpr(boolexpr.NewParser(), []string{"user=33"})
+		matcher, err := boolexpr.CreateMatcher(boolexpr.NewParser(), []string{"user=33"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -235,7 +237,7 @@ func TestReportStatsSingleID(t *testing.T) {
 			pikeys = append(pikeys, fmt.Sprintf("p%v", i))
 			totals.update(0, 0, 0, 0, 0)
 		}
-		computeStats(t, sdb, calc, pikeys, expr, pis...)
+		computeStats(t, sdb, calc, pikeys, matcher, pis...)
 		for _, h := range []*reports.Heaps[string]{
 			sdb.Prefix,
 			sdb.PerUser.ByPrefix[tc.uid],
@@ -299,7 +301,6 @@ func TestReportStatsMultipleIDs(t *testing.T) {
 			d := testStats{prefix: pikeys[i]}
 			d.update(fib(nf[i]), fib(nf[i])*2, int64(nf[i]), int64(nd[i]), fib(nd[i]))
 			perIDDetails[id] = append(perIDDetails[id], d)
-
 		}
 	}
 
@@ -315,17 +316,19 @@ func TestReportStatsMultipleIDs(t *testing.T) {
 			func(i, j int) bool { return prefixedOrdered[id][i].prefixes > prefixedOrdered[id][j].prefixes })
 	}
 
-	testAllIDs(t, pikeys, pis, totals, uids, gids, perIDTotals, sizeOrdered, fileOrdered, prefixedOrdered)
+	testAllIDs(t, pikeys, pis, totals, uids, gids, perIDTotals, sizeOrdered,
+		fileOrdered, prefixedOrdered)
 
 	testIDExpr(t, pikeys, pis, uids, gids, perIDTotals, sizeOrdered, fileOrdered, prefixedOrdered)
 }
 
-func testSingleID(t *testing.T, expr boolexpr.T, group bool, pikeys []string, pis []prefixinfo.T, id uint32, perIDTotal testStats, sizeOrdered, fileOrdered, prefixedOrdered []testStats) {
+func testSingleID(t *testing.T, match stats.Matcher, group bool, pikeys []string, pis []prefixinfo.T, id uint32, perIDTotal testStats, sizeOrdered, fileOrdered, prefixedOrdered []testStats) {
 	calc := times2{}
 
 	sdb := reports.NewAllStats("test", true, 5)
 
-	computeStats(t, sdb, calc, pikeys, expr, pis...)
+	computeStats(t, sdb, calc, pikeys, match, pis...)
+
 	compareHeapTotals(t, sdb.Prefix, perIDTotal)
 
 	comparePerIDTotals(t, sdb.PerUser, perIDTotal)
@@ -361,19 +364,19 @@ func testIDExpr(t *testing.T, pikeys []string, pis []prefixinfo.T, uids, gids []
 	parser := boolexpr.NewParser()
 
 	for _, uid := range uids {
-		expr, err := boolexpr.CreateExpr(parser, []string{fmt.Sprintf("user=%d", uid)})
+		matcher, err := boolexpr.CreateMatcher(parser, []string{fmt.Sprintf("type=d || user=%d", uid)})
 		if err != nil {
 			t.Fatal(err)
 		}
-		testSingleID(t, expr, false, pikeys, pis, uid, perIDTotals[uid], sizeOrdered[uid], fileOrdered[uid], prefixedOrdered[uid])
+		testSingleID(t, matcher, false, pikeys, pis, uid, perIDTotals[uid], sizeOrdered[uid], fileOrdered[uid], prefixedOrdered[uid])
 	}
 
 	for _, gid := range gids {
-		expr, err := boolexpr.CreateExpr(parser, []string{fmt.Sprintf("group=%d", gid)})
+		matcher, err := boolexpr.CreateMatcher(parser, []string{fmt.Sprintf("type=d || group=%d", gid)})
 		if err != nil {
 			t.Fatal(err)
 		}
-		testSingleID(t, expr, true, pikeys, pis, gid, perIDTotals[gid], sizeOrdered[gid], fileOrdered[gid], prefixedOrdered[gid])
+		testSingleID(t, matcher, true, pikeys, pis, gid, perIDTotals[gid], sizeOrdered[gid], fileOrdered[gid], prefixedOrdered[gid])
 	}
 }
 
@@ -381,7 +384,7 @@ func testAllIDs(t *testing.T, pikeys []string, pis []prefixinfo.T, totals testSt
 	calc := times2{}
 
 	sdb := reports.NewAllStats("test", true, 5)
-	computeStats(t, sdb, calc, pikeys, boolexpr.T{}, pis...)
+	computeStats(t, sdb, calc, pikeys, boolexpr.AlwaysTrue{}, pis...)
 
 	compareHeapTotals(t, sdb.Prefix, totals)
 

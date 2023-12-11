@@ -27,7 +27,7 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 
 	parser := boolexpr.NewParser()
 
-	expr, err := boolexpr.CreateExpr(parser, args[1:])
+	match, err := boolexpr.CreateMatcher(parser, args[1:])
 	if err != nil {
 		return err
 	}
@@ -51,8 +51,7 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 			return false
 		}
 
-		named := prefixinfo.NewNamed(k, pi)
-		if expr.Eval(named) {
+		if match.Prefix(k, &pi) {
 			if ff.Long {
 				fmt.Println(fs.FormatFileInfo(internal.PrefixInfoAsFSInfo(pi, k)))
 			} else {
@@ -60,14 +59,11 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 			}
 		}
 		for _, fi := range pi.InfoList() {
-			uid, gid, _, _ := pi.SysInfo(fi)
-			fid := boolexpr.NewFileInfoUserGroup(fi, uid, gid)
-			n := fid.Name()
-			if expr.Eval(fid) {
+			if match.Entry(k, &pi, fi) {
 				if ff.Long {
 					fmt.Println("    ", fs.FormatFileInfo(fi))
 				} else {
-					fmt.Printf("%v\n", k+sep+n)
+					fmt.Printf("%v\n", k+sep+fi.Name())
 				}
 			}
 		}

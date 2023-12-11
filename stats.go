@@ -86,7 +86,7 @@ func (st *statsCmds) compute(ctx context.Context, values interface{}, args []str
 
 	parser := boolexpr.NewParser()
 
-	expr, err := boolexpr.CreateExpr(parser, args[1:])
+	match, err := boolexpr.CreateMatcher(parser, args[1:])
 	if err != nil {
 		return err
 	}
@@ -100,7 +100,7 @@ func (st *statsCmds) compute(ctx context.Context, values interface{}, args []str
 		fmt.Printf("warning: computing and storing stats for %v and not for %v\n", cfg.Prefix, args[0])
 	}
 
-	sdb, err := st.computeStats(ctx, rdb, expr, cfg.Prefix, cfg.Calculator(), cf.ComputeN, cf.Progress)
+	sdb, err := st.computeStats(ctx, rdb, match, cfg.Prefix, cfg.Calculator(), cf.ComputeN, cf.Progress)
 	if err != nil {
 		rdb.Close(ctx)
 		return err
@@ -111,13 +111,13 @@ func (st *statsCmds) compute(ctx context.Context, values interface{}, args []str
 	stats := statsFileFormat{
 		Prefix:     args[0],
 		Date:       time.Now(),
-		Expression: expr.String(),
+		Expression: match.String(),
 		Stats:      sdb,
 	}
 	return saveStats(cf.StatsDir, stats)
 }
 
-func (st *statsCmds) computeStats(ctx context.Context, db database.DB, expr boolexpr.T, prefix string, calc diskusage.Calculator, topN int, progress bool) (*reports.AllStats, error) {
+func (st *statsCmds) computeStats(ctx context.Context, db database.DB, match boolexpr.Matcher, prefix string, calc diskusage.Calculator, topN int, progress bool) (*reports.AllStats, error) {
 
 	hasStorabeBytes := calc.String() != "identity"
 	sdb := reports.NewAllStats(prefix, hasStorabeBytes, topN)
@@ -133,7 +133,7 @@ func (st *statsCmds) computeStats(ctx context.Context, db database.DB, expr bool
 			fmt.Fprintf(os.Stderr, "failed to unmarshal value for %v: %v\n", k, err)
 			return
 		}
-		if err := sdb.Update(k, pi, calc, expr); err != nil {
+		if err := sdb.Update(k, pi, calc, match); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to compute stats for %v: %v\n", k, err)
 			return
 		}
