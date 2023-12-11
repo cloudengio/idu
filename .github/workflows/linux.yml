@@ -44,7 +44,10 @@ jobs:
         with:
           version: latest
 
-      - name: Vulnerabilities
+      - name: install govuln
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Vulnerabilities
+        run: |
           govulncheck ./...
