@@ -6,8 +6,8 @@ package reports
 
 import (
 	"cloudeng.io/algo/container/heap"
-	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
+	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/file/diskusage"
 )
 
@@ -49,8 +49,8 @@ type AllStats struct {
 	ByUser   *Heaps[uint32]
 	ByGroup  *Heaps[uint32]
 
-	userTotals  map[uint32]prefixinfo.Stats
-	groupTotals map[uint32]prefixinfo.Stats
+	userTotals  map[uint32]stats.Totals
+	groupTotals map[uint32]stats.Totals
 }
 
 func newHeaps[T comparable](prefix string, storageBytes bool, n int) *Heaps[T] {
@@ -192,12 +192,12 @@ func NewAllStats(prefix string, withStorageBytes bool, n int) *AllStats {
 		PerGroup:    newPerIDStats(prefix, withStorageBytes, n),
 		ByUser:      newHeaps[uint32](prefix, withStorageBytes, n),
 		ByGroup:     newHeaps[uint32](prefix, withStorageBytes, n),
-		userTotals:  map[uint32]prefixinfo.Stats{},
-		groupTotals: map[uint32]prefixinfo.Stats{},
+		userTotals:  map[uint32]stats.Totals{},
+		groupTotals: map[uint32]stats.Totals{},
 	}
 }
 
-func addToMap(stats map[uint32]prefixinfo.Stats, uid uint32, size, storageBytes, prefixBytes, files, children int64) {
+func addToMap(stats map[uint32]stats.Totals, uid uint32, size, storageBytes, prefixBytes, files, children int64) {
 	s := stats[uid]
 	s.Bytes += size
 	s.StorageBytes += storageBytes
@@ -207,14 +207,14 @@ func addToMap(stats map[uint32]prefixinfo.Stats, uid uint32, size, storageBytes,
 	stats[uid] = s
 }
 
-func (s *AllStats) PushPerUserStats(prefix string, us prefixinfo.StatsList) {
+func (s *AllStats) PushPerUserStats(prefix string, us stats.PerIDTotals) {
 	for _, u := range us {
 		s.PerUser.Push(u.ID, prefix, u.Bytes, u.StorageBytes, u.PrefixBytes, u.Files, u.Prefixes)
 		addToMap(s.userTotals, u.ID, u.Bytes, u.StorageBytes, u.PrefixBytes, u.Files, u.Prefixes)
 	}
 }
 
-func (s *AllStats) PushPerGroupStats(prefix string, ug prefixinfo.StatsList) {
+func (s *AllStats) PushPerGroupStats(prefix string, ug stats.PerIDTotals) {
 	for _, g := range ug {
 		s.PerGroup.Push(g.ID, prefix, g.Bytes, g.StorageBytes, g.PrefixBytes, g.Files, g.Prefixes)
 		addToMap(s.groupTotals, g.ID, g.Bytes, g.StorageBytes, g.PrefixBytes, g.Files, g.Prefixes)
@@ -230,11 +230,8 @@ func (s *AllStats) Finalize() {
 	}
 }
 
-func (s *AllStats) Update(prefix string, pi prefixinfo.T, calc diskusage.Calculator, expr boolexpr.T) error {
-	totals, users, groups, err := pi.ComputeStats(calc, expr)
-	if err != nil {
-		return err
-	}
+func (s *AllStats) Update(prefix string, pi prefixinfo.T, calc diskusage.Calculator, matcher stats.Matcher) error {
+	totals, users, groups := stats.ComputeTotals(prefix, &pi, calc, matcher)
 	s.Prefix.Push(prefix,
 		totals.Bytes,
 		totals.StorageBytes,

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 
+	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/internal/usernames"
 	"cloudeng.io/cmdutil/boolexpr"
 	"cloudeng.io/file"
@@ -28,47 +29,48 @@ func NewParser() *boolexpr.Parser {
 	return parser
 }
 
-type T struct {
-	s bool
-	e boolexpr.T
-}
-
-func (e T) Eval(value any) bool {
-	if !e.s {
-		return true
-	}
-	return e.e.Eval(value)
-}
-
-func (e T) String() string {
-	if !e.s {
-		return ""
-	}
-	return e.e.String()
-}
-
-func CreateExpr(parser *boolexpr.Parser, args []string) (T, error) {
+func CreateMatcher(parser *boolexpr.Parser, args []string) (Matcher, error) {
 	if len(args) == 0 {
 		// If no expression is specified, then always return true.
-		return T{}, nil
+		return Matcher{}, nil
 	}
 	input := strings.Join(args, " ")
 	expr, err := parser.Parse(input)
 	if err != nil {
-		return T{}, fmt.Errorf("failed to parse expression: %v: %v\n", input, err)
+		return Matcher{}, fmt.Errorf("failed to parse expression: %v: %v\n", input, err)
 	}
-	return T{e: expr, s: true}, nil
+	return Matcher{T: expr}, nil
 }
 
-type FileInfoUserGroup struct {
-	file.Info
-	uid, gid uint32
+type Matcher struct {
+	boolexpr.T
 }
 
-func NewFileInfoUserGroup(info file.Info, uid, gid uint32) FileInfoUserGroup {
-	return FileInfoUserGroup{Info: info, uid: uid, gid: gid}
+func (m Matcher) Prefix(prefix string, info *prefixinfo.T) bool {
+	named := prefixinfo.NewNamed(prefix, info)
+	return m.Eval(named)
 }
 
-func (fwid FileInfoUserGroup) UserGroup() (uint32, uint32) {
-	return fwid.uid, fwid.gid
+type withids struct {
+	pi *prefixinfo.T
+	fi file.Info
+}
+
+func (w withids) UserGroup() (uid, gid uint32) {
+	uid, gid, _, _ = w.pi.SysInfo(w.fi)
+	return
+}
+
+func (m Matcher) Entry(prefix string, info *prefixinfo.T, fi file.Info) bool {
+	return m.Eval(withids{info, fi})
+}
+
+type AlwaysTrue struct{}
+
+func (AlwaysTrue) Prefix(prefix string, info *prefixinfo.T) bool {
+	return true
+}
+
+func (AlwaysTrue) Entry(prefix string, info *prefixinfo.T, fi file.Info) bool {
+	return true
 }

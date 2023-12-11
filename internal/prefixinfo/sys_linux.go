@@ -17,9 +17,8 @@ func getSysInfo(fi file.Info) (uid, gid uint32, dev, ino uint64) {
 	if si == nil {
 		return 0, 0, 0, 0
 	}
-	switch s := si.(type) {
-	case *syscall.Stat_t:
-		return s.Uid, s.Gid, uint64(s.Dev), s.Ino
+	if s, ok := si.(*syscall.Stat_t); ok {
+		return s.Uid, s.Gid, s.Dev, s.Ino
 	}
 	return 0, 0, 0, 0
 }

@@ -8,14 +8,9 @@ import (
 	"bytes"
 	"encoding/gob"
 	"fmt"
-	"io/fs"
-	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
-	"time"
-
-	"cloudeng.io/file"
 )
 
 type RoundTripper func(*testing.T, *T) T
@@ -52,57 +47,28 @@ func BinaryRoundTrip(t *testing.T, pi *T) T {
 	return npi
 }
 
-// IDCombinations returns 5 sets of file.Info values with differing combinations
-// of uid and gid.
-// ug00 has uid, gid for both files
-// ug10 has uid+1, gid for the second file
-// ug01 has uid, gid+1 for the second file
-// ug11 has uid+1, gid+1 for the second file
-// ugOther has uid+1, gid+1 for both files
-func TestdataIDCombinations(modTime time.Time, mode fs.FileMode, uid, gid uint32, inode uint64) (ug00, ug10, ug01, ug11, ugOther []file.Info) {
-	ug00 = []file.Info{
-		TestdataNewInfo("0", 1, mode, modTime, uid, gid, 0, inode),
-		TestdataNewInfo("1", 2, mode, modTime, uid, gid, 0, inode),
-	}
-	ug10 = []file.Info{
-		TestdataNewInfo("0", 1, mode, modTime, uid, gid, 0, inode),
-		TestdataNewInfo("1", 2, mode, modTime, uid+1, gid, 0, inode),
-	}
-	ug01 = []file.Info{
-		TestdataNewInfo("0", 1, mode, modTime, uid, gid, 0, inode),
-		TestdataNewInfo("1", 2, mode, modTime, uid, gid+1, 0, inode),
-	}
-	ug11 = []file.Info{
-		TestdataNewInfo("0", 1, mode, modTime, uid, gid, 0, inode),
-		TestdataNewInfo("1", 2, mode, modTime, uid+1, gid+1, 0, inode),
-	}
-	ugOther = []file.Info{
-		TestdataNewInfo("0", 1, mode, modTime, uid+1, gid+1, 0, inode),
-		TestdataNewInfo("1", 2, mode, modTime, uid+1, gid+1, 0, inode),
-	}
-	return
+func NumUserIDs(pi T) int {
+	return len(pi.userIDMap)
 }
 
-func TestdataIDCombinationsFiles(modTime time.Time, uid, gid uint32, inode uint64) (ug00, ug10, ug01, ug11, ugOther []file.Info) {
-	return TestdataIDCombinations(modTime, 0700, uid, gid, inode)
+func NumGroupIDs(pi T) int {
+	return len(pi.groupIDMap)
 }
 
-func TestdataIDCombinationsDirs(modTime time.Time, uid, gid uint32, inode uint64) (ug00, ug10, ug01, ug11, ugOther []file.Info) {
-	return TestdataIDCombinations(modTime, 0700|os.ModeDir, uid, gid, inode)
-}
-
-func TestdataNewInfo(name string, size int64, mode fs.FileMode, modTime time.Time, uid, gid uint32, device, inode uint64) file.Info {
-	return file.NewInfo(name, size, mode, modTime, NewSysInfo(uid, gid, device, inode))
-}
-
-func TestdataNewPrefixInfo(name string, size int64, mode fs.FileMode, modTime time.Time, uid, gid uint32, dev, inode uint64) T {
-	return New(TestdataNewInfo(name, size, mode, modTime, uid, gid, dev, inode))
-}
-
-func IDsFromStats(s StatsList) []uint32 {
-	r := []uint32{}
-	for _, st := range s {
-		r = append(r, st.ID)
+func CompareUserIDMap(t *testing.T, pi T, ids []uint32, pos []int) {
+	t.Helper()
+	for j, u := range ids {
+		if got, want := pi.userIDMap.idMapFor(u), pos[j]; got != want {
+			t.Errorf("id %v: got %v, want %v", u, got, want)
+		}
 	}
-	return r
+}
+
+func CompareGroupIDMap(t *testing.T, pi T, ids []uint32, pos []int) {
+	t.Helper()
+	for j, u := range ids {
+		if got, want := pi.groupIDMap.idMapFor(u), pos[j]; got != want {
+			t.Errorf("id %v: got %v, want %v", u, got, want)
+		}
+	}
 }

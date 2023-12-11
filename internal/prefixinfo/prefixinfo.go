@@ -11,9 +11,7 @@ import (
 	"io/fs"
 	"time"
 
-	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/file"
-	"cloudeng.io/file/diskusage"
 )
 
 // T represents the information for a prefix, ie. a directory.
@@ -339,76 +337,6 @@ func (pi *T) finalizeOnUnmarshal() error {
 	return nil
 }
 
-// ComputeStats computes all available statistics for this Prefix, including
-// using the supplied calculator to determine on-disk raw storage usage.
-// Note that the size of the prefix itself is not included in the returned
-// PrefixBytes but rather is included in the PrefixBytes for its parent prefix.
-func (pi *T) ComputeStats(calculator diskusage.Calculator, expr boolexpr.T) (totals Stats, userStats, groupStats StatsList, err error) {
-	pi.finalize()
-	userStats = pi.computeStatsForIDMapOrFiles(pi.userIDMap, pi.userID, calculator, expr)
-	groupStats = pi.computeStatsForIDMapOrFiles(pi.groupIDMap, pi.groupID, calculator, expr)
-	for _, us := range userStats {
-		totals.Bytes += us.Bytes
-		totals.Files += us.Files
-		totals.Prefixes += us.Prefixes
-		totals.PrefixBytes += us.PrefixBytes
-		totals.StorageBytes += us.StorageBytes
-	}
-	return
-}
-
-func (pi *T) computeStatsForIDMapOrFiles(idms idMaps, defaultID uint32, calculator diskusage.Calculator, expr boolexpr.T) []Stats {
-	if len(idms) == 0 {
-		var stats Stats
-		stats.ID = defaultID
-		var found bool
-		for _, fi := range pi.entries {
-			found = pi.updateStats(&stats, fi, calculator, expr)
-		}
-		if !found {
-			return nil
-		}
-		return []Stats{stats}
-	}
-	stats := make([]Stats, 0, len(idms))
-	for _, idm := range idms {
-		if s, ok := pi.computeStatsForID(idm, calculator, expr); ok {
-			stats = append(stats, s)
-		}
-	}
-	return stats
-}
-
-func (pi *T) updateStats(s *Stats, fi file.Info, calculator diskusage.Calculator, expr boolexpr.T) bool {
-	uid, gid, _, _ := pi.SysInfo(fi)
-	if !expr.Eval(boolexpr.NewFileInfoUserGroup(fi, uid, gid)) {
-		return false
-	}
-	if fi.IsDir() {
-		s.Prefixes++
-		s.PrefixBytes += fi.Size()
-	} else {
-		s.Files++
-		s.StorageBytes += calculator.Calculate(fi.Size())
-		s.Bytes += fi.Size()
-	}
-	return true
-}
-
-func (pi *T) computeStatsForID(idm idMap, calculator diskusage.Calculator, expr boolexpr.T) (Stats, bool) {
-	var stats Stats
-	stats.ID = idm.ID
-	sc := newIdMapScanner(idm)
-	found := false
-	for sc.next() {
-		fi := pi.entries[sc.pos()]
-		if pi.updateStats(&stats, fi, calculator, expr) {
-			found = true
-		}
-	}
-	return stats, found
-}
-
 // TODO(cnicolaou): get rid of this?
 
 // IDScanner allows for iterating over files that belong to a particular user
@@ -485,7 +413,7 @@ func (pi *T) newIDScan(id uint32, userID bool, idms idMaps) (IDSanner, error) {
 // and also a NumEntries() method that returns the number of entries
 // in the prefix.
 type Named struct {
-	T
+	*T
 	name string
 }
 
@@ -497,6 +425,6 @@ func (pi Named) NumEntries() int64 {
 	return int64(len(pi.entries))
 }
 
-func NewNamed(name string, pi T) Named {
+func NewNamed(name string, pi *T) Named {
 	return Named{name: name, T: pi}
 }
