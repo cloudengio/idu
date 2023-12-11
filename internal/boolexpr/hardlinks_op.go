@@ -25,23 +25,24 @@ type Hardlink struct {
 }
 
 func (hl *Hardlink) forDevice(dev uint64) *perDeviceRefs {
-	for _, d := range hl.devices {
-		if d.dev == dev {
-			return d
+	for _, pd := range hl.devices {
+		if pd.dev == dev {
+			return pd
 		}
 	}
-	hl.devices = append(hl.devices, &perDeviceRefs{
+	pd := &perDeviceRefs{
 		dev:    dev,
 		inodes: map[uint64]struct{}{},
-	})
-	return nil
+	}
+	hl.devices = append(hl.devices, pd)
+	return pd
 }
 
 type devInoIfc interface {
 	DevIno() (uint64, uint64)
 }
 
-func (hl Hardlink) Prepare() (boolexpr.Operand, error) {
+func (hl *Hardlink) Prepare() (boolexpr.Operand, error) {
 	switch hl.text {
 	case "true":
 		hl.value = true
@@ -54,7 +55,8 @@ func (hl Hardlink) Prepare() (boolexpr.Operand, error) {
 	return hl, nil
 }
 
-func (hl Hardlink) Eval(v any) bool {
+func (hl *Hardlink) Eval(v any) bool {
+	fmt.Printf("eval: %T\n", v)
 	var dev, ino uint64
 	switch t := v.(type) {
 	case devInoIfc:
@@ -71,25 +73,26 @@ func (hl Hardlink) Eval(v any) bool {
 	return !hl.value
 }
 
-func (hl Hardlink) String() string {
+func (hl *Hardlink) String() string {
 	if hl.value {
 		return "hardlink=true"
 	}
 	return "hardlink=false"
 }
 
-func (hl Hardlink) Document() string {
+func (hl *Hardlink) Document() string {
 	return hl.document
 }
 
-func (hl Hardlink) Needs(t reflect.Type) bool {
+func (hl *Hardlink) Needs(t reflect.Type) bool {
 	return t.Implements(hl.requires)
 }
 
-// NewUID returns an operand that matches the specified user id/name.
-// The evaluated value must provide the method UserGroup() (uint32, uint32).
+// NewHardlink returns an operand that determines if the supplied value is
+// a hardlink, or not. This operand must be evaluated for all directories/files
+// in order to determine if they are hardlinks or not.
 func NewHardlink(_, v string) boolexpr.Operand {
-	return UserOrGroup{
+	return &Hardlink{
 		text:     v,
 		document: `hardlink=true|false matches if the directory or file is, or is not, a hard link`,
 	}

@@ -71,5 +71,32 @@ func TestIDs(t *testing.T) {
 }
 
 func TestHardlinks(t *testing.T) {
+	fi := file.NewInfo("foo", 0, 0, time.Now(), prefixinfo.NewSysInfo(1, 2, 3, 4))
+	pi := prefixinfo.New(fi)
+	a := file.NewInfo("a", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, 30, 40))
+	b := file.NewInfo("b", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, 30, 41))
+	c := file.NewInfo("c", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, 30, 40))
+	pi.AppendInfoList(file.InfoList{a, b, c})
 
+	matcher := createMatcher(t, "hardlink=true")
+	for i, fi := range pi.InfoList() {
+		want := false
+		if i == 2 {
+			want = true
+		}
+		if got := matcher.Entry("foo", &pi, fi); got != want {
+			t.Errorf("got %v, want %v", got, want)
+		}
+	}
+
+	matcher = createMatcher(t, "hardlink=false")
+	for i, fi := range pi.InfoList() {
+		want := true
+		if i == 2 {
+			want = false
+		}
+		if got := matcher.Entry("foo", &pi, fi); got != want {
+			t.Errorf("got %v, want %v", got, want)
+		}
+	}
 }

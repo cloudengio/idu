@@ -19,13 +19,18 @@ import (
 
 func NewParser() *boolexpr.Parser {
 	parser := matcher.New()
+
 	parser.RegisterOperand("user",
 		func(_, v string) boolexpr.Operand {
 			return NewUID("user", v, usernames.Manager.UIDForName)
 		})
+
 	parser.RegisterOperand("group", func(_, v string) boolexpr.Operand {
 		return NewGID("group", v, usernames.Manager.GIDForName)
 	})
+
+	parser.RegisterOperand("hardlink", NewHardlink)
+
 	return parser
 }
 
