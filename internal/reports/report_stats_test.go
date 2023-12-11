@@ -162,8 +162,6 @@ func fib(n int) int64 {
 }
 
 func TestReportStatsSingleID(t *testing.T) {
-
-	t.Fail()
 	calc := times2{}
 	var uid, gid uint32 = 100, 2
 
