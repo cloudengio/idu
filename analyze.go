@@ -211,7 +211,7 @@ func (w *walker) handlePrefix(ctx context.Context, state *prefixState, prefix st
 	current, err := prefixinfo.New(prefix, info)
 	if err != nil {
 		w.dbLogErr(ctx, prefix, []byte(err.Error()))
-		return true, false, err
+		// system level info (uid, gid, dev, ino) is not available.
 	}
 
 	state.current = current

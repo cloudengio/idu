@@ -37,12 +37,12 @@ type T struct {
 // New creates a new PrefixInfo for the supplied file.Info. It will
 // determine the uid, gid, device and inode from the supplied file.Info assuming
 // that it was created by a call to LStat or Stat rather than being obtained
-// from the database.
+// from the database. If error is non-nil, the returned PrefixInfo.T is still
+// valid and can be used but will not contain all of the system specific
+// information. On Windows in particular this means that user and device/inode
+// information may not be available.
 func New(pathname string, info file.Info) (T, error) {
 	uid, gid, dev, ino, err := GetSysInfo(pathname, info)
-	if err != nil {
-		return T{}, err
-	}
 	return T{
 		userID:  uid,
 		groupID: gid,
@@ -51,7 +51,7 @@ func New(pathname string, info file.Info) (T, error) {
 		size:    info.Size(),
 		modTime: info.ModTime(),
 		mode:    info.Mode(),
-	}, nil
+	}, err
 }
 
 func (pi *T) SetInfoList(entries file.InfoList) {
