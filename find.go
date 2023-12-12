@@ -59,6 +59,9 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 			}
 		}
 		for _, fi := range pi.InfoList() {
+			if fi.IsDir() {
+				continue
+			}
 			if match.Entry(k, &pi, fi) {
 				if ff.Long {
 					fmt.Println("    ", fs.FormatFileInfo(fi))

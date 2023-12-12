@@ -124,10 +124,11 @@ func ComputeTotals(prefix string, pi *prefixinfo.T, du diskusage.Calculator, mat
 	}
 	user, group := make(perID), make(perID)
 	for _, fi := range pi.InfoList() {
-		uid, gid, _, _ := pi.SysInfo(fi)
-		if !match.Entry(prefix, pi, fi) {
+		// Only apply the matcher to files, not directories.
+		if !fi.IsDir() && !match.Entry(prefix, pi, fi) {
 			continue
 		}
+		uid, gid, _, _ := pi.SysInfo(fi)
 		totals = totals.Update(fi, du)
 		user[uid] = user[uid].Update(fi, du)
 		group[gid] = group[gid].Update(fi, du)

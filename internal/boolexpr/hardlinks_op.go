@@ -42,6 +42,10 @@ type devInoIfc interface {
 	DevIno() (uint64, uint64)
 }
 
+type nameIfc interface {
+	Name() string
+}
+
 func (hl *Hardlink) Prepare() (boolexpr.Operand, error) {
 	switch hl.text {
 	case "true":
@@ -56,7 +60,6 @@ func (hl *Hardlink) Prepare() (boolexpr.Operand, error) {
 }
 
 func (hl *Hardlink) Eval(v any) bool {
-	fmt.Printf("eval: %T\n", v)
 	var dev, ino uint64
 	switch t := v.(type) {
 	case devInoIfc:

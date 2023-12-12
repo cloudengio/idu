@@ -71,6 +71,10 @@ func (pi T) Mode() fs.FileMode {
 	return pi.mode
 }
 
+func (pi T) Type() fs.FileMode {
+	return pi.mode.Type()
+}
+
 func (pi T) ModTime() time.Time {
 	return pi.modTime
 }

@@ -29,7 +29,7 @@ func NewParser() *boolexpr.Parser {
 		return NewGID("group", v, usernames.Manager.GIDForName)
 	})
 
-	parser.RegisterOperand("hardlink", NewHardlink)
+	//parser.RegisterOperand("hardlink", NewHardlink)
 
 	return parser
 }
@@ -69,6 +69,10 @@ func (w withsys) UserGroup() (uid, gid uint32) {
 func (w withsys) DevIno() (dev, ino uint64) {
 	_, _, dev, ino = w.SysInfo(w.fi)
 	return
+}
+
+func (w withsys) Name() string {
+	return w.fi.Name()
 }
 
 func (m Matcher) Entry(prefix string, info *prefixinfo.T, fi file.Info) bool {
