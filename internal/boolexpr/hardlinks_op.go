@@ -26,10 +26,6 @@ type devInoIfc interface {
 	DevIno() (uint64, uint64)
 }
 
-type nameIfc interface {
-	Name() string
-}
-
 func (hl *Hardlink) Prepare() (boolexpr.Operand, error) {
 	f, err := hl.fs.Open(hl.text)
 	if err != nil {
