@@ -7,20 +7,21 @@
 package prefixinfo
 
 import (
+	"fmt"
 	"syscall"
 
 	"cloudeng.io/file"
 )
 
-func getSysInfo(fi file.Info) (uid, gid uint32, dev, ino uint64) {
+func GetSysInfo(pathname string, fi file.Info) (uid, gid uint32, dev, ino uint64, err error) {
 	si := fi.Sys()
 	if si == nil {
-		return 0, 0, 0, 0
+		return 0, 0, 0, 0, fmt.Errorf("no system set for %v", pathname)
 	}
 	if s, ok := si.(*syscall.Stat_t); ok {
-		return s.Uid, s.Gid, uint64(s.Dev), s.Ino
+		return s.Uid, s.Gid, uint64(s.Dev), s.Ino, nil
 	}
-	return 0, 0, 0, 0
+	return 0, 0, 0, 0, fmt.Errorf("unrecognised system information %T for %v", si, pathname)
 }
 
 func (pi *T) SysInfo(fi file.Info) (userID, groupID uint32, dev, ino uint64) {

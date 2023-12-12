@@ -5,22 +5,21 @@
 package boolexpr
 
 import (
-	"fmt"
+	"io/fs"
 	"reflect"
-	"sync"
 
-	"cloudeng.io/cmd/idu/internal/hardlinks"
+	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmdutil/boolexpr"
+	"cloudeng.io/file"
 )
 
 type Hardlink struct {
 	text     string
 	name     string
 	document string
-	value    bool
+	fs       fs.FS
+	dev, ino uint64
 	requires reflect.Type
-	mu       sync.Mutex
-	detector *hardlinks.Incremental
 }
 
 type devInoIfc interface {
@@ -32,19 +31,25 @@ type nameIfc interface {
 }
 
 func (hl *Hardlink) Prepare() (boolexpr.Operand, error) {
-	switch hl.text {
-	case "true":
-		hl.value = true
-	case "false":
-		hl.value = false
-	default:
-		return hl, fmt.Errorf("invalid hardlink value: %q", hl.text)
+	f, err := hl.fs.Open(hl.text)
+	if err != nil {
+		return nil, err
 	}
-	hl.requires = reflect.TypeOf((*devInoIfc)(nil)).Elem()
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	fi := file.NewInfoFromFileInfo(info)
+	_, _, dev, ino, err := prefixinfo.GetSysInfo(hl.text, fi)
+	if err != nil {
+		return nil, err
+	}
+	hl.dev, hl.ino = dev, ino
 	return hl, nil
 }
 
-func (hl *Hardlink) Eval(v any) bool {
+func (hl Hardlink) Eval(v any) bool {
 	var dev, ino uint64
 	switch t := v.(type) {
 	case devInoIfc:
@@ -52,20 +57,11 @@ func (hl *Hardlink) Eval(v any) bool {
 	default:
 		return false
 	}
-	hl.mu.Lock()
-	defer hl.mu.Unlock()
-	islink := hl.detector.Ref(dev, ino)
-	if hl.value {
-		return islink
-	}
-	return !islink
+	return dev == hl.dev && ino == hl.ino
 }
 
 func (hl *Hardlink) String() string {
-	if hl.value {
-		return hl.name + "=true"
-	}
-	return hl.name + "=false"
+	return hl.name + "=" + hl.text
 }
 
 func (hl *Hardlink) Document() string {
@@ -77,16 +73,12 @@ func (hl *Hardlink) Needs(t reflect.Type) bool {
 }
 
 // NewHardlink returns an operand that determines if the supplied value is,
-// or is not, a hardlink to a previously seen file or directory. It is
-// incremental and hence only detects the second and subsequent hardlink in
-// a set of hardlinks, the first instance of the hardlink is not detected.
-// It is intended to help avoid overcounting the resources shared by
-// hardlinks.
-func NewHardlink(n, v string) boolexpr.Operand {
+// or is not, a hardlink to the specified file or directory.
+func NewHardlink(n, v string, fs fs.FS) boolexpr.Operand {
 	return &Hardlink{
+		fs:       fs,
 		name:     n,
 		text:     v,
-		document: n + `=true|false matches if the directory or file is, or is not, a hard link to a previously seen directory or file. It is incremental and hence only detects the second and subsequent hardlink in a set of hardlinks, the first instance of the hardlink is not detected. It is intended to help avoid overcounting the resources shared by hardlinks.`,
-		detector: &hardlinks.Incremental{},
+		document: n + `=<pathname>. Returns true if the evaluated value refers to the same file or directory as <pathname>, ie. if they share the same device and inode numbers.`,
 	}
 }

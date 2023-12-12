@@ -14,6 +14,8 @@ import (
 	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/errors"
+	"cloudeng.io/file/filewalk"
+	"cloudeng.io/file/filewalk/localfs"
 )
 
 type findFlags struct {
@@ -24,9 +26,14 @@ type findFlags struct {
 type findCmds struct{}
 
 func (fc *findCmds) find(ctx context.Context, values interface{}, args []string) error {
-	ff := values.(*findFlags)
+	// TODO(cnicolaou): generalize this to other filesystems.
+	fs := localfs.New()
+	return fc.findFS(ctx, fs, values.(*findFlags), args)
+}
 
-	parser := boolexpr.NewParser()
+func (fc *findCmds) findFS(ctx context.Context, fwfs filewalk.FS, ff *findFlags, args []string) error {
+
+	parser := boolexpr.NewParser(fwfs)
 
 	match, err := boolexpr.CreateMatcher(parser,
 		boolexpr.WithExpression(args[1:]...),

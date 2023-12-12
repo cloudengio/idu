@@ -23,6 +23,8 @@ import (
 	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/cmd/idu/internal/usernames"
 	"cloudeng.io/file/diskusage"
+	"cloudeng.io/file/filewalk"
+	"cloudeng.io/file/filewalk/localfs"
 )
 
 type statsFileFormat struct {
@@ -82,9 +84,14 @@ type viewFlags struct {
 }
 
 func (st *statsCmds) compute(ctx context.Context, values interface{}, args []string) error {
-	cf := values.(*computeFlags)
+	// TODO(cnicolaou): generalize this to other filesystems.
+	fs := localfs.New()
+	return st.computeFS(ctx, fs, values.(*computeFlags), args)
+}
 
-	parser := boolexpr.NewParser()
+func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *computeFlags, args []string) error {
+
+	parser := boolexpr.NewParser(fwfs)
 
 	match, err := boolexpr.CreateMatcher(parser,
 		boolexpr.WithExpression(args[1:]...),

@@ -7,20 +7,21 @@
 package prefixinfo
 
 import (
+	"fmt"
 	"syscall"
 
 	"cloudeng.io/file"
 )
 
-func getSysInfo(fi file.Info) (uid, gid uint32, dev, ino uint64) {
+func GetSysInfo(pathname string, fi file.Info) (uid, gid uint32, dev, ino uint64, err error) {
 	si := fi.Sys()
 	if si == nil {
-		return 0, 0, 0, 0
+		return 0, 0, 0, 0, fmt.Errorf("no system set for %v", pathname)
 	}
 	if s, ok := si.(*syscall.Stat_t); ok {
-		return s.Uid, s.Gid, s.Dev, s.Ino
+		return s.Uid, s.Gid, s.Dev, s.Ino, nil
 	}
-	return 0, 0, 0, 0
+	return 0, 0, 0, 0, fmt.Errorf("unrecognised system information %T for %v", si, pathname)
 }
 
 // NewSysInfo is intended to be used by tests.
@@ -32,6 +33,7 @@ func (pi *T) SysInfo(fi file.Info) (userID, groupID uint32, dev, ino uint64) {
 	if fi.Sys() == nil {
 		return pi.userID, pi.groupID, pi.device, 0
 	}
+	// device is stored in the prefixinfo.
 	switch s := fi.Sys().(type) {
 	case inoOnly:
 		return pi.userID, pi.groupID, pi.device, uint64(s)

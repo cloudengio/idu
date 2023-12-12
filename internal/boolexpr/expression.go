@@ -8,6 +8,7 @@ package boolexpr
 
 import (
 	"fmt"
+	"io/fs"
 	"strings"
 
 	"cloudeng.io/cmd/idu/internal/hardlinks"
@@ -18,7 +19,7 @@ import (
 	"cloudeng.io/file/matcher"
 )
 
-func NewParser() *boolexpr.Parser {
+func NewParser(fs fs.FS) *boolexpr.Parser {
 	parser := matcher.New()
 
 	parser.RegisterOperand("user",
@@ -28,6 +29,10 @@ func NewParser() *boolexpr.Parser {
 
 	parser.RegisterOperand("group", func(_, v string) boolexpr.Operand {
 		return NewGID("group", v, usernames.Manager.GIDForName)
+	})
+
+	parser.RegisterOperand("hardlink", func(n, v string) boolexpr.Operand {
+		return NewHardlink(n, v, fs)
 	})
 
 	return parser

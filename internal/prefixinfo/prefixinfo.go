@@ -38,8 +38,11 @@ type T struct {
 // determine the uid, gid, device and inode from the supplied file.Info assuming
 // that it was created by a call to LStat or Stat rather than being obtained
 // from the database.
-func New(info file.Info) T {
-	uid, gid, dev, ino := getSysInfo(info)
+func New(pathname string, info file.Info) (T, error) {
+	uid, gid, dev, ino, err := GetSysInfo(pathname, info)
+	if err != nil {
+		return T{}, err
+	}
 	return T{
 		userID:  uid,
 		groupID: gid,
@@ -48,7 +51,7 @@ func New(info file.Info) T {
 		size:    info.Size(),
 		modTime: info.ModTime(),
 		mode:    info.Mode(),
-	}
+	}, nil
 }
 
 func (pi *T) SetInfoList(entries file.InfoList) {
@@ -236,7 +239,7 @@ func newIDMapIfNeeded(idms *idMaps, id uint32, n int) int {
 	return len(*idms) - 1
 }
 
-func (pi *T) createIDMapsEtc() {
+func (pi *T) createIDMapsAndInodes() {
 	prefixUserMap := newIDMap(pi.userID, len(pi.entries))
 	prefixGroupMap := newIDMap(pi.groupID, len(pi.entries))
 
@@ -327,7 +330,7 @@ func (pi *T) finalize() error {
 	if pi.finalized {
 		return nil
 	}
-	pi.createIDMapsEtc()
+	pi.createIDMapsAndInodes()
 	pi.finalized = true
 	return pi.validateIDMaps()
 }

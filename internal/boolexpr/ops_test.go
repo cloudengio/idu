@@ -5,16 +5,21 @@
 package boolexpr_test
 
 import (
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/file"
+	"cloudeng.io/file/filewalk/localfs"
 )
 
-func createMatcher(t *testing.T, hl bool, expr string) boolexpr.Matcher {
-	parser := boolexpr.NewParser()
+func createMatcher(t *testing.T, fs fs.FS, hl bool, expr string) boolexpr.Matcher {
+	parser := boolexpr.NewParser(fs)
 	matcher, err := boolexpr.CreateMatcher(parser,
 		boolexpr.WithExpression(expr),
 		boolexpr.WithHardlinkHandling(hl))
@@ -25,47 +30,51 @@ func createMatcher(t *testing.T, hl bool, expr string) boolexpr.Matcher {
 }
 
 func TestIDs(t *testing.T) {
+
 	fi := file.NewInfo("foo", 0, 0, time.Now(), prefixinfo.NewSysInfo(1, 2, 3, 4))
-	pi := prefixinfo.New(fi)
+	pi, err := prefixinfo.New("foo", fi)
+	if err != nil {
+		t.Fatal(err)
+	}
 	pi.AppendInfo(file.NewInfo("bar", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, 30, 40)))
 
-	matcher := createMatcher(t, false, "user=1")
+	matcher := createMatcher(t, nil, false, "user=1")
 	if !matcher.Prefix("foo", &pi) {
 		t.Errorf("failed to match")
 	}
 
-	matcher = createMatcher(t, false, "user=2")
+	matcher = createMatcher(t, nil, false, "user=2")
 	if matcher.Prefix("foo", &pi) {
 		t.Errorf("incorrect match")
 	}
 
-	matcher = createMatcher(t, false, "group=2")
+	matcher = createMatcher(t, nil, false, "group=2")
 	if !matcher.Prefix("foo", &pi) {
 		t.Errorf("failed to match")
 	}
 
-	matcher = createMatcher(t, false, "group=3")
+	matcher = createMatcher(t, nil, false, "group=3")
 	if matcher.Prefix("foo", &pi) {
 		t.Errorf("incorrect match")
 	}
 
 	fi = pi.InfoList()[0]
-	matcher = createMatcher(t, false, "user=10")
+	matcher = createMatcher(t, nil, false, "user=10")
 	if !matcher.Entry("foo", &pi, fi) {
 		t.Errorf("failed to match")
 	}
 
-	matcher = createMatcher(t, false, "user=20")
+	matcher = createMatcher(t, nil, false, "user=20")
 	if matcher.Entry("foo", &pi, fi) {
 		t.Errorf("incorrect match")
 	}
 
-	matcher = createMatcher(t, false, "group=20")
+	matcher = createMatcher(t, nil, false, "group=20")
 	if !matcher.Entry("foo", &pi, fi) {
 		t.Errorf("failed to match")
 	}
 
-	matcher = createMatcher(t, false, "group=30")
+	matcher = createMatcher(t, nil, false, "group=30")
 	if matcher.Entry("foo", &pi, fi) {
 		t.Errorf("incorrect match")
 	}
@@ -73,25 +82,42 @@ func TestIDs(t *testing.T) {
 }
 
 func TestHardlinks(t *testing.T) {
-	fi := file.NewInfo("foo", 0, 0, time.Now(), prefixinfo.NewSysInfo(1, 2, 3, 4))
-	pi := prefixinfo.New(fi)
-	a := file.NewInfo("a", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, 30, 40))
-	b := file.NewInfo("b", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, 30, 41))
-	c := file.NewInfo("c", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, 30, 40))
+	tmpdir := t.TempDir()
+	ta := filepath.Join(tmpdir, "a")
+	f, err := os.Create(ta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fi := file.NewInfoFromFileInfo(info)
+	_, _, dev, ino, err := prefixinfo.GetSysInfo(ta, fi)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fi.SetSys(prefixinfo.NewSysInfo(10, 20, 1000, 1000))
+	pi, err := prefixinfo.New("foo", fi)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a := file.NewInfo("a", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, 30, ino))
+	b := file.NewInfo("b", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, dev, ino))
+	c := file.NewInfo("c", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, dev, 40))
 	pi.AppendInfoList(file.InfoList{a, b, c})
 
-	matcher := createMatcher(t, true, "")
-
-	if got, want := matcher.Prefix("foo", &pi), true; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
+	lfs := localfs.New()
+	matcher := createMatcher(t, lfs, false, fmt.Sprintf("hardlink='%v'", ta))
 	for i, fi := range pi.InfoList() {
-		want := true
-		if i == 2 {
-			want = false
+		want := false
+		if i == 1 {
+			want = true
 		}
 		if got := matcher.Entry("foo", &pi, fi); got != want {
-			t.Errorf("got %v, want %v", got, want)
+			t.Errorf("%v: got %v, want %v", i, got, want)
 		}
 	}
 }
