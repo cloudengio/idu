@@ -13,9 +13,11 @@ import (
 	"cloudeng.io/file"
 )
 
-func createMatcher(t *testing.T, expr string) boolexpr.Matcher {
+func createMatcher(t *testing.T, hl bool, expr string) boolexpr.Matcher {
 	parser := boolexpr.NewParser()
-	matcher, err := boolexpr.CreateMatcher(parser, []string{expr})
+	matcher, err := boolexpr.CreateMatcher(parser,
+		boolexpr.WithExpression(expr),
+		boolexpr.WithHardlinkHandling(hl))
 	if err != nil {
 		t.Fatalf("failed to create matcher: %v", err)
 	}
@@ -27,43 +29,43 @@ func TestIDs(t *testing.T) {
 	pi := prefixinfo.New(fi)
 	pi.AppendInfo(file.NewInfo("bar", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, 30, 40)))
 
-	matcher := createMatcher(t, "user=1")
+	matcher := createMatcher(t, false, "user=1")
 	if !matcher.Prefix("foo", &pi) {
 		t.Errorf("failed to match")
 	}
 
-	matcher = createMatcher(t, "user=2")
+	matcher = createMatcher(t, false, "user=2")
 	if matcher.Prefix("foo", &pi) {
 		t.Errorf("incorrect match")
 	}
 
-	matcher = createMatcher(t, "group=2")
+	matcher = createMatcher(t, false, "group=2")
 	if !matcher.Prefix("foo", &pi) {
 		t.Errorf("failed to match")
 	}
 
-	matcher = createMatcher(t, "group=3")
+	matcher = createMatcher(t, false, "group=3")
 	if matcher.Prefix("foo", &pi) {
 		t.Errorf("incorrect match")
 	}
 
 	fi = pi.InfoList()[0]
-	matcher = createMatcher(t, "user=10")
+	matcher = createMatcher(t, false, "user=10")
 	if !matcher.Entry("foo", &pi, fi) {
 		t.Errorf("failed to match")
 	}
 
-	matcher = createMatcher(t, "user=20")
+	matcher = createMatcher(t, false, "user=20")
 	if matcher.Entry("foo", &pi, fi) {
 		t.Errorf("incorrect match")
 	}
 
-	matcher = createMatcher(t, "group=20")
+	matcher = createMatcher(t, false, "group=20")
 	if !matcher.Entry("foo", &pi, fi) {
 		t.Errorf("failed to match")
 	}
 
-	matcher = createMatcher(t, "group=30")
+	matcher = createMatcher(t, false, "group=30")
 	if matcher.Entry("foo", &pi, fi) {
 		t.Errorf("incorrect match")
 	}
@@ -78,18 +80,11 @@ func TestHardlinks(t *testing.T) {
 	c := file.NewInfo("c", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, 30, 40))
 	pi.AppendInfoList(file.InfoList{a, b, c})
 
-	matcher := createMatcher(t, "hardlink=true")
-	for i, fi := range pi.InfoList() {
-		want := false
-		if i == 2 {
-			want = true
-		}
-		if got := matcher.Entry("foo", &pi, fi); got != want {
-			t.Errorf("got %v, want %v", got, want)
-		}
-	}
+	matcher := createMatcher(t, true, "")
 
-	matcher = createMatcher(t, "hardlink=false")
+	if got, want := matcher.Prefix("foo", &pi), true; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
 	for i, fi := range pi.InfoList() {
 		want := true
 		if i == 2 {

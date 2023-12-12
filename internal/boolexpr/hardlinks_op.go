@@ -7,35 +7,20 @@ package boolexpr
 import (
 	"fmt"
 	"reflect"
+	"sync"
 
+	"cloudeng.io/cmd/idu/internal/hardlinks"
 	"cloudeng.io/cmdutil/boolexpr"
 )
 
-type perDeviceRefs struct {
-	dev    uint64
-	inodes map[uint64]struct{}
-}
-
 type Hardlink struct {
 	text     string
+	name     string
 	document string
 	value    bool
 	requires reflect.Type
-	devices  []*perDeviceRefs
-}
-
-func (hl *Hardlink) forDevice(dev uint64) *perDeviceRefs {
-	for _, pd := range hl.devices {
-		if pd.dev == dev {
-			return pd
-		}
-	}
-	pd := &perDeviceRefs{
-		dev:    dev,
-		inodes: map[uint64]struct{}{},
-	}
-	hl.devices = append(hl.devices, pd)
-	return pd
+	mu       sync.Mutex
+	detector *hardlinks.Incremental
 }
 
 type devInoIfc interface {
@@ -67,20 +52,20 @@ func (hl *Hardlink) Eval(v any) bool {
 	default:
 		return false
 	}
-	seen := hl.forDevice(dev)
-	_, ok := seen.inodes[ino]
-	if ok {
-		return hl.value
+	hl.mu.Lock()
+	defer hl.mu.Unlock()
+	islink := hl.detector.Ref(dev, ino)
+	if hl.value {
+		return islink
 	}
-	seen.inodes[ino] = struct{}{}
-	return !hl.value
+	return !islink
 }
 
 func (hl *Hardlink) String() string {
 	if hl.value {
-		return "hardlink=true"
+		return hl.name + "=true"
 	}
-	return "hardlink=false"
+	return hl.name + "=false"
 }
 
 func (hl *Hardlink) Document() string {
@@ -91,12 +76,17 @@ func (hl *Hardlink) Needs(t reflect.Type) bool {
 	return t.Implements(hl.requires)
 }
 
-// NewHardlink returns an operand that determines if the supplied value is
-// a hardlink, or not. This operand must be evaluated for all directories/files
-// in order to determine if they are hardlinks or not.
-func NewHardlink(_, v string) boolexpr.Operand {
+// NewHardlink returns an operand that determines if the supplied value is,
+// or is not, a hardlink to a previously seen file or directory. It is
+// incremental and hence only detects the second and subsequent hardlink in
+// a set of hardlinks, the first instance of the hardlink is not detected.
+// It is intended to help avoid overcounting the resources shared by
+// hardlinks.
+func NewHardlink(n, v string) boolexpr.Operand {
 	return &Hardlink{
+		name:     n,
 		text:     v,
-		document: `hardlink=true|false matches if the directory or file is, or is not, a hard link`,
+		document: n + `=true|false matches if the directory or file is, or is not, a hard link to a previously seen directory or file. It is incremental and hence only detects the second and subsequent hardlink in a set of hardlinks, the first instance of the hardlink is not detected. It is intended to help avoid overcounting the resources shared by hardlinks.`,
+		detector: &hardlinks.Incremental{},
 	}
 }

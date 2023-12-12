@@ -92,7 +92,7 @@ type Matcher interface {
 	Entry(prefix string, pi *prefixinfo.T, fi file.Info) bool
 }
 
-func (t Totals) Update(fi file.Info, du diskusage.Calculator) Totals {
+func (t Totals) update(fi file.Info, du diskusage.Calculator) Totals {
 	if fi.IsDir() {
 		t.Prefixes++
 		t.PrefixBytes += fi.Size()
@@ -124,14 +124,13 @@ func ComputeTotals(prefix string, pi *prefixinfo.T, du diskusage.Calculator, mat
 	}
 	user, group := make(perID), make(perID)
 	for _, fi := range pi.InfoList() {
-		// Only apply the matcher to files, not directories.
-		if !fi.IsDir() && !match.Entry(prefix, pi, fi) {
+		if !match.Entry(prefix, pi, fi) {
 			continue
 		}
 		uid, gid, _, _ := pi.SysInfo(fi)
-		totals = totals.Update(fi, du)
-		user[uid] = user[uid].Update(fi, du)
-		group[gid] = group[gid].Update(fi, du)
+		totals = totals.update(fi, du)
+		user[uid] = user[uid].update(fi, du)
+		group[gid] = group[gid].update(fi, du)
 	}
 	return totals, user.flatten(), group.flatten()
 }

@@ -225,7 +225,7 @@ func TestReportStatsSingleID(t *testing.T) {
 		}
 
 		sdb = reports.NewAllStats("test", true, 5)
-		matcher, err := boolexpr.CreateMatcher(boolexpr.NewParser(), []string{"user=33"})
+		matcher, err := boolexpr.CreateMatcher(boolexpr.NewParser(), boolexpr.WithExpression("user=33"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -362,7 +362,7 @@ func testIDExpr(t *testing.T, pikeys []string, pis []prefixinfo.T, uids, gids []
 	parser := boolexpr.NewParser()
 
 	for _, uid := range uids {
-		matcher, err := boolexpr.CreateMatcher(parser, []string{fmt.Sprintf("type=d || user=%d", uid)})
+		matcher, err := boolexpr.CreateMatcher(parser, boolexpr.WithExpression(fmt.Sprintf("type=d || user=%d", uid)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -370,7 +370,7 @@ func testIDExpr(t *testing.T, pikeys []string, pis []prefixinfo.T, uids, gids []
 	}
 
 	for _, gid := range gids {
-		matcher, err := boolexpr.CreateMatcher(parser, []string{fmt.Sprintf("type=d || group=%d", gid)})
+		matcher, err := boolexpr.CreateMatcher(parser, boolexpr.WithExpression(fmt.Sprintf("type=d || group=%d", gid)))
 		if err != nil {
 			t.Fatal(err)
 		}

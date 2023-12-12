@@ -86,7 +86,9 @@ func (st *statsCmds) compute(ctx context.Context, values interface{}, args []str
 
 	parser := boolexpr.NewParser()
 
-	match, err := boolexpr.CreateMatcher(parser, args[1:])
+	match, err := boolexpr.CreateMatcher(parser,
+		boolexpr.WithExpression(args[1:]...),
+		boolexpr.WithHardlinkHandling(true))
 	if err != nil {
 		return err
 	}

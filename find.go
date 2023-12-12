@@ -17,7 +17,8 @@ import (
 )
 
 type findFlags struct {
-	Long bool `subcmd:"long,false,'show long listing for each result'"`
+	Long            bool `subcmd:"long,false,'show long listing for each result'"`
+	HandleHardlinks bool `subcmd:"handle-hardlinks,false,'handle hardlinks'"`
 }
 
 type findCmds struct{}
@@ -27,7 +28,9 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 
 	parser := boolexpr.NewParser()
 
-	match, err := boolexpr.CreateMatcher(parser, args[1:])
+	match, err := boolexpr.CreateMatcher(parser,
+		boolexpr.WithExpression(args[1:]...),
+		boolexpr.WithHardlinkHandling(ff.HandleHardlinks))
 	if err != nil {
 		return err
 	}
@@ -50,7 +53,6 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 			errs.Append(fmt.Errorf("failed to unmarshal value for %v: %v", k, err))
 			return false
 		}
-
 		if match.Prefix(k, &pi) {
 			if ff.Long {
 				fmt.Println(fs.FormatFileInfo(internal.PrefixInfoAsFSInfo(pi, k)))
@@ -59,9 +61,6 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 			}
 		}
 		for _, fi := range pi.InfoList() {
-			if fi.IsDir() {
-				continue
-			}
 			if match.Entry(k, &pi, fi) {
 				if ff.Long {
 					fmt.Println("    ", fs.FormatFileInfo(fi))

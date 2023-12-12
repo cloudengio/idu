@@ -13,6 +13,7 @@ import (
 )
 
 type UserOrGroup struct {
+	name     string
 	text     string
 	id       uint32
 	idLookup func(string) (uint32, error)
@@ -75,21 +76,23 @@ func (op UserOrGroup) Needs(t reflect.Type) bool {
 
 // NewUID returns an operand that matches the specified user id/name.
 // The evaluated value must provide the method UserGroup() (uint32, uint32).
-func NewUID(_, v string, idl func(name string) (uint32, error)) boolexpr.Operand {
+func NewUID(n, v string, idl func(name string) (uint32, error)) boolexpr.Operand {
 	return UserOrGroup{
+		name:     n,
 		text:     v,
-		document: `uid=<uid/name> matches the specified user id/name`,
+		document: n + `=<uid/name> matches the specified user id/name`,
 		idLookup: idl,
 	}
 }
 
 // NewGID returns an operand that matches the specified group id/name.
 // The evaluated value must provide the method UserGroup() (uint32, uint32).
-func NewGID(_, v string, idl func(name string) (uint32, error)) boolexpr.Operand {
+func NewGID(n, v string, idl func(name string) (uint32, error)) boolexpr.Operand {
 	return UserOrGroup{
+		name:     n,
 		text:     v,
 		group:    true,
-		document: `gid=<gid/name> matches the specified group id/name`,
+		document: n + `=<gid/name> matches the specified group id/name`,
 		idLookup: idl,
 	}
 }
