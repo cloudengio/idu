@@ -44,6 +44,7 @@ const mdTotals = `
 | Storage Bytes | {{fmtBytes .Heaps.TotalStorageBytes}} |
 | Files | {{fmtCount .Heaps.TotalFiles }} |
 | Prefixes | {{fmtCount .Heaps.TotalPrefixes}} |
+| Prefixes + Files | {{fmtCount .TotalPrefixesAndFiles}} |
 | Prefix Bytes | {{fmtBytes .Heaps.TotalPrefixBytes}} |
 
 `
@@ -235,7 +236,7 @@ func (md *markdownReports) initTemplates() {
 	md.created = true
 }
 
-func (md *markdownReports) generateReports(ctx context.Context, rf *reportsFlags, filenames *reportFilenames, stats statsFileFormat) error {
+func (md *markdownReports) generateReports(ctx context.Context, rf *generateReportsFlags, filenames *reportFilenames, stats statsFileFormat) error {
 	md.initTemplates()
 
 	prefix := stats.Prefix
@@ -271,13 +272,15 @@ func (md *markdownReports) generateReports(ctx context.Context, rf *reportsFlags
 
 	// Totals.
 	if err := md.totals.Execute(out, struct {
-		Prefix string
-		Heaps  *reports.Heaps[string]
-		When   string
+		Prefix                string
+		Heaps                 *reports.Heaps[string]
+		TotalPrefixesAndFiles int64
+		When                  string
 	}{
-		Prefix: prefix,
-		Heaps:  sdb.Prefix,
-		When:   when.Format(time.RFC3339),
+		Prefix:                prefix,
+		Heaps:                 sdb.Prefix,
+		TotalPrefixesAndFiles: sdb.Prefix.TotalPrefixes + sdb.Prefix.TotalFiles,
+		When:                  when.Format(time.RFC3339),
 	}); err != nil {
 		return err
 	}

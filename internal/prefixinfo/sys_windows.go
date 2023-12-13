@@ -7,7 +7,10 @@
 package prefixinfo
 
 import (
+	"syscall"
+
 	"cloudeng.io/file"
+	"golang.org/x/sys/windows"
 )
 
 type sysinfo struct {
@@ -16,16 +19,39 @@ type sysinfo struct {
 	ino      uint64
 }
 
-func getSysInfo(fi file.Info) (uid, gid uint32, dev, ino uint64) {
+func packFileIndices(hi, low uint32) uint64 {
+	return uint64(hi)<<32 | uint64(low)
+}
+
+func GetSysInfo(pathname string, fi file.Info) (uid, gid uint32, dev, ino uint64, err error) {
 	si := fi.Sys()
 	if si == nil {
-		return 0, 0, 0, 0
+		return getSysInfo(pathname)
 	}
 	switch s := si.(type) {
 	case *sysinfo:
-		return s.uid, s.gid, s.dev, s.ino
+		return s.uid, s.gid, s.dev, s.ino, nil
 	}
-	return 0, 0, 0, 0
+	return getSysInfo(pathname)
+}
+
+func getSysInfo(pathname string) (uid, gid uint32, dev, ino uint64, err error) {
+	// taken from loadFileId in types_windows.go
+	pathp, err := syscall.UTF16PtrFromString(pathname)
+	if err != nil {
+		return
+	}
+	attrs := uint32(syscall.FILE_FLAG_BACKUP_SEMANTICS | syscall.FILE_FLAG_OPEN_REPARSE_POINT)
+	h, err := windows.CreateFile(pathp, 0, 0, nil, syscall.OPEN_EXISTING, attrs, 0)
+	if err != nil {
+		return
+	}
+	defer windows.CloseHandle(h)
+	var d windows.ByHandleFileInformation
+	if err = windows.GetFileInformationByHandle(h, &d); err != nil {
+		return
+	}
+	return 0, 0, uint64(d.VolumeSerialNumber), packFileIndices(d.FileIndexHigh, d.FileIndexLow), nil
 }
 
 // NewSysInfo is intended to be used by tests.

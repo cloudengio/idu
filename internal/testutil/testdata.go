@@ -57,5 +57,9 @@ func TestdataNewInfo(name string, size int64, mode fs.FileMode, modTime time.Tim
 }
 
 func TestdataNewPrefixInfo(name string, size int64, mode fs.FileMode, modTime time.Time, uid, gid uint32, dev, inode uint64) prefixinfo.T {
-	return prefixinfo.New(TestdataNewInfo(name, size, mode, modTime, uid, gid, dev, inode))
+	pi, err := prefixinfo.New(name, TestdataNewInfo(name, size, mode, modTime, uid, gid, dev, inode))
+	if err != nil {
+		panic(err)
+	}
+	return pi
 }

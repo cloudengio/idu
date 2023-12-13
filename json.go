@@ -14,7 +14,7 @@ import (
 
 type jsonReports struct{}
 
-func (jr *jsonReports) generateReports(ctx context.Context, rf *reportsFlags, filenames *reportFilenames, stats statsFileFormat) error {
+func (jr *jsonReports) generateReports(ctx context.Context, rf *generateReportsFlags, filenames *reportFilenames, stats statsFileFormat) error {
 	return writeReportFiles(stats.Stats, filenames, jr.formatMerged, jr.formatUserGroupMerged, rf.JSON)
 }
 

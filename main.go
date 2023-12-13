@@ -150,7 +150,7 @@ func cli() *subcmd.CommandSetYAML {
 	cmdSet.Set("stats", "view").MustRunner(statsCmd.view, &viewFlags{})
 
 	reportsCmds := &reportCmds{}
-	cmdSet.Set("reports", "generate").MustRunner(reportsCmds.generate, &reportsFlags{})
+	cmdSet.Set("reports", "generate").MustRunner(reportsCmds.generate, &generateReportsFlags{})
 	cmdSet.Set("reports", "locate").MustRunner(reportsCmds.locate, &locateReportsFlags{})
 
 	findCmds := &findCmds{}

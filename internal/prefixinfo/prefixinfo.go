@@ -37,9 +37,12 @@ type T struct {
 // New creates a new PrefixInfo for the supplied file.Info. It will
 // determine the uid, gid, device and inode from the supplied file.Info assuming
 // that it was created by a call to LStat or Stat rather than being obtained
-// from the database.
-func New(info file.Info) T {
-	uid, gid, dev, ino := getSysInfo(info)
+// from the database. If error is non-nil, the returned PrefixInfo.T is still
+// valid and can be used but will not contain all of the system specific
+// information. On Windows in particular this means that user and device/inode
+// information may not be available.
+func New(pathname string, info file.Info) (T, error) {
+	uid, gid, dev, ino, err := GetSysInfo(pathname, info)
 	return T{
 		userID:  uid,
 		groupID: gid,
@@ -48,7 +51,7 @@ func New(info file.Info) T {
 		size:    info.Size(),
 		modTime: info.ModTime(),
 		mode:    info.Mode(),
-	}
+	}, err
 }
 
 func (pi *T) SetInfoList(entries file.InfoList) {
@@ -69,6 +72,10 @@ func (pi T) Size() int64 {
 
 func (pi T) Mode() fs.FileMode {
 	return pi.mode
+}
+
+func (pi T) Type() fs.FileMode {
+	return pi.mode.Type()
 }
 
 func (pi T) ModTime() time.Time {
@@ -232,7 +239,7 @@ func newIDMapIfNeeded(idms *idMaps, id uint32, n int) int {
 	return len(*idms) - 1
 }
 
-func (pi *T) createIDMapsEtc() {
+func (pi *T) createIDMapsAndInodes() {
 	prefixUserMap := newIDMap(pi.userID, len(pi.entries))
 	prefixGroupMap := newIDMap(pi.groupID, len(pi.entries))
 
@@ -323,7 +330,7 @@ func (pi *T) finalize() error {
 	if pi.finalized {
 		return nil
 	}
-	pi.createIDMapsEtc()
+	pi.createIDMapsAndInodes()
 	pi.finalized = true
 	return pi.validateIDMaps()
 }

@@ -22,7 +22,7 @@ import (
 	"golang.org/x/exp/maps"
 )
 
-type reportsFlags struct {
+type generateReportsFlags struct {
 	ReportDir string `subcmd:"report-dir,reports,directory to write reports to"`
 	TSV       int    `subcmd:"tsv,100,'generate tsv reports with the requested number of entries, 0 for none'"`
 	Markdown  int    `subcmd:"markdown,20,'generate markdown reports with the requested number of entries, 0 for none'"`
@@ -34,7 +34,7 @@ type reportCmds struct {
 }
 
 func (rc *reportCmds) generate(ctx context.Context, values interface{}, args []string) error {
-	rf := values.(*reportsFlags)
+	rf := values.(*generateReportsFlags)
 	if err := os.MkdirAll(rf.ReportDir, 0770); err != nil {
 		return err
 	}
@@ -64,25 +64,27 @@ func (rc *reportCmds) getStats() (statsFileFormat, error) {
 	return stats, nil
 }
 
-func (rc *reportCmds) statsFor(rf *reportsFlags, suffix string) (statsFileFormat, *reportFilenames, error) {
+func (rc *reportCmds) statsFor(rf *generateReportsFlags, suffix string) (statsFileFormat, *reportFilenames, error) {
 	stats, err := rc.getStats()
 	if err != nil {
 		return statsFileFormat{}, nil, err
 	}
-	filenames, err := newReportFilenames(rf.ReportDir, stats.Date, ".tsv")
+	filenames, err := newReportFilenames(rf.ReportDir, stats.Date, suffix)
 	if err != nil {
 		return statsFileFormat{}, nil, err
 	}
 	return stats, filenames, nil
 }
 
-func (rc *reportCmds) generateReports(ctx context.Context, rf *reportsFlags) error {
+func (rc *reportCmds) generateReports(ctx context.Context, rf *generateReportsFlags) error {
 	if rf.TSV == 0 && rf.JSON == 0 && rf.Markdown == 0 {
 		return fmt.Errorf("no report requested, please specify one of --tsv, --json or --markdown")
 	}
+	var err error
+	var stats statsFileFormat
 	var filenames *reportFilenames
 	if rf.TSV > 0 {
-		stats, filenames, err := rc.statsFor(rf, ".tsv")
+		stats, filenames, err = rc.statsFor(rf, ".tsv")
 		if err != nil {
 			return err
 		}
@@ -92,7 +94,7 @@ func (rc *reportCmds) generateReports(ctx context.Context, rf *reportsFlags) err
 		}
 	}
 	if rf.JSON > 0 {
-		stats, filenames, err := rc.statsFor(rf, ".json")
+		stats, filenames, err = rc.statsFor(rf, ".json")
 		if err != nil {
 			return err
 		}
@@ -102,12 +104,12 @@ func (rc *reportCmds) generateReports(ctx context.Context, rf *reportsFlags) err
 		}
 	}
 	if rf.Markdown > 0 {
-		stats, filenames, err := rc.statsFor(rf, ".md")
+		stats, filenames, err = rc.statsFor(rf, ".md")
 		if err != nil {
 			return err
 		}
-		mdr := &markdownReports{}
-		if err := mdr.generateReports(ctx, rf, filenames, stats); err != nil {
+		md := &markdownReports{}
+		if err := md.generateReports(ctx, rf, filenames, stats); err != nil {
 			return err
 		}
 	}

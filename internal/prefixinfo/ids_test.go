@@ -45,7 +45,10 @@ func TestCreateIDMaps(t *testing.T) {
 			[]uint32{uid + 1, uid + 1}, []uint32{gid + 1, gid + 1}},
 	} {
 		info := testutil.TestdataNewInfo("dir", 1, 0700, time.Now().Truncate(0), uid, gid, 37, 200)
-		pi := prefixinfo.New(info)
+		pi, err := prefixinfo.New("dir", info)
+		if err != nil {
+			t.Fatal(err)
+		}
 		pi.AppendInfoList(tc.fi)
 
 		npi := prefixinfo.BinaryRoundTrip(t, &pi)
@@ -84,7 +87,10 @@ func TestSysTypes(t *testing.T) {
 	modTime := time.Now().Truncate(0)
 
 	info := testutil.TestdataNewInfo("dir", 1, 0700, modTime, uid, gid, 37, 200)
-	pi := prefixinfo.New(info)
+	pi, err := prefixinfo.New("dir", info)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ug00, ug10, ug01, ug11, ugOther := testutil.TestdataIDCombinationsFiles(modTime, uid, gid, 100)
 
 	pi.AppendInfoList(ug00)
@@ -98,7 +104,10 @@ func TestSysTypes(t *testing.T) {
 	}
 
 	for _, tc := range [][]file.Info{ug10, ug01, ug11, ugOther} {
-		pi := prefixinfo.New(info)
+		pi, err := prefixinfo.New("dir", info)
+		if err != nil {
+			t.Fatal(err)
+		}
 		pi.AppendInfoList(tc)
 		npi := prefixinfo.BinaryRoundTrip(t, &pi)
 		for _, fi := range npi.InfoList() {

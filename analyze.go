@@ -48,7 +48,7 @@ func (alz *analyzeCmd) analyze(ctx context.Context, values interface{}, args []s
 	return alz.analyzeFS(ctx, fs, values.(*analyzeFlags), args)
 }
 
-func (alz *analyzeCmd) analyzeFS(ctx context.Context, fs filewalk.FS, af *analyzeFlags, args []string) error {
+func (alz *analyzeCmd) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *analyzeFlags, args []string) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	if err := useMaxProcs(ctx); err != nil {
@@ -94,12 +94,12 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fs filewalk.FS, af *analyz
 	w := &walker{
 		cfg:      cfg,
 		db:       sdb,
-		fs:       fs,
+		fs:       fwfs,
 		pt:       pt,
 		slowScan: af.SlowScans,
 	}
 
-	w.lsi = asyncstat.New(fs,
+	w.lsi = asyncstat.New(fwfs,
 		asyncstat.WithAsyncStats(cfg.ConcurrentStats),
 		asyncstat.WithAsyncThreshold(cfg.ConcurrentStatsThreshold),
 		asyncstat.WithErrorLogger(w.logLStatError),
@@ -206,8 +206,15 @@ func (w *walker) handlePrefix(ctx context.Context, state *prefixState, prefix st
 		return true, false, nil
 	}
 
-	// info was obtained via lstat/stat and hence will have uid/gid information.
-	state.current = prefixinfo.New(info)
+	// info was obtained via lstat/stat and hence will have system level information
+	// such as uid, gid, dev, ino etc.
+	current, err := prefixinfo.New(prefix, info)
+	if err != nil {
+		w.dbLogErr(ctx, prefix, []byte(err.Error()))
+		// system level info (uid, gid, dev, ino) is not available.
+	}
+
+	state.current = current
 
 	ok, err := w.db.GetPrefixInfo(ctx, prefix, &state.existing)
 	if !ok {

@@ -8,8 +8,10 @@ package boolexpr
 
 import (
 	"fmt"
+	"io/fs"
 	"strings"
 
+	"cloudeng.io/cmd/idu/internal/hardlinks"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/internal/usernames"
 	"cloudeng.io/cmdutil/boolexpr"
@@ -17,60 +19,135 @@ import (
 	"cloudeng.io/file/matcher"
 )
 
-func NewParser() *boolexpr.Parser {
+func NewParser(fs fs.FS) *boolexpr.Parser {
 	parser := matcher.New()
+
 	parser.RegisterOperand("user",
 		func(_, v string) boolexpr.Operand {
 			return NewUID("user", v, usernames.Manager.UIDForName)
 		})
+
 	parser.RegisterOperand("group", func(_, v string) boolexpr.Operand {
 		return NewGID("group", v, usernames.Manager.GIDForName)
 	})
+
+	parser.RegisterOperand("hardlink", func(n, v string) boolexpr.Operand {
+		return NewHardlink(n, v, fs)
+	})
+
 	return parser
 }
 
-func CreateMatcher(parser *boolexpr.Parser, args []string) (Matcher, error) {
-	if len(args) == 0 {
-		// If no expression is specified, then always return true.
-		return Matcher{}, nil
+type Option func(o *options)
+
+func WithExpression(expr ...string) Option {
+	return func(o *options) {
+		o.args = append(o.args, expr...)
 	}
-	input := strings.Join(args, " ")
+}
+
+// WithHardlinkHandling enables incrmental detection of hardlinks so as to
+// avoid visiting the second and subsequent file system entries that
+// represent the same file. This is primarily useful for avoiding overcounting
+// the resources shared by hardlinks. With this option enabled, the matcher's
+// Entry method will return false for any file that has already been seen
+// (based on its device and inode numbers).
+func WithHardlinkHandling(v bool) Option {
+	return func(o *options) {
+		o.hardlinks = v
+	}
+}
+
+type options struct {
+	args      []string
+	hardlinks bool
+}
+
+func CreateMatcher(parser *boolexpr.Parser, opts ...Option) (Matcher, error) {
+	options := &options{}
+	for _, fn := range opts {
+		fn(options)
+	}
+	m := Matcher{}
+	if options.hardlinks {
+		m.hl = &hardlinks.Incremental{}
+	}
+	input := strings.Join(options.args, " ")
+	input = strings.TrimSpace(input)
+	if len(input) == 0 {
+		// If no expression is specified, then always return true.
+		return m, nil
+	}
 	expr, err := parser.Parse(input)
 	if err != nil {
 		return Matcher{}, fmt.Errorf("failed to parse expression: %v: %v\n", input, err)
 	}
-	return Matcher{T: expr}, nil
+	m.set = true
+	m.expr = expr
+	return m, nil
 }
 
 type Matcher struct {
-	boolexpr.T
+	set  bool
+	expr boolexpr.T
+	hl   *hardlinks.Incremental
 }
 
-func (m Matcher) Prefix(prefix string, info *prefixinfo.T) bool {
-	named := prefixinfo.NewNamed(prefix, info)
-	return m.Eval(named)
+func (m Matcher) IsHardlink(prefix string, info *prefixinfo.T, fi file.Info) bool {
+	if m.hl == nil {
+		return false
+	}
+	_, _, dev, ino := info.SysInfo(fi)
+	return m.hl.Ref(dev, ino)
 }
 
-type withids struct {
+func (m Matcher) Entry(prefix string, info *prefixinfo.T, fi file.Info) bool {
+	if !m.set {
+		return true
+	}
+	return m.expr.Eval(withsys{info, fi})
+}
+
+func (m Matcher) String() string {
+	if m.hl != nil {
+		return fmt.Sprintf("[hardlink handling enabled]: %v", m.expr.String())
+	}
+	return fmt.Sprintf("[hardlink handling disabled]: %v", m.expr.String())
+}
+
+type withsys struct {
 	pi *prefixinfo.T
 	fi file.Info
 }
 
-func (w withids) UserGroup() (uid, gid uint32) {
+func (w withsys) UserGroup() (uid, gid uint32) {
 	uid, gid, _, _ = w.pi.SysInfo(w.fi)
 	return
 }
 
-func (m Matcher) Entry(prefix string, info *prefixinfo.T, fi file.Info) bool {
-	return m.Eval(withids{info, fi})
+func (w withsys) DevIno() (dev, ino uint64) {
+	_, _, dev, ino = w.pi.SysInfo(w.fi)
+	return
 }
 
-type AlwaysTrue struct{}
-
-func (AlwaysTrue) Prefix(prefix string, info *prefixinfo.T) bool {
-	return true
+func (w withsys) Name() string {
+	return w.fi.Name()
 }
 
-func (AlwaysTrue) Entry(prefix string, info *prefixinfo.T, fi file.Info) bool {
+func (w withsys) Type() fs.FileMode {
+	return w.fi.Mode().Type()
+}
+
+func (w withsys) Mode() fs.FileMode {
+	return w.fi.Mode()
+}
+
+type AlwaysMatch struct{}
+
+func (AlwaysMatch) IsHardlink(prefix string, info *prefixinfo.T, fi file.Info) bool {
+	return false
+}
+
+func (AlwaysMatch) Entry(prefix string, info *prefixinfo.T, fi file.Info) bool {
 	return true
 }
