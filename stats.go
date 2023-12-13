@@ -93,23 +93,19 @@ func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *comput
 
 	parser := boolexpr.NewParser(fwfs)
 
-	match, err := boolexpr.CreateMatcher(parser,
-		boolexpr.WithExpression(args[1:]...),
-		boolexpr.WithHardlinkHandling(true))
-	if err != nil {
-		return err
-	}
-
 	ctx, cfg, rdb, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
 	if err != nil {
 		return err
 	}
 
-	if args[0] != cfg.Prefix {
-		fmt.Printf("warning: computing and storing stats for %v and not for %v\n", cfg.Prefix, args[0])
+	match, err := boolexpr.CreateMatcher(parser,
+		boolexpr.WithExpression(args[1:]...),
+		boolexpr.WithHardlinkHandling(cfg.CountHardlinkAsFiles)) // Move to config.
+	if err != nil {
+		return err
 	}
 
-	sdb, err := st.computeStats(ctx, rdb, match, cfg.Prefix, cfg.Calculator(), cf.ComputeN, cf.Progress)
+	sdb, err := st.computeStats(ctx, rdb, match, args[0], cfg.Calculator(), cf.ComputeN, cf.Progress)
 	if err != nil {
 		rdb.Close(ctx)
 		return err
@@ -131,6 +127,7 @@ func (st *statsCmds) computeStats(ctx context.Context, db database.DB, match boo
 	hasStorabeBytes := calc.String() != "identity"
 	sdb := reports.NewAllStats(prefix, hasStorabeBytes, topN)
 	n := 0
+
 	err := db.Stream(ctx, prefix, func(_ context.Context, k string, v []byte) {
 		if progress && (n != 0 && n%1000 == 0) {
 			fmt.Printf("processed % 10v entries\n", fmtCount(int64(n)))
@@ -245,7 +242,8 @@ func (hf heapFormatter[T]) formatTotals(h *reports.Heaps[T], out io.Writer) {
 		fmt.Fprintf(out, "Storage:  %v\n", fmtSize(h.TotalStorageBytes))
 	}
 	fmt.Fprintf(out, "Files:    %v\n", fmtCount(h.TotalFiles))
-	fmt.Fprintf(out, "Prefixes: %v\n\n", fmtCount(h.TotalPrefixes))
+	fmt.Fprintf(out, "Prefixes: %v\n", fmtCount(h.TotalPrefixes))
+	fmt.Fprintf(out, "Total:    %v\n\n", fmtCount(h.TotalFiles+h.TotalPrefixes))
 }
 
 func (st *statsCmds) formatPerIDStats(s reports.PerIDStats, out io.Writer, nameForID func(uint32) string, ids map[uint32]bool, n int) {

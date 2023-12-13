@@ -18,11 +18,10 @@ import (
 	"cloudeng.io/file/filewalk/localfs"
 )
 
-func createMatcher(t *testing.T, fs fs.FS, hl bool, expr string) boolexpr.Matcher {
+func createMatcher(t *testing.T, fs fs.FS, expr string) boolexpr.Matcher {
 	parser := boolexpr.NewParser(fs)
 	matcher, err := boolexpr.CreateMatcher(parser,
-		boolexpr.WithExpression(expr),
-		boolexpr.WithHardlinkHandling(hl))
+		boolexpr.WithExpression(expr))
 	if err != nil {
 		t.Fatalf("failed to create matcher: %v", err)
 	}
@@ -37,46 +36,28 @@ func TestIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	pi.AppendInfo(file.NewInfo("bar", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, 30, 40)))
+	pi.AppendInfo(file.NewInfo("dir", 0, fs.ModeDir, time.Now(), prefixinfo.NewSysInfo(10, 20, 30, 40)))
 
-	matcher := createMatcher(t, nil, false, "user=1")
-	if !matcher.Prefix("foo", &pi) {
-		t.Errorf("failed to match")
-	}
+	for _, fi := range pi.InfoList() {
+		matcher := createMatcher(t, nil, "user=10")
+		if !matcher.Entry("foo", &pi, fi) {
+			t.Errorf("failed to match")
+		}
 
-	matcher = createMatcher(t, nil, false, "user=2")
-	if matcher.Prefix("foo", &pi) {
-		t.Errorf("incorrect match")
-	}
+		matcher = createMatcher(t, nil, "user=20")
+		if matcher.Entry("foo", &pi, fi) {
+			t.Errorf("incorrect match")
+		}
 
-	matcher = createMatcher(t, nil, false, "group=2")
-	if !matcher.Prefix("foo", &pi) {
-		t.Errorf("failed to match")
-	}
+		matcher = createMatcher(t, nil, "group=20")
+		if !matcher.Entry("foo", &pi, fi) {
+			t.Errorf("failed to match")
+		}
 
-	matcher = createMatcher(t, nil, false, "group=3")
-	if matcher.Prefix("foo", &pi) {
-		t.Errorf("incorrect match")
-	}
-
-	fi = pi.InfoList()[0]
-	matcher = createMatcher(t, nil, false, "user=10")
-	if !matcher.Entry("foo", &pi, fi) {
-		t.Errorf("failed to match")
-	}
-
-	matcher = createMatcher(t, nil, false, "user=20")
-	if matcher.Entry("foo", &pi, fi) {
-		t.Errorf("incorrect match")
-	}
-
-	matcher = createMatcher(t, nil, false, "group=20")
-	if !matcher.Entry("foo", &pi, fi) {
-		t.Errorf("failed to match")
-	}
-
-	matcher = createMatcher(t, nil, false, "group=30")
-	if matcher.Entry("foo", &pi, fi) {
-		t.Errorf("incorrect match")
+		matcher = createMatcher(t, nil, "group=30")
+		if matcher.Entry("foo", &pi, fi) {
+			t.Errorf("incorrect match")
+		}
 	}
 
 }
@@ -110,7 +91,7 @@ func TestHardlinks(t *testing.T) {
 	pi.AppendInfoList(file.InfoList{a, b, c})
 
 	lfs := localfs.New()
-	matcher := createMatcher(t, lfs, false, fmt.Sprintf("hardlink='%v'", ta))
+	matcher := createMatcher(t, lfs, fmt.Sprintf("hardlink='%v'", ta))
 	for i, fi := range pi.InfoList() {
 		want := false
 		if i == 1 {

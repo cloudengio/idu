@@ -35,9 +35,7 @@ func (fc *findCmds) findFS(ctx context.Context, fwfs filewalk.FS, ff *findFlags,
 
 	parser := boolexpr.NewParser(fwfs)
 
-	match, err := boolexpr.CreateMatcher(parser,
-		boolexpr.WithExpression(args[1:]...),
-		boolexpr.WithHardlinkHandling(ff.HandleHardlinks))
+	match, err := boolexpr.CreateMatcher(parser, boolexpr.WithExpression(args[1:]...))
 	if err != nil {
 		return err
 	}
@@ -54,17 +52,17 @@ func (fc *findCmds) findFS(ctx context.Context, fwfs filewalk.FS, ff *findFlags,
 		if !strings.HasPrefix(k, args[0]) {
 			return false
 		}
-
 		var pi prefixinfo.T
 		if err := pi.UnmarshalBinary(v); err != nil {
 			errs.Append(fmt.Errorf("failed to unmarshal value for %v: %v", k, err))
 			return false
 		}
-		if match.Prefix(k, &pi) {
+		if k == args[0] {
+			n := strings.TrimSuffix(k, sep)
 			if ff.Long {
-				fmt.Println(fs.FormatFileInfo(internal.PrefixInfoAsFSInfo(pi, k)))
+				fmt.Println(fs.FormatFileInfo(internal.PrefixInfoAsFSInfo(pi, n)))
 			} else {
-				fmt.Printf("%v/\n", k)
+				fmt.Printf("%v\n", n)
 			}
 		}
 		for _, fi := range pi.InfoList() {
@@ -72,7 +70,8 @@ func (fc *findCmds) findFS(ctx context.Context, fwfs filewalk.FS, ff *findFlags,
 				if ff.Long {
 					fmt.Println("    ", fs.FormatFileInfo(fi))
 				} else {
-					fmt.Printf("%v\n", k+sep+fi.Name())
+					n := strings.TrimSuffix(k, sep) + sep + fi.Name()
+					fmt.Printf("%v\n", n)
 				}
 			}
 		}

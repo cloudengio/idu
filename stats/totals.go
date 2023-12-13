@@ -88,11 +88,11 @@ func (tl *PerIDTotals) UnmarshalBinary(data []byte) error {
 }
 
 type Matcher interface {
-	Prefix(prefix string, pi *prefixinfo.T) bool
+	IsHardlink(prefix string, pi *prefixinfo.T, fi file.Info) bool
 	Entry(prefix string, pi *prefixinfo.T, fi file.Info) bool
 }
 
-func (t Totals) update(fi file.Info, du diskusage.Calculator) Totals {
+func (t Totals) update(fi file.Info, hardlink bool, du diskusage.Calculator) Totals {
 	if fi.IsDir() {
 		t.Prefixes++
 		t.PrefixBytes += fi.Size()
@@ -119,18 +119,16 @@ func (pid perID) flatten() PerIDTotals {
 }
 
 func ComputeTotals(prefix string, pi *prefixinfo.T, du diskusage.Calculator, match Matcher) (totals Totals, perUser, perGroup PerIDTotals) {
-	if !match.Prefix(prefix, pi) {
-		return
-	}
 	user, group := make(perID), make(perID)
 	for _, fi := range pi.InfoList() {
 		if !match.Entry(prefix, pi, fi) {
 			continue
 		}
+		hl := match.IsHardlink(prefix, pi, fi)
 		uid, gid, _, _ := pi.SysInfo(fi)
-		totals = totals.update(fi, du)
-		user[uid] = user[uid].update(fi, du)
-		group[gid] = group[gid].update(fi, du)
+		totals = totals.update(fi, hl, du)
+		user[uid] = user[uid].update(fi, hl, du)
+		group[gid] = group[gid].update(fi, hl, du)
 	}
 	return totals, user.flatten(), group.flatten()
 }

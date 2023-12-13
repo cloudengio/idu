@@ -9,6 +9,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -341,6 +342,7 @@ func (db *Database) Stream(ctx context.Context, path string, visitor func(ctx co
 	stream.ChooseKey = func(item *badger.Item) bool {
 		return item.Key()[0] == prefixBucket
 	}
+	stream.NumGo = runtime.NumCPU()
 	stream.KeyToList = nil
 	stream.Send = func(buf *z.Buffer) error {
 		list, err := badger.BufferToKVList(buf)

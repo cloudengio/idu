@@ -223,7 +223,6 @@ func compareSummary(t *testing.T, got anaylzeSummary,
 func TestAnalyze(t *testing.T) {
 	ctx := context.Background()
 	testAnalyze(ctx, t)
-
 }
 
 func testAnalyze(ctx context.Context, t *testing.T) {

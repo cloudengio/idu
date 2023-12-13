@@ -27,6 +27,7 @@ type Prefix struct {
 	ScanSize                 int      `yaml:"scan_size" cmd:"maximum number of items to fetch from the filesystem in a single operation"`
 	Exclusions               []string `yaml:"exclusions" cmd:"prefixes and files matching these regular expressions will be ignored when building a dataase"`
 	Layout                   layout   `yaml:"layout" cmd:"the filesystem layout to use for calculating raw bytes used"`
+	CountHardlinkAsFiles     bool     `yaml:"count_hardlinks_as_files" cmd:"if true, hardlinks will be counted as separate files"`
 
 	regexps    []*regexp.Regexp
 	calculator diskusage.Calculator

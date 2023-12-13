@@ -195,7 +195,7 @@ func TestReportStatsSingleID(t *testing.T) {
 		}
 
 		sdb := reports.NewAllStats("test", true, 5)
-		computeStats(t, sdb, calc, pikeys, boolexpr.AlwaysTrue{}, pis...)
+		computeStats(t, sdb, calc, pikeys, boolexpr.AlwaysMatch{}, pis...)
 
 		compareIDs(t, sdb.PerUser.ByPrefix, tc.uid)
 		compareIDs(t, sdb.PerGroup.ByPrefix, tc.gid)
@@ -366,7 +366,7 @@ func testIDExpr(t *testing.T, pikeys []string, pis []prefixinfo.T, uids, gids []
 	parser := boolexpr.NewParser(nil)
 
 	for _, uid := range uids {
-		matcher, err := boolexpr.CreateMatcher(parser, boolexpr.WithExpression(fmt.Sprintf("type=d || user=%d", uid)))
+		matcher, err := boolexpr.CreateMatcher(parser, boolexpr.WithExpression(fmt.Sprintf("user=%d", uid)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -374,7 +374,7 @@ func testIDExpr(t *testing.T, pikeys []string, pis []prefixinfo.T, uids, gids []
 	}
 
 	for _, gid := range gids {
-		matcher, err := boolexpr.CreateMatcher(parser, boolexpr.WithExpression(fmt.Sprintf("type=d || group=%d", gid)))
+		matcher, err := boolexpr.CreateMatcher(parser, boolexpr.WithExpression(fmt.Sprintf("group=%d", gid)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -386,7 +386,7 @@ func testAllIDs(t *testing.T, pikeys []string, pis []prefixinfo.T, totals testSt
 	calc := times2{}
 
 	sdb := reports.NewAllStats("test", true, 5)
-	computeStats(t, sdb, calc, pikeys, boolexpr.AlwaysTrue{}, pis...)
+	computeStats(t, sdb, calc, pikeys, boolexpr.AlwaysMatch{}, pis...)
 
 	compareHeapTotals(t, sdb.Prefix, totals)
 

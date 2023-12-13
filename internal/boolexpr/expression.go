@@ -93,22 +93,15 @@ type Matcher struct {
 	hl   *hardlinks.Incremental
 }
 
-func (m Matcher) Prefix(prefix string, info *prefixinfo.T) bool {
-	if !m.set {
-		return true
+func (m Matcher) IsHardlink(prefix string, info *prefixinfo.T, fi file.Info) bool {
+	if m.hl == nil {
+		return false
 	}
-	named := prefixinfo.NewNamed(prefix, info)
-	return m.expr.Eval(named)
+	_, _, dev, ino := info.SysInfo(fi)
+	return m.hl.Ref(dev, ino)
 }
 
 func (m Matcher) Entry(prefix string, info *prefixinfo.T, fi file.Info) bool {
-	if m.hl != nil {
-		_, _, dev, ino := info.SysInfo(fi)
-		if m.hl.Ref(dev, ino) {
-			// seen before.
-			return false
-		}
-	}
 	if !m.set {
 		return true
 	}
@@ -141,12 +134,20 @@ func (w withsys) Name() string {
 	return w.fi.Name()
 }
 
-type AlwaysTrue struct{}
-
-func (AlwaysTrue) Prefix(prefix string, info *prefixinfo.T) bool {
-	return true
+func (w withsys) Type() fs.FileMode {
+	return w.fi.Type()
 }
 
-func (AlwaysTrue) Entry(prefix string, info *prefixinfo.T, fi file.Info) bool {
+func (w withsys) Mode() fs.FileMode {
+	return w.fi.Mode()
+}
+
+type AlwaysMatch struct{}
+
+func (AlwaysMatch) IsHardlink(prefix string, info *prefixinfo.T, fi file.Info) bool {
+	return false
+}
+
+func (AlwaysMatch) Entry(prefix string, info *prefixinfo.T, fi file.Info) bool {
 	return true
 }
