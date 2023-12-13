@@ -135,7 +135,7 @@ func (w withsys) Name() string {
 }
 
 func (w withsys) Type() fs.FileMode {
-	return w.fi.Type()
+	return w.fi.Mode().Type()
 }
 
 func (w withsys) Mode() fs.FileMode {
