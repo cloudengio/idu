@@ -63,7 +63,7 @@ func TestTotals(t *testing.T) {
 		pi.AppendInfoList(tc.fi)
 		pi.AppendInfoList(tc.fd)
 
-		totals, us, gs := stats.ComputeTotals("", &pi, times2{}, boolexpr.AlwaysTrue{})
+		totals, us, gs := stats.ComputeTotals("", &pi, times2{}, boolexpr.AlwaysMatch{})
 
 		sort.Slice(us, func(i, j int) bool { return us[i].ID < us[j].ID })
 		sort.Slice(gs, func(i, j int) bool { return gs[i].ID < gs[j].ID })
