@@ -19,8 +19,7 @@ import (
 )
 
 type findFlags struct {
-	Long            bool `subcmd:"long,false,'show long listing for each result'"`
-	HandleHardlinks bool `subcmd:"handle-hardlinks,false,'handle hardlinks'"`
+	Long bool `subcmd:"long,false,'show long listing for each result'"`
 }
 
 type findCmds struct{}
