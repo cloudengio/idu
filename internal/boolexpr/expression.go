@@ -97,7 +97,7 @@ func (m Matcher) IsHardlink(prefix string, info *prefixinfo.T, fi file.Info) boo
 	if m.hl == nil {
 		return false
 	}
-	_, _, dev, ino := info.SysInfo(fi)
+	_, _, dev, ino, _ := info.SysInfo(fi)
 	return m.hl.Ref(dev, ino)
 }
 
@@ -121,12 +121,12 @@ type withsys struct {
 }
 
 func (w withsys) UserGroup() (uid, gid uint32) {
-	uid, gid, _, _ = w.pi.SysInfo(w.fi)
+	uid, gid, _, _, _ = w.pi.SysInfo(w.fi)
 	return
 }
 
 func (w withsys) DevIno() (dev, ino uint64) {
-	_, _, dev, ino = w.pi.SysInfo(w.fi)
+	_, _, dev, ino, _ = w.pi.SysInfo(w.fi)
 	return
 }
 
@@ -135,7 +135,7 @@ func (w withsys) Name() string {
 }
 
 func (w withsys) Type() fs.FileMode {
-	return w.fi.Mode().Type()
+	return w.fi.Type()
 }
 
 func (w withsys) Mode() fs.FileMode {

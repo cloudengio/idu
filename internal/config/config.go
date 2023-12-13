@@ -26,8 +26,9 @@ type Prefix struct {
 	SetMaxThreads            int      `yaml:"set_max_threads" cmd:"if non-zero used for debug.SetMaxThreads"`
 	ScanSize                 int      `yaml:"scan_size" cmd:"maximum number of items to fetch from the filesystem in a single operation"`
 	Exclusions               []string `yaml:"exclusions" cmd:"prefixes and files matching these regular expressions will be ignored when building a dataase"`
-	Layout                   layout   `yaml:"layout" cmd:"the filesystem layout to use for calculating raw bytes used"`
 	CountHardlinkAsFiles     bool     `yaml:"count_hardlinks_as_files" cmd:"if true, hardlinks will be counted as separate files"`
+
+	Layout layout `yaml:"layout" cmd:"the filesystem layout to use for calculating raw bytes used"`
 
 	regexps    []*regexp.Regexp
 	calculator diskusage.Calculator
@@ -169,7 +170,7 @@ func blockCalc(n yaml.Node) (diskusage.Calculator, error) {
 	if err := n.Decode(&b); err != nil {
 		return nil, fmt.Errorf("failed parsing block layout parameters: %v", err)
 	}
-	return diskusage.NewSimple(b.BlockSize), nil
+	return diskusage.NewBlock(b.BlockSize), nil
 }
 
 func blockDesc() string {

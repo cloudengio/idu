@@ -100,7 +100,7 @@ func (t Totals) update(fi file.Info, hardlink bool, du diskusage.Calculator) Tot
 	}
 	t.Files++
 	t.Bytes += fi.Size()
-	t.StorageBytes += du.Calculate(fi.Size())
+	t.StorageBytes += du.Calculate(fi.Blocks())
 	return t
 }
 
@@ -125,7 +125,7 @@ func ComputeTotals(prefix string, pi *prefixinfo.T, du diskusage.Calculator, mat
 			continue
 		}
 		hl := match.IsHardlink(prefix, pi, fi)
-		uid, gid, _, _ := pi.SysInfo(fi)
+		uid, gid, _, _, blocks := pi.SysInfo(fi)
 		totals = totals.update(fi, hl, du)
 		user[uid] = user[uid].update(fi, hl, du)
 		group[gid] = group[gid].update(fi, hl, du)
