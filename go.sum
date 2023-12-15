@@ -35,6 +35,8 @@ cloudeng.io/cmdutil v0.0.0-20231213200048-831633bb3d35 h1:u6TSJAvQZXXuBpqqehgEGZ
 cloudeng.io/cmdutil v0.0.0-20231213200048-831633bb3d35/go.mod h1:hoYkAtqaZlVijfSsWNwe+ntymZcYlIejsGaoX3oztAU=
 cloudeng.io/cmdutil v0.0.0-20231215173023-0b284985cfae h1:qyDrsh+2rNHr7814jb9SwJSOjyCuxcPSr3MxpUqGQDw=
 cloudeng.io/cmdutil v0.0.0-20231215173023-0b284985cfae/go.mod h1:hoYkAtqaZlVijfSsWNwe+ntymZcYlIejsGaoX3oztAU=
+cloudeng.io/cmdutil v0.0.0-20231215194107-6c5b9307c104 h1:kkIQZbIIU6Mtw4zcbrHTIBMCQPllRdIx0oDadxdVAvg=
+cloudeng.io/cmdutil v0.0.0-20231215194107-6c5b9307c104/go.mod h1:hoYkAtqaZlVijfSsWNwe+ntymZcYlIejsGaoX3oztAU=
 cloudeng.io/debug v0.0.0-20230105021008-948d22470af5 h1:zsKXQfoCtN7whSQIdpArUNxKTtQG3+vpd1XJ8qzcWBA=
 cloudeng.io/debug v0.0.0-20230105021008-948d22470af5/go.mod h1:UDKUtuaCh0+iaDe5+i70G3l3liexOPeU3h0lyUeAt+o=
 cloudeng.io/errors v0.0.8 h1:WEpTcAYnL2wsPm0qfMpXRupoO61DahxbD4doPKbsaGY=
