@@ -21,7 +21,7 @@ import (
 func createMatcher(t *testing.T, fs fs.FS, expr string) boolexpr.Matcher {
 	parser := boolexpr.NewParser(fs)
 	matcher, err := boolexpr.CreateMatcher(parser,
-		boolexpr.WithExpression(expr))
+		boolexpr.WithEntryExpression(expr))
 	if err != nil {
 		t.Fatalf("failed to create matcher: %v", err)
 	}
@@ -30,13 +30,13 @@ func createMatcher(t *testing.T, fs fs.FS, expr string) boolexpr.Matcher {
 
 func TestIDs(t *testing.T) {
 
-	fi := file.NewInfo("foo", 0, 0, time.Now(), prefixinfo.NewSysInfo(1, 2, 3, 4))
+	fi := file.NewInfo("foo", 0, 0, time.Now(), prefixinfo.NewSysInfo(1, 2, 3, 4, 5))
 	pi, err := prefixinfo.New("foo", fi)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pi.AppendInfo(file.NewInfo("bar", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, 30, 40)))
-	pi.AppendInfo(file.NewInfo("dir", 0, fs.ModeDir, time.Now(), prefixinfo.NewSysInfo(10, 20, 30, 40)))
+	pi.AppendInfo(file.NewInfo("bar", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, 30, 40, 10)))
+	pi.AppendInfo(file.NewInfo("dir", 0, fs.ModeDir, time.Now(), prefixinfo.NewSysInfo(10, 20, 30, 40, 10)))
 
 	for _, fi := range pi.InfoList() {
 		matcher := createMatcher(t, nil, "user=10")
@@ -75,19 +75,19 @@ func TestHardlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	fi := file.NewInfoFromFileInfo(info)
-	_, _, dev, ino, err := prefixinfo.GetSysInfo(ta, fi)
+	_, _, dev, ino, blocks, err := prefixinfo.GetSysInfo(ta, fi)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fi.SetSys(prefixinfo.NewSysInfo(10, 20, 1000, 1000))
+	fi.SetSys(prefixinfo.NewSysInfo(10, 20, 1000, 1000, blocks))
 	pi, err := prefixinfo.New("foo", fi)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	a := file.NewInfo("a", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, 30, ino))
-	b := file.NewInfo("b", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, dev, ino))
-	c := file.NewInfo("c", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, dev, 40))
+	a := file.NewInfo("a", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, 30, ino, 10))
+	b := file.NewInfo("b", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, dev, ino, 10))
+	c := file.NewInfo("c", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, dev, 40, 10))
 	pi.AppendInfoList(file.InfoList{a, b, c})
 
 	lfs := localfs.New()

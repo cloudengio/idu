@@ -22,6 +22,7 @@ import (
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/cmd/idu/internal/usernames"
+	"cloudeng.io/cmdutil/flags"
 	"cloudeng.io/file/diskusage"
 	"cloudeng.io/file/filewalk"
 	"cloudeng.io/file/filewalk/localfs"
@@ -35,25 +36,34 @@ type statsFileFormat struct {
 }
 
 func loadStats(filename string) (statsFileFormat, error) {
+	var stats statsFileFormat
+	if filename == "-" {
+		if err := gob.NewDecoder(os.Stdin).Decode(&stats); err != nil {
+			return statsFileFormat{}, err
+		}
+		return stats, nil
+	}
 	buf, err := os.ReadFile(filename)
 	if err != nil {
 		return statsFileFormat{}, err
 	}
-	var stats statsFileFormat
 	if err := gob.NewDecoder(bytes.NewBuffer(buf)).Decode(&stats); err != nil {
 		return statsFileFormat{}, err
 	}
 	return stats, nil
 }
 
-func saveStats(dir string, stats statsFileFormat) error {
-	basename := stats.Date.Format(time.DateTime)
-	basename = strings.TrimSuffix(basename, ".idustats") + ".idustats"
-	filename := filepath.Join(dir, basename)
+func saveStats(dir string, stdout bool, stats statsFileFormat) error {
+	if stdout {
+		return gob.NewEncoder(os.Stdout).Encode(stats)
+	}
 	buf := &bytes.Buffer{}
 	if err := gob.NewEncoder(buf).Encode(stats); err != nil {
 		return err
 	}
+	basename := stats.Date.Format(time.DateTime)
+	basename = strings.TrimSuffix(basename, ".idustats") + ".idustats"
+	filename := filepath.Join(dir, basename)
 	if err := os.WriteFile(filename, buf.Bytes(), 0660); err != nil { //nolint:gosec
 		return err
 	}
@@ -71,9 +81,11 @@ type StatsFlags struct {
 }
 
 type computeFlags struct {
-	ComputeN int    `subcmd:"n,2000,number of top entries to compute"`
-	Progress bool   `subcmd:"progress,false,show progress"`
-	StatsDir string `subcmd:"stats-dir,stats,'directory that stats files are written to'"`
+	ComputeN int             `subcmd:"n,2000,number of top entries to compute"`
+	Progress bool            `subcmd:"progress,false,show progress"`
+	StatsDir string          `subcmd:"stats-dir,stats,'directory that stats files are written to'"`
+	Stdout   bool            `subcmd:"stdout,false,'write stats to stdout'"`
+	Prefix   flags.Repeating `subcmd:"prefix,,'prefix match expression'"`
 }
 
 type viewFlags struct {
@@ -99,7 +111,8 @@ func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *comput
 	}
 
 	match, err := boolexpr.CreateMatcher(parser,
-		boolexpr.WithExpression(args[1:]...),
+		boolexpr.WithEntryExpression(args[1:]...),
+		boolexpr.WithPrefixExpression(cf.Prefix.Values...),
 		boolexpr.WithHardlinkHandling(cfg.CountHardlinkAsFiles)) // Move to config.
 	if err != nil {
 		return err
@@ -119,7 +132,7 @@ func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *comput
 		Expression: match.String(),
 		Stats:      sdb,
 	}
-	return saveStats(cf.StatsDir, stats)
+	return saveStats(cf.StatsDir, cf.Stdout, stats)
 }
 
 func (st *statsCmds) computeStats(ctx context.Context, db database.DB, match boolexpr.Matcher, prefix string, calc diskusage.Calculator, topN int, progress bool) (*reports.AllStats, error) {
@@ -133,7 +146,6 @@ func (st *statsCmds) computeStats(ctx context.Context, db database.DB, match boo
 			fmt.Printf("processed % 10v entries\n", fmtCount(int64(n)))
 		}
 		n++
-
 		var pi prefixinfo.T
 		if err := pi.UnmarshalBinary(v); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to unmarshal value for %v: %v\n", k, err)
@@ -143,9 +155,12 @@ func (st *statsCmds) computeStats(ctx context.Context, db database.DB, match boo
 			fmt.Fprintf(os.Stderr, "failed to compute stats for %v: %v\n", k, err)
 			return
 		}
-
 	})
-	fmt.Printf("processed % 10v entries\n", fmtCount(int64(n)))
+
+	if progress {
+		fmt.Printf("processed % 10v entries\n", fmtCount(int64(n)))
+	}
+
 	sdb.Finalize()
 	return sdb, err
 }

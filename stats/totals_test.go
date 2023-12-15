@@ -17,12 +17,12 @@ import (
 	"cloudeng.io/file"
 )
 
-type times2 struct{}
+type sumSizeAndBlocks struct{}
 
-func (times2) Calculate(n int64) int64 { return n * 2 }
+func (sumSizeAndBlocks) Calculate(n, b int64) int64 { return n + b }
 
-func (times2) String() string {
-	return "plus10"
+func (sumSizeAndBlocks) String() string {
+	return "sumSizeAndBlocks"
 }
 
 func TestTotals(t *testing.T) {
@@ -59,11 +59,11 @@ func TestTotals(t *testing.T) {
 		{ug11, ug11d, []uint32{uid, uid + 1}, []uint32{gid, gid + 1}, 3},
 		{ugOther, ugOtherd, []uint32{uid + 1}, []uint32{gid + 1}, 4},
 	} {
-		pi := testutil.TestdataNewPrefixInfo("dir", 1, 0700, modTime, uid, gid, 33, 100)
+		pi := testutil.TestdataNewPrefixInfo("dir", 1, 1, 0700, modTime, uid, gid, 33, 100)
 		pi.AppendInfoList(tc.fi)
 		pi.AppendInfoList(tc.fd)
 
-		totals, us, gs := stats.ComputeTotals("", &pi, times2{}, boolexpr.AlwaysMatch{})
+		totals, us, gs := stats.ComputeTotals("", &pi, sumSizeAndBlocks{}, boolexpr.AlwaysMatch{})
 
 		sort.Slice(us, func(i, j int) bool { return us[i].ID < us[j].ID })
 		sort.Slice(gs, func(i, j int) bool { return gs[i].ID < gs[j].ID })

@@ -7,6 +7,7 @@ package stats
 import (
 	"encoding/binary"
 
+	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/file"
 	"cloudeng.io/file/diskusage"
@@ -87,20 +88,19 @@ func (tl *PerIDTotals) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-type Matcher interface {
-	IsHardlink(prefix string, pi *prefixinfo.T, fi file.Info) bool
-	Entry(prefix string, pi *prefixinfo.T, fi file.Info) bool
-}
-
-func (t Totals) update(fi file.Info, hardlink bool, du diskusage.Calculator) Totals {
+func (t Totals) update(fi file.Info, hardlink bool, blocks int64, du diskusage.Calculator) Totals {
 	if fi.IsDir() {
 		t.Prefixes++
-		t.PrefixBytes += fi.Size()
+		if !hardlink {
+			t.PrefixBytes += fi.Size()
+		}
 		return t
 	}
 	t.Files++
-	t.Bytes += fi.Size()
-	t.StorageBytes += du.Calculate(fi.Size())
+	if !hardlink {
+		t.Bytes += fi.Size()
+		t.StorageBytes += du.Calculate(fi.Size(), blocks)
+	}
 	return t
 }
 
@@ -118,17 +118,17 @@ func (pid perID) flatten() PerIDTotals {
 	return tl
 }
 
-func ComputeTotals(prefix string, pi *prefixinfo.T, du diskusage.Calculator, match Matcher) (totals Totals, perUser, perGroup PerIDTotals) {
+func ComputeTotals(prefix string, pi *prefixinfo.T, du diskusage.Calculator, match boolexpr.Matcher) (totals Totals, perUser, perGroup PerIDTotals) {
 	user, group := make(perID), make(perID)
 	for _, fi := range pi.InfoList() {
 		if !match.Entry(prefix, pi, fi) {
 			continue
 		}
 		hl := match.IsHardlink(prefix, pi, fi)
-		uid, gid, _, _ := pi.SysInfo(fi)
-		totals = totals.update(fi, hl, du)
-		user[uid] = user[uid].update(fi, hl, du)
-		group[gid] = group[gid].update(fi, hl, du)
+		uid, gid, _, _, blocks := pi.SysInfo(fi)
+		totals = totals.update(fi, hl, blocks, du)
+		user[uid] = user[uid].update(fi, hl, blocks, du)
+		group[gid] = group[gid].update(fi, hl, blocks, du)
 	}
 	return totals, user.flatten(), group.flatten()
 }

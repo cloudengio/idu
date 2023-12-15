@@ -37,7 +37,7 @@ func (hl *Hardlink) Prepare() (boolexpr.Operand, error) {
 		return nil, err
 	}
 	fi := file.NewInfoFromFileInfo(info)
-	_, _, dev, ino, err := prefixinfo.GetSysInfo(hl.text, fi)
+	_, _, dev, ino, _, err := prefixinfo.GetSysInfo(hl.text, fi)
 	if err != nil {
 		return nil, err
 	}

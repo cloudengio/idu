@@ -22,24 +22,24 @@ import (
 // ugOther has uid+1, gid+1 for both files
 func TestdataIDCombinations(modTime time.Time, mode fs.FileMode, uid, gid uint32, inode uint64) (ug00, ug10, ug01, ug11, ugOther []file.Info) {
 	ug00 = []file.Info{
-		TestdataNewInfo("0", 1, mode, modTime, uid, gid, 0, inode),
-		TestdataNewInfo("1", 2, mode, modTime, uid, gid, 0, inode),
+		TestdataNewInfo("0", 1, 1, mode, modTime, uid, gid, 0, inode),
+		TestdataNewInfo("1", 2, 2, mode, modTime, uid, gid, 0, inode),
 	}
 	ug10 = []file.Info{
-		TestdataNewInfo("0", 1, mode, modTime, uid, gid, 0, inode),
-		TestdataNewInfo("1", 2, mode, modTime, uid+1, gid, 0, inode),
+		TestdataNewInfo("0", 1, 1, mode, modTime, uid, gid, 0, inode),
+		TestdataNewInfo("1", 2, 2, mode, modTime, uid+1, gid, 0, inode),
 	}
 	ug01 = []file.Info{
-		TestdataNewInfo("0", 1, mode, modTime, uid, gid, 0, inode),
-		TestdataNewInfo("1", 2, mode, modTime, uid, gid+1, 0, inode),
+		TestdataNewInfo("0", 1, 1, mode, modTime, uid, gid, 0, inode),
+		TestdataNewInfo("1", 2, 2, mode, modTime, uid, gid+1, 0, inode),
 	}
 	ug11 = []file.Info{
-		TestdataNewInfo("0", 1, mode, modTime, uid, gid, 0, inode),
-		TestdataNewInfo("1", 2, mode, modTime, uid+1, gid+1, 0, inode),
+		TestdataNewInfo("0", 1, 1, mode, modTime, uid, gid, 0, inode),
+		TestdataNewInfo("1", 2, 2, mode, modTime, uid+1, gid+1, 0, inode),
 	}
 	ugOther = []file.Info{
-		TestdataNewInfo("0", 1, mode, modTime, uid+1, gid+1, 0, inode),
-		TestdataNewInfo("1", 2, mode, modTime, uid+1, gid+1, 0, inode),
+		TestdataNewInfo("0", 1, 1, mode, modTime, uid+1, gid+1, 0, inode),
+		TestdataNewInfo("1", 2, 2, mode, modTime, uid+1, gid+1, 0, inode),
 	}
 	return
 }
@@ -52,12 +52,13 @@ func TestdataIDCombinationsDirs(modTime time.Time, uid, gid uint32, inode uint64
 	return TestdataIDCombinations(modTime, 0700|os.ModeDir, uid, gid, inode)
 }
 
-func TestdataNewInfo(name string, size int64, mode fs.FileMode, modTime time.Time, uid, gid uint32, device, inode uint64) file.Info {
-	return file.NewInfo(name, size, mode, modTime, prefixinfo.NewSysInfo(uid, gid, device, inode))
+func TestdataNewInfo(name string, size, blocks int64, mode fs.FileMode, modTime time.Time, uid, gid uint32, device, inode uint64) file.Info {
+	return file.NewInfo(name, size, mode, modTime,
+		prefixinfo.NewSysInfo(uid, gid, device, inode, blocks))
 }
 
-func TestdataNewPrefixInfo(name string, size int64, mode fs.FileMode, modTime time.Time, uid, gid uint32, dev, inode uint64) prefixinfo.T {
-	pi, err := prefixinfo.New(name, TestdataNewInfo(name, size, mode, modTime, uid, gid, dev, inode))
+func TestdataNewPrefixInfo(name string, size, blocks int64, mode fs.FileMode, modTime time.Time, uid, gid uint32, dev, inode uint64) prefixinfo.T {
+	pi, err := prefixinfo.New(name, TestdataNewInfo(name, size, blocks, mode, modTime, uid, gid, dev, inode))
 	if err != nil {
 		panic(err)
 	}

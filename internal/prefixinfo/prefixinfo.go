@@ -25,10 +25,12 @@ type T struct {
 	device     uint64
 	inode      uint64
 	size       int64
+	nblocks    int64
 	mode       fs.FileMode
 	modTime    time.Time
 	entries    file.InfoList // files and prefixes only
 	inodes     []uint64
+	blocks     []int64
 	userIDMap  idMaps
 	groupIDMap idMaps
 	finalized  bool
@@ -42,12 +44,13 @@ type T struct {
 // information. On Windows in particular this means that user and device/inode
 // information may not be available.
 func New(pathname string, info file.Info) (T, error) {
-	uid, gid, dev, ino, err := GetSysInfo(pathname, info)
+	uid, gid, dev, ino, blocks, err := GetSysInfo(pathname, info)
 	return T{
 		userID:  uid,
 		groupID: gid,
 		device:  dev,
 		inode:   ino,
+		nblocks: blocks,
 		size:    info.Size(),
 		modTime: info.ModTime(),
 		mode:    info.Mode(),
@@ -68,6 +71,10 @@ func (pi *T) AppendInfo(entry file.Info) {
 
 func (pi T) Size() int64 {
 	return pi.size
+}
+
+func (pi T) Blocks() int64 {
+	return pi.nblocks
 }
 
 func (pi T) Mode() fs.FileMode {
@@ -142,7 +149,8 @@ func (pi *T) AppendBinary(buf *bytes.Buffer) error {
 	var storage [128]byte
 	data := storage[:0]
 	data = append(data, 0x2)                              // version
-	data = binary.AppendVarint(data, pi.size)             // user id
+	data = binary.AppendVarint(data, pi.size)             // size
+	data = binary.AppendVarint(data, pi.nblocks)          // nblocks
 	data = binary.AppendUvarint(data, uint64(pi.userID))  // user id
 	data = binary.AppendUvarint(data, uint64(pi.groupID)) // groupd id
 
@@ -170,6 +178,9 @@ func (pi *T) AppendBinary(buf *bytes.Buffer) error {
 	for _, ino := range pi.inodes {
 		data = binary.AppendUvarint(data, ino) // inodes
 	}
+	for _, blk := range pi.blocks {
+		data = binary.AppendVarint(data, blk) // blocks
+	}
 	_, err = buf.Write(data)
 	return err
 }
@@ -188,8 +199,12 @@ func (pi *T) UnmarshalBinary(data []byte) error {
 	pi.size, n = binary.Varint(data) // size
 	data = data[n:]
 
+	pi.nblocks, n = binary.Varint(data) // nblocks
+	data = data[n:]
+
 	uid, n := binary.Uvarint(data) // userid
 	data = data[n:]
+
 	gid, n := binary.Uvarint(data) // groupid
 	data = data[n:]
 	pi.userID, pi.groupID = uint32(uid), uint32(gid)
@@ -217,16 +232,19 @@ func (pi *T) UnmarshalBinary(data []byte) error {
 	if err != nil {
 		return err
 	}
-	if version >= 0x2 {
-		pi.device, n = binary.Uvarint(data)
+	pi.device, n = binary.Uvarint(data)
+	data = data[n:]
+	pi.inode, n = binary.Uvarint(data)
+	data = data[n:]
+	pi.inodes = make([]uint64, len(pi.entries))
+	for i := range pi.inodes {
+		pi.inodes[i], n = binary.Uvarint(data)
 		data = data[n:]
-		pi.inode, n = binary.Uvarint(data)
+	}
+	pi.blocks = make([]int64, len(pi.entries))
+	for i := range pi.blocks {
+		pi.blocks[i], n = binary.Varint(data)
 		data = data[n:]
-		pi.inodes = make([]uint64, len(pi.entries))
-		for i := range pi.inodes {
-			pi.inodes[i], n = binary.Uvarint(data)
-			data = data[n:]
-		}
 	}
 	return pi.finalizeOnUnmarshal()
 }
@@ -244,8 +262,9 @@ func (pi *T) createIDMapsAndInodes() {
 	prefixGroupMap := newIDMap(pi.groupID, len(pi.entries))
 
 	pi.inodes = make([]uint64, len(pi.entries))
+	pi.blocks = make([]int64, len(pi.entries))
 	for i, file := range pi.entries {
-		uid, gid, _, ino := pi.SysInfo(file)
+		uid, gid, _, ino, blks := pi.SysInfo(file)
 		if pi.userID == uid {
 			prefixUserMap.set(i)
 		} else {
@@ -259,6 +278,7 @@ func (pi *T) createIDMapsAndInodes() {
 			pi.groupIDMap[mi].set(i)
 		}
 		pi.inodes[i] = ino
+		pi.blocks[i] = blks
 	}
 
 	if len(pi.userIDMap) > 0 {
@@ -309,7 +329,7 @@ func (pi *T) finalizePerFileInfo() {
 	if len(pi.userIDMap) == 0 && len(pi.groupIDMap) == 0 {
 		// All files have the same info as the prefix.
 		for i := range pi.entries {
-			(&pi.entries[i]).SetSys(inoOnly(pi.inodes[i]))
+			(&pi.entries[i]).SetSys(fsOnly{pi.inodes[i], pi.blocks[i]})
 		}
 		return
 	}
@@ -321,8 +341,8 @@ func (pi *T) finalizePerFileInfo() {
 		if len(pi.groupIDMap) > 0 {
 			gid, _ = pi.groupIDMap.idForPos(i)
 		}
-		(&pi.entries[i]).SetSys(idAndIno{
-			uid: uid, gid: gid, ino: pi.inodes[i]})
+		(&pi.entries[i]).SetSys(idAndFS{
+			uid: uid, gid: gid, fsOnly: fsOnly{pi.inodes[i], pi.blocks[i]}})
 	}
 }
 

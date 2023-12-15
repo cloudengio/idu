@@ -44,7 +44,7 @@ func TestCreateIDMaps(t *testing.T) {
 			[]uint32{uid + 1, uid + 1}, []uint32{gid + 1, gid + 1},
 			[]uint32{uid + 1, uid + 1}, []uint32{gid + 1, gid + 1}},
 	} {
-		info := testutil.TestdataNewInfo("dir", 1, 0700, time.Now().Truncate(0), uid, gid, 37, 200)
+		info := testutil.TestdataNewInfo("dir", 1, 2, 0700, time.Now().Truncate(0), uid, gid, 37, 200)
 		pi, err := prefixinfo.New("dir", info)
 		if err != nil {
 			t.Fatal(err)
@@ -65,7 +65,7 @@ func TestCreateIDMaps(t *testing.T) {
 		prefixinfo.CompareGroupIDMap(t, npi, tc.gidMap, tc.gidPos)
 
 		for j, fi := range npi.InfoList() {
-			u, g, dev, ino := npi.SysInfo(fi)
+			u, g, dev, ino, blocks := npi.SysInfo(fi)
 			if got, want := u, tc.uidFile[j]; got != want {
 				t.Errorf("%v: %v: got %v, want %v", i, j, got, want)
 			}
@@ -78,6 +78,9 @@ func TestCreateIDMaps(t *testing.T) {
 			if got, want := ino, uint64(100); got != want {
 				t.Errorf("%v: %v: got %v, want %v", i, j, got, want)
 			}
+			if got, want := blocks, int64(j+1); got != want {
+				t.Errorf("%v: %v: got %v, want %v", i, j, got, want)
+			}
 		}
 	}
 }
@@ -86,7 +89,7 @@ func TestSysTypes(t *testing.T) {
 	var uid, gid uint32 = 100, 1
 	modTime := time.Now().Truncate(0)
 
-	info := testutil.TestdataNewInfo("dir", 1, 0700, modTime, uid, gid, 37, 200)
+	info := testutil.TestdataNewInfo("dir", 1, 2, 0700, modTime, uid, gid, 37, 200)
 	pi, err := prefixinfo.New("dir", info)
 	if err != nil {
 		t.Fatal(err)
@@ -98,8 +101,8 @@ func TestSysTypes(t *testing.T) {
 
 	npi := prefixinfo.BinaryRoundTrip(t, &pi)
 	for _, fi := range npi.InfoList() {
-		if got, want := fmt.Sprintf("%T", fi.Sys()), "prefixinfo.inoOnly"; got != want {
-			t.Errorf("expected inoOnly, got %T", fi.Sys())
+		if got, want := fmt.Sprintf("%T", fi.Sys()), "prefixinfo.fsOnly"; got != want {
+			t.Errorf("expected fsOnly, got %T", fi.Sys())
 		}
 	}
 
@@ -111,8 +114,8 @@ func TestSysTypes(t *testing.T) {
 		pi.AppendInfoList(tc)
 		npi := prefixinfo.BinaryRoundTrip(t, &pi)
 		for _, fi := range npi.InfoList() {
-			if got, want := fmt.Sprintf("%T", fi.Sys()), "prefixinfo.idAndIno"; got != want {
-				t.Errorf("expected idAndIno, got %T", fi.Sys())
+			if got, want := fmt.Sprintf("%T", fi.Sys()), "prefixinfo.idAndFS"; got != want {
+				t.Errorf("expected idAndFS, got %T", fi.Sys())
 			}
 		}
 	}
