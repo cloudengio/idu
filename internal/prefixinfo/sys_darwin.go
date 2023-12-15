@@ -24,6 +24,11 @@ func GetSysInfo(pathname string, fi file.Info) (uid, gid uint32, dev, ino uint64
 	return 0, 0, 0, 0, 0, fmt.Errorf("unrecognised system information %T for %v", si, pathname)
 }
 
+// NewSysInfo is intended to be used by tests.
+func NewSysInfo(uid, gid uint32, dev, ino uint64, blocks int64) any {
+	return &syscall.Stat_t{Uid: uid, Gid: gid, Dev: int32(dev), Ino: ino, Blocks: blocks}
+}
+
 func (pi *T) SysInfo(fi file.Info) (userID, groupID uint32, dev, ino uint64, blocks int64) {
 	if fi.Sys() == nil {
 		return pi.userID, pi.groupID, pi.device, 0, 0
@@ -37,9 +42,4 @@ func (pi *T) SysInfo(fi file.Info) (userID, groupID uint32, dev, ino uint64, blo
 		return s.Uid, s.Gid, uint64(s.Dev), s.Ino, s.Blocks
 	}
 	return pi.userID, pi.groupID, 0, 0, 0
-}
-
-// NewSysInfo is intended to be used by tests.
-func NewSysInfo(uid, gid uint32, dev, ino uint64, blocks int64) any {
-	return &syscall.Stat_t{Uid: uid, Gid: gid, Dev: int32(dev), Ino: ino, Blocks: blocks}
 }

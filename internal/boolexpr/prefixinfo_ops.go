@@ -42,7 +42,6 @@ func (op UserOrGroup) Prepare() (boolexpr.Operand, error) {
 		return op, fmt.Errorf("failed to lookup user: %q: %v", op.text, err)
 	}
 	return op, nil
-
 }
 
 func (op UserOrGroup) Eval(v any) bool {

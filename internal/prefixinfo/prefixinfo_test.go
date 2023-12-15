@@ -110,7 +110,7 @@ func TestBinaryEncoding(t *testing.T) {
 		{ug11, []string{"0"}, []string{"0"}, []string{"1"}, []string{"1"}},
 		{ugOther, []string{}, []string{}, []string{"0", "1"}, []string{"0", "1"}},
 	} {
-		pi := testutil.TestdataNewPrefixInfo("dir", 1, 0700, modTime, uid, gid, 33, 200)
+		pi := testutil.TestdataNewPrefixInfo("dir", 1, 2, 0700, modTime, uid, gid, 33, 200)
 		pi.AppendInfoList(tc.fi)
 
 		expectedDevice, _ := pi.DevIno()
@@ -130,6 +130,11 @@ func TestBinaryEncoding(t *testing.T) {
 			if got, want := gid, ngid; got != want {
 				t.Errorf("got %v, want %v", got, want)
 			}
+
+			if got, want := npi.Blocks(), pi.Blocks(); got != want {
+				t.Errorf("got %v, want %v", got, want)
+			}
+
 			if got, want := npi.Mode(), pi.Mode(); got != want {
 				t.Errorf("got %v, want %v", got, want)
 			}
@@ -156,12 +161,15 @@ func TestBinaryEncoding(t *testing.T) {
 				t.Errorf("got %v, want %v", got, want)
 			}
 
-			for _, fi := range npi.InfoList() {
-				_, _, dev, ino := pi.SysInfo(fi)
+			for j, fi := range npi.InfoList() {
+				_, _, dev, ino, blocks := pi.SysInfo(fi)
 				if got, want := dev, expectedDevice; got != want {
 					t.Errorf("got %v, want %v", got, want)
 				}
 				if got, want := ino, uint64(100); got != want {
+					t.Errorf("got %v, want %v", got, want)
+				}
+				if got, want := blocks, int64(j+1); got != want {
 					t.Errorf("got %v, want %v", got, want)
 				}
 

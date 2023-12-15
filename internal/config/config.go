@@ -74,15 +74,6 @@ func (p *Prefix) Exclude(path string) bool {
 	return false
 }
 
-// StorageBytes returns the number of bytes used to store n bytes given
-// the underlying storage system.
-func (p *Prefix) StorageBytes(n int64) int64 {
-	if p.calculator == nil {
-		return n
-	}
-	return p.calculator.Calculate(n)
-}
-
 var (
 	DefaultConcurrentStats          = 0
 	DefaultConcurrentStatsThreshold = 0

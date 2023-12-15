@@ -149,7 +149,8 @@ func (pi *T) AppendBinary(buf *bytes.Buffer) error {
 	var storage [128]byte
 	data := storage[:0]
 	data = append(data, 0x2)                              // version
-	data = binary.AppendVarint(data, pi.size)             // user id
+	data = binary.AppendVarint(data, pi.size)             // size
+	data = binary.AppendVarint(data, pi.nblocks)          // nblocks
 	data = binary.AppendUvarint(data, uint64(pi.userID))  // user id
 	data = binary.AppendUvarint(data, uint64(pi.groupID)) // groupd id
 
@@ -178,7 +179,7 @@ func (pi *T) AppendBinary(buf *bytes.Buffer) error {
 		data = binary.AppendUvarint(data, ino) // inodes
 	}
 	for _, blk := range pi.blocks {
-		data = binary.AppendVarint(data, blk) // inodes
+		data = binary.AppendVarint(data, blk) // blocks
 	}
 	_, err = buf.Write(data)
 	return err
@@ -190,7 +191,7 @@ func (pi *T) UnmarshalBinary(data []byte) error {
 	}
 	version := data[0]
 
-	if version != 0x2 {
+	if version != 0x1 && version != 0x2 {
 		return fmt.Errorf("PrefixInfo: invalid version of binary encoding: got %x, want %x..%x", data[0], 01, 02)
 	}
 	var n int
@@ -198,8 +199,12 @@ func (pi *T) UnmarshalBinary(data []byte) error {
 	pi.size, n = binary.Varint(data) // size
 	data = data[n:]
 
+	pi.nblocks, n = binary.Varint(data) // nblocks
+	data = data[n:]
+
 	uid, n := binary.Uvarint(data) // userid
 	data = data[n:]
+
 	gid, n := binary.Uvarint(data) // groupid
 	data = data[n:]
 	pi.userID, pi.groupID = uint32(uid), uint32(gid)
@@ -257,6 +262,7 @@ func (pi *T) createIDMapsAndInodes() {
 	prefixGroupMap := newIDMap(pi.groupID, len(pi.entries))
 
 	pi.inodes = make([]uint64, len(pi.entries))
+	pi.blocks = make([]int64, len(pi.entries))
 	for i, file := range pi.entries {
 		uid, gid, _, ino, blks := pi.SysInfo(file)
 		if pi.userID == uid {

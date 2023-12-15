@@ -42,10 +42,6 @@ func TestSimple(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
-	if got, want := cfg.Prefixes[0].StorageBytes(3), int64(4096); got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-
 	if got, want := cfg.Prefixes[1].Exclude("something"), false; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}

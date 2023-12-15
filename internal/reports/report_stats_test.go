@@ -18,19 +18,18 @@ import (
 	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/internal/reports"
-	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/file"
 	"cloudeng.io/file/diskusage"
 	"golang.org/x/exp/maps"
 )
 
-func newInfo(name string, size int64, mode fs.FileMode, modTime time.Time, uid, gid uint32) file.Info {
-	return file.NewInfo(name, size, mode, modTime, prefixinfo.NewSysInfo(uid, gid, 0, 0))
+func newInfo(name string, size, blocks int64, mode fs.FileMode, modTime time.Time, uid, gid uint32) file.Info {
+	return file.NewInfo(name, size, mode, modTime, prefixinfo.NewSysInfo(uid, gid, 0, 0, blocks))
 }
 
 func createPrefixInfo(t *testing.T, uid, gid uint32, name string, contents ...[]file.Info) prefixinfo.T {
 	now := time.Now().Truncate(0)
-	info := newInfo(name, 3, fs.ModeDir|0700, now.Truncate(0), uid, gid)
+	info := newInfo(name, 3, 4, fs.ModeDir|0700, now.Truncate(0), uid, gid)
 	pi, err := prefixinfo.New(name, info)
 	if err != nil {
 		t.Fatal(err)
@@ -42,12 +41,12 @@ func createPrefixInfo(t *testing.T, uid, gid uint32, name string, contents ...[]
 	return pi
 }
 
-type times2 struct{}
+type sumSizeAndBlocks struct{}
 
-func (times2) Calculate(n int64) int64 { return 2 * n }
+func (sumSizeAndBlocks) Calculate(n, b int64) int64 { return n + b }
 
-func (times2) String() string {
-	return "times2"
+func (sumSizeAndBlocks) String() string {
+	return "sumSizeAndBlocks"
 }
 
 type testStats struct {
@@ -63,7 +62,7 @@ func (ts *testStats) update(bytes, storageBytes, files, prefixes, prefixBytes in
 	ts.prefixBytes += prefixBytes
 }
 
-func computeStats(t *testing.T, sdb *reports.AllStats, calc diskusage.Calculator, keys []string, match stats.Matcher, pis ...prefixinfo.T) {
+func computeStats(t *testing.T, sdb *reports.AllStats, calc diskusage.Calculator, keys []string, match boolexpr.Matcher, pis ...prefixinfo.T) {
 	for i, pi := range pis {
 		k := keys[i]
 		if err := sdb.Update(k, pi, calc, match); err != nil {
@@ -143,7 +142,7 @@ func comparePerIDTotals(t *testing.T, pis reports.PerIDStats, totals testStats) 
 func nInfos(n int, mode fs.FileMode, uid, gid uint32) (fis []file.Info) {
 	modTime := time.Now()
 	for i := 0; i < n; i++ {
-		fis = append(fis, newInfo(fmt.Sprintf("f%v", i), int64(i+1), mode, modTime, uid, gid))
+		fis = append(fis, newInfo(fmt.Sprintf("f%v", i), int64(i+1), int64(i+1), mode, modTime, uid, gid))
 
 	}
 	return
@@ -166,7 +165,7 @@ func fib(n int) int64 {
 }
 
 func TestReportStatsSingleID(t *testing.T) {
-	calc := times2{}
+	calc := sumSizeAndBlocks{}
 	var uid, gid uint32 = 100, 2
 
 	npi := createPrefixInfo
@@ -229,7 +228,7 @@ func TestReportStatsSingleID(t *testing.T) {
 		}
 
 		sdb = reports.NewAllStats("test", true, 5)
-		matcher, err := boolexpr.CreateMatcher(boolexpr.NewParser(nil), boolexpr.WithExpression("user=33"))
+		matcher, err := boolexpr.CreateMatcher(boolexpr.NewParser(nil), boolexpr.WithEntryExpression("user=33"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -324,8 +323,8 @@ func TestReportStatsMultipleIDs(t *testing.T) {
 	testIDExpr(t, pikeys, pis, uids, gids, perIDTotals, sizeOrdered, fileOrdered, prefixedOrdered)
 }
 
-func testSingleID(t *testing.T, match stats.Matcher, group bool, pikeys []string, pis []prefixinfo.T, id uint32, perIDTotal testStats, sizeOrdered, fileOrdered, prefixedOrdered []testStats) {
-	calc := times2{}
+func testSingleID(t *testing.T, match boolexpr.Matcher, group bool, pikeys []string, pis []prefixinfo.T, id uint32, perIDTotal testStats, sizeOrdered, fileOrdered, prefixedOrdered []testStats) {
+	calc := sumSizeAndBlocks{}
 
 	sdb := reports.NewAllStats("test", true, 5)
 
@@ -366,7 +365,7 @@ func testIDExpr(t *testing.T, pikeys []string, pis []prefixinfo.T, uids, gids []
 	parser := boolexpr.NewParser(nil)
 
 	for _, uid := range uids {
-		matcher, err := boolexpr.CreateMatcher(parser, boolexpr.WithExpression(fmt.Sprintf("user=%d", uid)))
+		matcher, err := boolexpr.CreateMatcher(parser, boolexpr.WithEntryExpression(fmt.Sprintf("user=%d", uid)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -374,7 +373,7 @@ func testIDExpr(t *testing.T, pikeys []string, pis []prefixinfo.T, uids, gids []
 	}
 
 	for _, gid := range gids {
-		matcher, err := boolexpr.CreateMatcher(parser, boolexpr.WithExpression(fmt.Sprintf("group=%d", gid)))
+		matcher, err := boolexpr.CreateMatcher(parser, boolexpr.WithEntryExpression(fmt.Sprintf("group=%d", gid)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -383,7 +382,7 @@ func testIDExpr(t *testing.T, pikeys []string, pis []prefixinfo.T, uids, gids []
 }
 
 func testAllIDs(t *testing.T, pikeys []string, pis []prefixinfo.T, totals testStats, uids, gids []uint32, perIDTotals map[uint32]testStats, sizeOrdered, fileOrdered, prefixedOrdered map[uint32][]testStats) {
-	calc := times2{}
+	calc := sumSizeAndBlocks{}
 
 	sdb := reports.NewAllStats("test", true, 5)
 	computeStats(t, sdb, calc, pikeys, boolexpr.AlwaysMatch{}, pis...)
