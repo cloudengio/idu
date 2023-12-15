@@ -96,7 +96,7 @@ func (fc *findCmds) findFS(ctx context.Context, fwfs filewalk.FS, ff *findFlags,
 			printPrefix(pi, ff.Long, k)
 		}
 		for _, fi := range pi.InfoList() {
-			if match.IsPrefixSet() && fi.IsDir() {
+			if match.IsPrefixSet() && fi.IsDir() && k != args[0] {
 				nextPrefix := k + sep + fi.Name()
 				// Need to fetch the directory entry to see if it matches or not
 				matched, err := handleDirEntry(ctx, db, match, &pi, fi, ff.Long, k, nextPrefix)
