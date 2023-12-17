@@ -54,6 +54,18 @@ func WithPrefixExpression(expr ...string) Option {
 	}
 }
 
+func WithEmptyEntryValue(v bool) Option {
+	return func(o *options) {
+		o.emptyEntryValue = v
+	}
+}
+
+func WithEmptyPrefixValue(v bool) Option {
+	return func(o *options) {
+		o.emptyPrefixValue = v
+	}
+}
+
 // WithHardlinkHandling enables incrmental detection of hardlinks so as to
 // avoid visiting the second and subsequent file system entries that
 // represent the same file. This is primarily useful for avoiding overcounting
@@ -67,8 +79,9 @@ func WithHardlinkHandling(v bool) Option {
 }
 
 type options struct {
-	entry, prefix []string
-	hardlinks     bool
+	entry, prefix                     []string
+	hardlinks                         bool
+	emptyEntryValue, emptyPrefixValue bool
 }
 
 func createExpr(p *boolexpr.Parser, args []string) (boolexpr.T, bool, error) {
@@ -86,28 +99,29 @@ func createExpr(p *boolexpr.Parser, args []string) (boolexpr.T, bool, error) {
 }
 
 func CreateMatcher(parser *boolexpr.Parser, opts ...Option) (Matcher, error) {
-	options := &options{}
-	for _, fn := range opts {
-		fn(options)
-	}
 	m := match{}
-	if options.hardlinks {
+	for _, fn := range opts {
+		fn(&m.options)
+	}
+	if m.hardlinks {
 		m.hl = &hardlinks.Incremental{}
 	}
 
 	var err error
-	m.entryExpr, m.entrySet, err = createExpr(parser, options.entry)
+	m.entryExpr, m.entrySet, err = createExpr(parser, m.entry)
 	if err != nil {
 		return match{}, err
 	}
-	m.prefixExpr, m.prefixSet, err = createExpr(parser, options.prefix)
+	m.prefixExpr, m.prefixSet, err = createExpr(parser, m.prefix)
 	if err != nil {
 		return match{}, err
 	}
+
 	return m, nil
 }
 
 type match struct {
+	options
 	prefixSet, entrySet   bool
 	prefixExpr, entryExpr boolexpr.T
 	hl                    *hardlinks.Incremental
@@ -121,19 +135,22 @@ func (m match) IsHardlink(prefix string, info *prefixinfo.T, fi file.Info) bool 
 	return m.hl.Ref(xattr.Device, xattr.FileID)
 }
 
-func (m match) IsPrefixSet() bool {
-	return m.prefixSet
-}
-
 func (m match) Prefix(prefix string, pi *prefixinfo.T) bool {
+	if !m.prefixSet {
+		return m.emptyPrefixValue
+	}
 	return m.prefixExpr.Eval(prefixinfo.NewNamed(prefix, pi))
 }
 
 func (m match) Entry(prefix string, pi *prefixinfo.T, fi file.Info) bool {
 	if !m.entrySet {
-		return true
+		return m.emptyEntryValue
 	}
-	return m.entryExpr.Eval(withsys{pi, fi})
+	v := m.entryExpr.Eval(withsys{pi, fi})
+	if v {
+		fmt.Printf("PI %v FI %v - %v\n", prefix, fi.Name(), fi.Mode())
+	}
+	return v
 }
 
 func (m match) String() string {
@@ -141,7 +158,7 @@ func (m match) String() string {
 	if m.hl != nil {
 		ph = "[hardlink handling enabled]:"
 	}
-	return fmt.Sprintf("%v: prefix: %v, entry: %v", ph, m.prefixExpr.String(), m.entryExpr.String())
+	return fmt.Sprintf("%v: prefix: %v (default: %v), entry: %v (default: %v)", ph, m.prefixExpr.String(), m.emptyPrefixValue, m.entryExpr.String(), m.emptyEntryValue)
 }
 
 type withsys struct {
@@ -179,10 +196,6 @@ func (AlwaysMatch) Prefix(prefix string, info *prefixinfo.T) bool {
 	return true
 }
 
-func (AlwaysMatch) IsPrefixSet() bool {
-	return false
-}
-
 func (AlwaysMatch) String() string {
 	return "always match"
 }
@@ -190,7 +203,7 @@ func (AlwaysMatch) String() string {
 type Matcher interface {
 	IsHardlink(prefix string, info *prefixinfo.T, fi file.Info) bool
 	Entry(prefix string, info *prefixinfo.T, fi file.Info) bool
+	//NeedsNumEntries() bool
 	Prefix(prefix string, info *prefixinfo.T) bool
-	IsPrefixSet() bool
 	String() string
 }

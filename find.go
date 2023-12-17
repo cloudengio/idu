@@ -64,16 +64,45 @@ func handleDirEntry(ctx context.Context, db database.DB, match boolexpr.Matcher,
 	return match.Prefix(nk, &npi) && match.Entry(k, pi, fi), nil
 }
 
+func isEmptyExpression(expr []string) bool {
+	if len(expr) == 0 {
+		return true
+	}
+	if len(strings.TrimSpace(strings.Join(expr, " "))) == 0 {
+		return true
+	}
+	return false
+}
+
 func (fc *findCmds) findFS(ctx context.Context, fwfs filewalk.FS, ff *findFlags, args []string) error {
 
 	parser := boolexpr.NewParser(ctx, fwfs)
 
+	emptyPrefix := isEmptyExpression(ff.Prefix.Values)
+
+	emptyEntry := isEmptyExpression(args[1:])
+	var emptyPrefixValue, emptyEntryValue bool
+	if emptyEntry {
+		// There is no entry expression, so
+		//   either match all entries if there is no prefix expression,
+		//   or match only the prefixes.
+		emptyEntryValue = emptyPrefix
+	} else {
+		// There is an entry expression, so
+		//
+		emptyPrefixValue = !emptyPrefix
+	}
+
 	match, err := boolexpr.CreateMatcher(parser,
+		boolexpr.WithEmptyEntryValue(emptyEntryValue),
+		boolexpr.WithEmptyPrefixValue(emptyPrefixValue),
 		boolexpr.WithEntryExpression(args[1:]...),
 		boolexpr.WithPrefixExpression(ff.Prefix.Values...))
 	if err != nil {
 		return err
 	}
+
+	fmt.Printf("match: %v\n", match)
 
 	ctx, cfg, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
 	if err != nil {
@@ -92,27 +121,36 @@ func (fc *findCmds) findFS(ctx context.Context, fwfs filewalk.FS, ff *findFlags,
 			errs.Append(fmt.Errorf("failed to unmarshal value for %v: %v", k, err))
 			return false
 		}
-		if !match.IsPrefixSet() && args[0] == k {
+
+		/*		if !emptyPrefix && args[0] == k {
+				printPrefix(pi, ff.Long, k)
+			}*/
+
+		if match.Prefix(k, &pi) {
 			printPrefix(pi, ff.Long, k)
 		}
+
 		for _, fi := range pi.InfoList() {
-			if match.IsPrefixSet() && fi.IsDir() && k != args[0] {
-				nextPrefix := k + sep + fi.Name()
-				// Need to fetch the directory entry to see if it matches or not
-				matched, err := handleDirEntry(ctx, db, match, &pi, fi, ff.Long, k, nextPrefix)
-				if err != nil {
-					errs.Append(err)
-					return false
-				}
-				if matched {
-					printPrefix(pi, ff.Long, nextPrefix)
-				}
+			if fi.IsDir() {
 				continue
 			}
-			if !match.IsPrefixSet() && match.Entry(k, &pi, fi) {
+			/*
+				if !emptyPrefix && fi.IsDir() && k != args[0] {
+					nextPrefix := k + sep + fi.Name()
+					// Need to fetch the directory entry to see if it matches or not
+					matched, err := handleDirEntry(ctx, db, match, &pi, fi, ff.Long, k, nextPrefix)
+					if err != nil {
+						errs.Append(err)
+						return false
+					}
+					if matched {
+						printPrefix(pi, ff.Long, nextPrefix)
+					}
+					continue
+				}*/
+			if match.Entry(k, &pi, fi) {
 				printEntry(pi, fi, ff.Long, sep, k)
 			}
-
 		}
 		return true
 	})
