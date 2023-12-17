@@ -19,7 +19,7 @@ var Manager = IDManager{
 	idmanager: userid.NewIDManager(),
 }
 
-func (um *IDManager) NameForUID(uid uint32) string {
+func (um *IDManager) NameForUID(uid uint64) string {
 	u := fmt.Sprintf("%d", uid)
 	info, err := um.idmanager.LookupUser(u)
 	if err == nil {
@@ -28,25 +28,25 @@ func (um *IDManager) NameForUID(uid uint32) string {
 	return u
 }
 
-func (um *IDManager) UIDForName(name string) (uint32, error) {
+func (um *IDManager) UIDForName(name string) (uint64, error) {
 	info, err := um.idmanager.LookupUser(name)
 	if err == nil {
 		name = info.UID
 	}
 	id, err := strconv.ParseUint(name, 10, 32)
-	return uint32(id), err
+	return id, err
 }
 
-func (um *IDManager) GIDForName(name string) (uint32, error) {
+func (um *IDManager) GIDForName(name string) (uint64, error) {
 	grp, err := um.idmanager.LookupGroup(name)
 	if err == nil {
 		name = grp.Gid
 	}
 	id, err := strconv.ParseUint(name, 10, 32)
-	return uint32(id), err
+	return id, err
 }
 
-func (um *IDManager) NameForGID(gid uint32) string {
+func (um *IDManager) NameForGID(gid uint64) string {
 	g := fmt.Sprintf("%d", gid)
 	grp, err := um.idmanager.LookupGroup(g)
 	if err == nil {

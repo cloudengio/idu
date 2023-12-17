@@ -14,7 +14,7 @@ import (
 )
 
 type Totals struct {
-	ID           uint32
+	ID           uint64
 	Files        int64 // number of files
 	Prefixes     int64 // number of prefixes/directories
 	Bytes        int64 // total size of files
@@ -25,7 +25,7 @@ type Totals struct {
 type PerIDTotals []Totals
 
 func (t *Totals) AppendBinary(data []byte) []byte {
-	data = binary.AppendUvarint(data, uint64(t.ID))
+	data = binary.AppendUvarint(data, t.ID)
 	data = binary.AppendVarint(data, t.Files)
 	data = binary.AppendVarint(data, t.Bytes)
 	data = binary.AppendVarint(data, t.StorageBytes)
@@ -42,7 +42,7 @@ func (t *Totals) DecodeBinary(data []byte) []byte {
 	var n int
 	id, n := binary.Uvarint(data)
 	data = data[n:]
-	t.ID = uint32(id)
+	t.ID = id
 	t.Files, n = binary.Varint(data)
 	data = data[n:]
 	t.Bytes, n = binary.Varint(data)
@@ -104,7 +104,7 @@ func (t Totals) update(fi file.Info, hardlink bool, blocks int64, du diskusage.C
 	return t
 }
 
-type perID map[uint32]Totals
+type perID map[uint64]Totals
 
 func (pid perID) flatten() PerIDTotals {
 	tl := make(PerIDTotals, 0, len(pid))
@@ -125,10 +125,10 @@ func ComputeTotals(prefix string, pi *prefixinfo.T, du diskusage.Calculator, mat
 			continue
 		}
 		hl := match.IsHardlink(prefix, pi, fi)
-		uid, gid, _, _, blocks := pi.SysInfo(fi)
-		totals = totals.update(fi, hl, blocks, du)
-		user[uid] = user[uid].update(fi, hl, blocks, du)
-		group[gid] = group[gid].update(fi, hl, blocks, du)
+		xattr := pi.XAttrInfo(fi)
+		totals = totals.update(fi, hl, xattr.Blocks, du)
+		user[xattr.UID] = user[xattr.UID].update(fi, hl, xattr.Blocks, du)
+		group[xattr.GID] = group[xattr.GID].update(fi, hl, xattr.Blocks, du)
 	}
 	return totals, user.flatten(), group.flatten()
 }

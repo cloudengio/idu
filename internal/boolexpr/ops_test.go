@@ -5,6 +5,7 @@
 package boolexpr_test
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -15,11 +16,12 @@ import (
 	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/file"
+	"cloudeng.io/file/filewalk"
 	"cloudeng.io/file/filewalk/localfs"
 )
 
-func createMatcher(t *testing.T, fs fs.FS, expr string) boolexpr.Matcher {
-	parser := boolexpr.NewParser(fs)
+func createMatcher(t *testing.T, fs filewalk.FS, expr string) boolexpr.Matcher {
+	parser := boolexpr.NewParser(context.Background(), fs)
 	matcher, err := boolexpr.CreateMatcher(parser,
 		boolexpr.WithEntryExpression(expr))
 	if err != nil {
@@ -31,10 +33,8 @@ func createMatcher(t *testing.T, fs fs.FS, expr string) boolexpr.Matcher {
 func TestIDs(t *testing.T) {
 
 	fi := file.NewInfo("foo", 0, 0, time.Now(), prefixinfo.NewSysInfo(1, 2, 3, 4, 5))
-	pi, err := prefixinfo.New("foo", fi)
-	if err != nil {
-		t.Fatal(err)
-	}
+	pi := prefixinfo.New("foo", fi)
+
 	pi.AppendInfo(file.NewInfo("bar", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, 30, 40, 10)))
 	pi.AppendInfo(file.NewInfo("dir", 0, fs.ModeDir, time.Now(), prefixinfo.NewSysInfo(10, 20, 30, 40, 10)))
 
@@ -75,15 +75,14 @@ func TestHardlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	fi := file.NewInfoFromFileInfo(info)
-	_, _, dev, ino, blocks, err := prefixinfo.GetSysInfo(ta, fi)
+	fs := localfs.New()
+	xattr, err := fs.XAttr(context.Background(), ta, fi)
 	if err != nil {
 		t.Fatal(err)
 	}
+	dev, ino, blocks := xattr.Device, xattr.FileID, xattr.Blocks
 	fi.SetSys(prefixinfo.NewSysInfo(10, 20, 1000, 1000, blocks))
-	pi, err := prefixinfo.New("foo", fi)
-	if err != nil {
-		t.Fatal(err)
-	}
+	pi := prefixinfo.New("foo", fi)
 
 	a := file.NewInfo("a", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, 30, ino, 10))
 	b := file.NewInfo("b", 0, 0, time.Now(), prefixinfo.NewSysInfo(10, 20, dev, ino, 10))

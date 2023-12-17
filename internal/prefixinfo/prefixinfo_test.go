@@ -24,7 +24,7 @@ func scanFilesByID(ids prefixinfo.IDSanner) []string {
 	return n
 }
 
-func scanUsers(t *testing.T, pi *prefixinfo.T, uid uint32) []string {
+func scanUsers(t *testing.T, pi *prefixinfo.T, uid uint64) []string {
 	sc, err := pi.UserIDScan(uid)
 	if err != nil {
 		t.Fatal(err)
@@ -32,7 +32,7 @@ func scanUsers(t *testing.T, pi *prefixinfo.T, uid uint32) []string {
 	return scanFilesByID(sc)
 }
 
-func scanAndMatchUsers(t *testing.T, pi *prefixinfo.T, uid uint32, want []string) {
+func scanAndMatchUsers(t *testing.T, pi *prefixinfo.T, uid uint64, want []string) {
 	_, _, l, _ := runtime.Caller(1)
 	if want == nil {
 		_, err := pi.UserIDScan(uid)
@@ -47,7 +47,7 @@ func scanAndMatchUsers(t *testing.T, pi *prefixinfo.T, uid uint32, want []string
 	}
 }
 
-func scanGroups(t *testing.T, pi *prefixinfo.T, gid uint32) []string {
+func scanGroups(t *testing.T, pi *prefixinfo.T, gid uint64) []string {
 	sc, err := pi.GroupIDScan(gid)
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +55,7 @@ func scanGroups(t *testing.T, pi *prefixinfo.T, gid uint32) []string {
 	return scanFilesByID(sc)
 }
 
-func scanAndMatchGroups(t *testing.T, pi *prefixinfo.T, gid uint32, want []string) {
+func scanAndMatchGroups(t *testing.T, pi *prefixinfo.T, gid uint64, want []string) {
 	_, _, l, _ := runtime.Caller(1)
 	if want == nil {
 		_, err := pi.GroupIDScan(gid)
@@ -95,7 +95,7 @@ func cmpInfoList(t *testing.T, npi prefixinfo.T, got, want file.InfoList) {
 
 func TestBinaryEncoding(t *testing.T) {
 	modTime := time.Now().Truncate(0)
-	var uid, gid uint32 = 100, 2
+	var uid, gid uint64 = 100, 2
 
 	ug00, ug10, ug01, ug11, ugOther := testutil.TestdataIDCombinationsFiles(modTime, uid, gid, 100)
 
@@ -162,14 +162,14 @@ func TestBinaryEncoding(t *testing.T) {
 			}
 
 			for j, fi := range npi.InfoList() {
-				_, _, dev, ino, blocks := pi.SysInfo(fi)
-				if got, want := dev, expectedDevice; got != want {
+				xattr := pi.XAttrInfo(fi)
+				if got, want := xattr.Device, expectedDevice; got != want {
 					t.Errorf("got %v, want %v", got, want)
 				}
-				if got, want := ino, uint64(100); got != want {
+				if got, want := xattr.FileID, uint64(100); got != want {
 					t.Errorf("got %v, want %v", got, want)
 				}
-				if got, want := blocks, int64(j+1); got != want {
+				if got, want := xattr.Blocks, int64(j+1); got != want {
 					t.Errorf("got %v, want %v", got, want)
 				}
 

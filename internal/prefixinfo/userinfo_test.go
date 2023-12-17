@@ -5,32 +5,51 @@
 package prefixinfo
 
 import (
-	"io/fs"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"cloudeng.io/file"
+	"cloudeng.io/file/filewalk/localfs"
 )
 
-func TestUserInfo(t *testing.T) {
+func TestXAttr(t *testing.T) {
+	ctx := context.Background()
 	tmpDir := t.TempDir()
-	tmpFileName := filepath.Join(tmpDir, "a")
-	f, err := os.Create(tmpFileName)
+
+	lfs := localfs.New()
+	info, err := lfs.Stat(ctx, tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
-	info, err := os.DirFS(tmpDir).(fs.StatFS).Stat("a")
+	xattr, err := lfs.XAttr(ctx, tmpDir, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info.SetSys(xattr)
+	pi := New(tmpDir, info)
+
+	tmpFileName := filepath.Join(tmpDir, "a")
+
+	if err := os.WriteFile(tmpFileName, []byte{0x00}, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err = lfs.Stat(ctx, tmpFileName)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	fi := file.NewInfoFromFileInfo(info)
+	xattr, err = lfs.XAttr(ctx, tmpFileName, fi)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fi.SetSys(xattr)
+	pi.AppendInfo(fi)
 
-	pi := T{userID: 1, groupID: 2}
-
-	uid, gid, _, _, _ := pi.SysInfo(fi)
+	uid, gid := pi.UserGroup()
 	ouid, ogid := os.Getuid(), os.Getgid()
 	if ouid == -1 {
 		// Windows returns uid and gid as -1, so this is really
@@ -45,23 +64,22 @@ func TestUserInfo(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
+	xattr = pi.XAttrInfo(fi)
+	if got, want := int(xattr.UID), ouid; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if got, want := int(xattr.GID), ogid; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
 	fi.SetSys(NewSysInfo(600, 6, 33, 44, 1))
 
-	uid, gid, dev, ino, _ := pi.SysInfo(fi)
-
-	if got, want := uid, uint32(600); got != want {
+	xattr = pi.XAttrInfo(fi)
+	if got, want := xattr.UID, uint64(600); got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if got, want := xattr.GID, uint64(6); got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
-	if got, want := gid, uint32(6); got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-
-	if got, want := dev, uint64(33); got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-
-	if got, want := ino, uint64(44); got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
 }

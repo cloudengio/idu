@@ -206,14 +206,18 @@ func (w *walker) handlePrefix(ctx context.Context, state *prefixState, prefix st
 		return true, false, nil
 	}
 
-	// info was obtained via lstat/stat and hence will have system level information
-	// such as uid, gid, dev, ino etc.
-	current, err := prefixinfo.New(prefix, info)
+	// info was obtained via lstat/stat and hence will have system
+	// level information such as uid, gid, dev, ino etc.
+	xattr, err := w.fs.XAttr(ctx, prefix, info)
 	if err != nil {
 		w.dbLogErr(ctx, prefix, []byte(err.Error()))
-		// system level info (uid, gid, dev, ino) is not available.
+		internal.Log(ctx, internal.LogPrefix, "prefix xattr error",
+			"prefix", w.cfg.Prefix,
+			"path", prefix,
+			"error", err)
 	}
-
+	info.SetSys(xattr)
+	current := prefixinfo.New(prefix, info)
 	state.current = current
 
 	ok, err := w.db.GetPrefixInfo(ctx, prefix, &state.existing)
@@ -276,6 +280,23 @@ func (w *walker) Prefix(ctx context.Context, state *prefixState, prefix string, 
 	return stop, nil, err
 }
 
+func (w *walker) processStats(ctx context.Context, prefix string, toStat []filewalk.Entry) (children, all file.InfoList, err error) {
+	children, all, err = w.lsi.Process(ctx, prefix, toStat)
+	if err != nil {
+		w.dbLogErr(ctx, prefix, []byte(err.Error()))
+		return nil, nil, err
+	}
+	for i, fi := range all {
+		filename := w.fs.Join(prefix, fi.Name())
+		xattr, _ := w.fs.XAttr(ctx, filename, fi)
+		// Regardless of any error, set the system information
+		// to be of type filewalk.XAttr since all other code
+		// assumes it so.
+		all[i].SetSys(xattr)
+	}
+	return children, all, nil
+}
+
 func (w *walker) Contents(ctx context.Context, state *prefixState, prefix string, contents []filewalk.Entry) (file.InfoList, error) {
 	sinceLast := time.Since(state.contentsStart)
 	state.contentsStart = time.Now()
@@ -296,7 +317,7 @@ func (w *walker) Contents(ctx context.Context, state *prefixState, prefix string
 			}
 			toStat = append(toStat, entry)
 		}
-		children, all, err := w.lsi.Process(ctx, prefix, toStat)
+		children, all, err := w.processStats(ctx, prefix, toStat)
 		if err != nil {
 			w.dbLogErr(ctx, prefix, []byte(err.Error()))
 		}
@@ -306,7 +327,7 @@ func (w *walker) Contents(ctx context.Context, state *prefixState, prefix string
 		return children, nil
 	}
 
-	children, all, err := w.lsi.Process(ctx, prefix, contents)
+	children, all, err := w.processStats(ctx, prefix, contents)
 	if err != nil {
 		w.dbLogErr(ctx, prefix, []byte(err.Error()))
 	}

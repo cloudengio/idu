@@ -66,7 +66,7 @@ func handleDirEntry(ctx context.Context, db database.DB, match boolexpr.Matcher,
 
 func (fc *findCmds) findFS(ctx context.Context, fwfs filewalk.FS, ff *findFlags, args []string) error {
 
-	parser := boolexpr.NewParser(fwfs)
+	parser := boolexpr.NewParser(ctx, fwfs)
 
 	match, err := boolexpr.CreateMatcher(parser,
 		boolexpr.WithEntryExpression(args[1:]...),

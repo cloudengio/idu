@@ -155,12 +155,12 @@ func (rf *reportFilenames) summary(file string) string {
 	return filepath.Join(rf.rootDir(), file+rf.ext)
 }
 
-func (rf *reportFilenames) user(uid uint32) string {
+func (rf *reportFilenames) user(uid uint64) string {
 	un := usernames.Manager.NameForUID(uid)
 	return filepath.Join(rf.usersDir(), un+rf.ext)
 }
 
-func (rf *reportFilenames) group(gid uint32) string {
+func (rf *reportFilenames) group(gid uint64) string {
 	un := usernames.Manager.NameForGID(gid)
 	return filepath.Join(rf.groupsDir(), un+rf.ext)
 }
@@ -172,7 +172,7 @@ func (rf *reportFilenames) latest() (src, dst string) {
 func writeReportFiles(sdb *reports.AllStats,
 	filenames *reportFilenames,
 	prefixFormatter func(m map[string]reports.MergedStats) []byte,
-	idFormatter func(m map[uint32]reports.MergedStats, nameForID func(uint32) string) []byte,
+	idFormatter func(m map[uint64]reports.MergedStats, nameForID func(uint64) string) []byte,
 	topN int,
 ) error {
 

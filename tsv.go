@@ -37,14 +37,14 @@ func (tr *tsvReports) formatMerged(merged map[string]reports.MergedStats) []byte
 	return out.Bytes()
 }
 
-func (tr *tsvReports) formatUserGroupMerged(merged map[uint32]reports.MergedStats, nameForID func(uint32) string) []byte {
+func (tr *tsvReports) formatUserGroupMerged(merged map[uint64]reports.MergedStats, nameForID func(uint64) string) []byte {
 	out := &bytes.Buffer{}
 	wr := csv.NewWriter(out)
 	wr.Comma = '\t'
 	wr.Write([]string{"id", "idname", "bytes", "storage bytes", "files", "directories", "directory bytes"})
 	for k, v := range merged {
 		wr.Write([]string{
-			strconv.FormatUint(uint64(k), 10),
+			strconv.FormatUint(k, 10),
 			nameForID(k),
 			strconv.FormatInt(v.Bytes, 10),
 			strconv.FormatInt(v.Storage, 10),

@@ -5,25 +5,22 @@
 package boolexpr
 
 import (
-	"io/fs"
+	"context"
 	"reflect"
 
-	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmdutil/boolexpr"
 	"cloudeng.io/file"
+	"cloudeng.io/file/filewalk"
 )
 
 type Hardlink struct {
+	ctx      context.Context
 	text     string
 	name     string
 	document string
-	fs       fs.FS
+	fs       filewalk.FS
 	dev, ino uint64
 	requires reflect.Type
-}
-
-type devInoIfc interface {
-	DevIno() (uint64, uint64)
 }
 
 func (hl *Hardlink) Prepare() (boolexpr.Operand, error) {
@@ -37,19 +34,20 @@ func (hl *Hardlink) Prepare() (boolexpr.Operand, error) {
 		return nil, err
 	}
 	fi := file.NewInfoFromFileInfo(info)
-	_, _, dev, ino, _, err := prefixinfo.GetSysInfo(hl.text, fi)
+	xattr, err := hl.fs.XAttr(hl.ctx, hl.text, fi)
 	if err != nil {
 		return nil, err
 	}
-	hl.dev, hl.ino = dev, ino
+	hl.dev, hl.ino = xattr.Device, xattr.FileID
 	return hl, nil
 }
 
 func (hl Hardlink) Eval(v any) bool {
 	var dev, ino uint64
 	switch t := v.(type) {
-	case devInoIfc:
-		dev, ino = t.DevIno()
+	case xattrIfc:
+		xattr := t.XAttr()
+		dev, ino = xattr.Device, xattr.FileID
 	default:
 		return false
 	}
@@ -70,8 +68,9 @@ func (hl *Hardlink) Needs(t reflect.Type) bool {
 
 // NewHardlink returns an operand that determines if the supplied value is,
 // or is not, a hardlink to the specified file or directory.
-func NewHardlink(n, v string, fs fs.FS) boolexpr.Operand {
+func NewHardlink(ctx context.Context, n, v string, fs filewalk.FS) boolexpr.Operand {
 	return &Hardlink{
+		ctx:      ctx,
 		fs:       fs,
 		name:     n,
 		text:     v,
