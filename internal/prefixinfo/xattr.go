@@ -47,8 +47,8 @@ func (pi *T) xAttrFromSys(v any) filewalk.XAttr {
 // NewSysInfo is intended to be used by tests.
 func NewSysInfo(uid, gid uint64, dev, ino uint64, blocks int64) any {
 	return &filewalk.XAttr{
-		UID:    uint64(uid),
-		GID:    uint64(gid),
+		UID:    uid,
+		GID:    gid,
 		Device: dev,
 		FileID: ino,
 		Blocks: blocks}

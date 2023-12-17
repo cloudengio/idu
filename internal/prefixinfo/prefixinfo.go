@@ -150,11 +150,11 @@ func (pi *T) AppendBinary(buf *bytes.Buffer) error {
 
 	var storage [128]byte
 	data := storage[:0]
-	data = append(data, 0x2)                                // version
-	data = binary.AppendVarint(data, pi.size)               // size
-	data = binary.AppendVarint(data, pi.xattr.Blocks)       // nblocks
-	data = binary.AppendUvarint(data, uint64(pi.xattr.UID)) // user id
-	data = binary.AppendUvarint(data, uint64(pi.xattr.GID)) // groupd id
+	data = append(data, 0x2)                          // version
+	data = binary.AppendVarint(data, pi.size)         // size
+	data = binary.AppendVarint(data, pi.xattr.Blocks) // nblocks
+	data = binary.AppendUvarint(data, pi.xattr.UID)   // user id
+	data = binary.AppendUvarint(data, pi.xattr.GID)   // groupd id
 
 	data = binary.LittleEndian.AppendUint32(data, uint32(pi.mode)) // filemode
 	out, err := pi.modTime.MarshalBinary()                         // modtime

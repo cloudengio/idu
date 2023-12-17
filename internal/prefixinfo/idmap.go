@@ -26,7 +26,7 @@ func (idm idMap) String() string {
 func (idm idMap) appendBinary(buf *bytes.Buffer) {
 	var storage [16]byte
 	data := storage[:0]
-	data = binary.AppendUvarint(data, uint64(idm.ID))
+	data = binary.AppendUvarint(data, idm.ID)
 	data = binary.AppendUvarint(data, uint64(len(idm.Pos)))
 	buf.Write(data)
 	for _, p := range idm.Pos {

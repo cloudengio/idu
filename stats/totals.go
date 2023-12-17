@@ -25,7 +25,7 @@ type Totals struct {
 type PerIDTotals []Totals
 
 func (t *Totals) AppendBinary(data []byte) []byte {
-	data = binary.AppendUvarint(data, uint64(t.ID))
+	data = binary.AppendUvarint(data, t.ID)
 	data = binary.AppendVarint(data, t.Files)
 	data = binary.AppendVarint(data, t.Bytes)
 	data = binary.AppendVarint(data, t.StorageBytes)
@@ -42,7 +42,7 @@ func (t *Totals) DecodeBinary(data []byte) []byte {
 	var n int
 	id, n := binary.Uvarint(data)
 	data = data[n:]
-	t.ID = uint64(id)
+	t.ID = id
 	t.Files, n = binary.Varint(data)
 	data = data[n:]
 	t.Bytes, n = binary.Varint(data)

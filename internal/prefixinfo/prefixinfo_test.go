@@ -25,7 +25,7 @@ func scanFilesByID(ids prefixinfo.IDSanner) []string {
 }
 
 func scanUsers(t *testing.T, pi *prefixinfo.T, uid uint64) []string {
-	sc, err := pi.UserIDScan(uint64(uid))
+	sc, err := pi.UserIDScan(uid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func scanUsers(t *testing.T, pi *prefixinfo.T, uid uint64) []string {
 func scanAndMatchUsers(t *testing.T, pi *prefixinfo.T, uid uint64, want []string) {
 	_, _, l, _ := runtime.Caller(1)
 	if want == nil {
-		_, err := pi.UserIDScan(uint64(uid))
+		_, err := pi.UserIDScan(uid)
 		if err == nil || err.Error() != fmt.Sprintf("no such user id: %v", uid) {
 			t.Errorf("line %v: missing or unexpected error: %v", l, err)
 		}
