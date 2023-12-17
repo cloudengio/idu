@@ -37,7 +37,7 @@ func (tr *tsvReports) formatMerged(merged map[string]reports.MergedStats) []byte
 	return out.Bytes()
 }
 
-func (tr *tsvReports) formatUserGroupMerged(merged map[uint32]reports.MergedStats, nameForID func(uint32) string) []byte {
+func (tr *tsvReports) formatUserGroupMerged(merged map[uint64]reports.MergedStats, nameForID func(uint64) string) []byte {
 	out := &bytes.Buffer{}
 	wr := csv.NewWriter(out)
 	wr.Comma = '\t'

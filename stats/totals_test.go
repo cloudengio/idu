@@ -27,7 +27,7 @@ func (sumSizeAndBlocks) String() string {
 
 func TestTotals(t *testing.T) {
 	modTime := time.Now().Truncate(0)
-	var uid, gid uint32 = 100, 2
+	var uid, gid uint64 = 100, 2
 
 	ug00, ug10, ug01, ug11, ugOther := testutil.TestdataIDCombinationsFiles(modTime, uid, gid, 100)
 	ug00d, ug10d, ug01d, ug11d, ugOtherd := testutil.TestdataIDCombinationsDirs(modTime, uid, gid, 200)
@@ -50,14 +50,14 @@ func TestTotals(t *testing.T) {
 	for _, tc := range []struct {
 		fi         []file.Info
 		fd         []file.Info
-		uids, gids []uint32
+		uids, gids []uint64
 		perIDStats int
 	}{
-		{ug00, ug00d, []uint32{uid}, []uint32{gid}, 0},
-		{ug10, ug10d, []uint32{uid, uid + 1}, []uint32{gid}, 1},
-		{ug01, ug01d, []uint32{uid}, []uint32{gid, gid + 1}, 2},
-		{ug11, ug11d, []uint32{uid, uid + 1}, []uint32{gid, gid + 1}, 3},
-		{ugOther, ugOtherd, []uint32{uid + 1}, []uint32{gid + 1}, 4},
+		{ug00, ug00d, []uint64{uid}, []uint64{gid}, 0},
+		{ug10, ug10d, []uint64{uid, uid + 1}, []uint64{gid}, 1},
+		{ug01, ug01d, []uint64{uid}, []uint64{gid, gid + 1}, 2},
+		{ug11, ug11d, []uint64{uid, uid + 1}, []uint64{gid, gid + 1}, 3},
+		{ugOther, ugOtherd, []uint64{uid + 1}, []uint64{gid + 1}, 4},
 	} {
 		pi := testutil.TestdataNewPrefixInfo("dir", 1, 1, 0700, modTime, uid, gid, 33, 100)
 		pi.AppendInfoList(tc.fi)
@@ -116,8 +116,8 @@ func TestTotals(t *testing.T) {
 	}
 }
 
-func IDsFromStats(s stats.PerIDTotals) []uint32 {
-	r := []uint32{}
+func IDsFromStats(s stats.PerIDTotals) []uint64 {
+	r := []uint64{}
 	for _, st := range s {
 		r = append(r, st.ID)
 	}

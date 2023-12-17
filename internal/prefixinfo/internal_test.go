@@ -55,7 +55,7 @@ func NumGroupIDs(pi T) int {
 	return len(pi.groupIDMap)
 }
 
-func CompareUserIDMap(t *testing.T, pi T, ids []uint32, pos []int) {
+func CompareUserIDMap(t *testing.T, pi T, ids []uint64, pos []int) {
 	t.Helper()
 	for j, u := range ids {
 		if got, want := pi.userIDMap.idMapFor(u), pos[j]; got != want {
@@ -64,7 +64,7 @@ func CompareUserIDMap(t *testing.T, pi T, ids []uint32, pos []int) {
 	}
 }
 
-func CompareGroupIDMap(t *testing.T, pi T, ids []uint32, pos []int) {
+func CompareGroupIDMap(t *testing.T, pi T, ids []uint64, pos []int) {
 	t.Helper()
 	for j, u := range ids {
 		if got, want := pi.groupIDMap.idMapFor(u), pos[j]; got != want {

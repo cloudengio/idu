@@ -187,7 +187,7 @@ type mdPerIDHeap struct {
 	TopN        int
 	Prefix      string
 	UserOrGroup string
-	PerID       map[uint32]mdHeap[string]
+	PerID       map[uint64]mdHeap[string]
 }
 
 type markdownReports struct {
@@ -262,7 +262,7 @@ func (md *markdownReports) generateReports(ctx context.Context, rf *generateRepo
 
 	uids, gids := maps.Keys(sdb.PerUser.ByPrefix), maps.Keys(sdb.PerGroup.ByPrefix)
 	if err := md.lists.Execute(out, struct {
-		Users, Groups []uint32
+		Users, Groups []uint64
 	}{
 		Users:  uids,
 		Groups: gids,
@@ -301,7 +301,7 @@ func (md *markdownReports) generateReports(ctx context.Context, rf *generateRepo
 	}
 
 	// Largest Users/Groups.
-	byUsers := mdHeap[uint32]{
+	byUsers := mdHeap[uint64]{
 		Prefix:       prefix,
 		TopN:         rf.Markdown,
 		UserOrGroup:  "Users",
@@ -316,7 +316,7 @@ func (md *markdownReports) generateReports(ctx context.Context, rf *generateRepo
 		return err
 	}
 
-	byGroups := mdHeap[uint32]{
+	byGroups := mdHeap[uint64]{
 		Prefix:       prefix,
 		TopN:         rf.Markdown,
 		UserOrGroup:  "Groups",
@@ -334,7 +334,7 @@ func (md *markdownReports) generateReports(ctx context.Context, rf *generateRepo
 	for _, r := range []struct {
 		label string
 		tpl   *template.Template
-		data  map[uint32]*reports.Heaps[string]
+		data  map[uint64]*reports.Heaps[string]
 	}{
 		{"user", md.perUsers, sdb.PerUser.ByPrefix},
 		{"group", md.perGroups, sdb.PerGroup.ByPrefix},
@@ -343,7 +343,7 @@ func (md *markdownReports) generateReports(ctx context.Context, rf *generateRepo
 			TopN:        rf.Markdown,
 			Prefix:      prefix,
 			UserOrGroup: r.label,
-			PerID:       make(map[uint32]mdHeap[string]),
+			PerID:       make(map[uint64]mdHeap[string]),
 		}
 		for id, us := range r.data {
 			perUsers.PerID[id] = mdHeap[string]{

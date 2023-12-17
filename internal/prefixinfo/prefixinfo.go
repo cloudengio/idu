@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"cloudeng.io/file"
+	"cloudeng.io/file/filewalk"
 )
 
 // T represents the information for a prefix, ie. a directory.
@@ -19,13 +20,10 @@ import (
 // and hence attention is paid to minizing its storage requirements.
 // In particular, the name of the prefix is not stored as it is assumed
 // to be implicitly known from the store's key or database entry.
+
 type T struct {
-	userID     uint32
-	groupID    uint32
-	device     uint64
-	inode      uint64
+	xattr      filewalk.XAttr
 	size       int64
-	nblocks    int64
 	mode       fs.FileMode
 	modTime    time.Time
 	entries    file.InfoList // files and prefixes only
@@ -36,25 +34,23 @@ type T struct {
 	finalized  bool
 }
 
-// New creates a new PrefixInfo for the supplied file.Info. It will
-// determine the uid, gid, device and inode from the supplied file.Info assuming
-// that it was created by a call to LStat or Stat rather than being obtained
-// from the database. If error is non-nil, the returned PrefixInfo.T is still
-// valid and can be used but will not contain all of the system specific
-// information. On Windows in particular this means that user and device/inode
-// information may not be available.
-func New(pathname string, info file.Info) (T, error) {
-	uid, gid, dev, ino, blocks, err := GetSysInfo(pathname, info)
-	return T{
-		userID:  uid,
-		groupID: gid,
-		device:  dev,
-		inode:   ino,
-		nblocks: blocks,
+// New creates a new PrefixInfo for the supplied file.Info. It assumes that
+// the supplied file.Info contains a filewalk.XAttr in its Sys() value.
+func New(pathname string, info file.Info) T {
+	pi := T{
 		size:    info.Size(),
 		modTime: info.ModTime(),
 		mode:    info.Mode(),
-	}, err
+	}
+	switch v := info.Sys().(type) {
+	case filewalk.XAttr:
+		pi.xattr = v
+	case *filewalk.XAttr:
+		pi.xattr = *v
+	default:
+		panic(fmt.Sprintf("invalid system information: %T", v))
+	}
+	return pi
 }
 
 func (pi *T) SetInfoList(entries file.InfoList) {
@@ -74,7 +70,7 @@ func (pi T) Size() int64 {
 }
 
 func (pi T) Blocks() int64 {
-	return pi.nblocks
+	return pi.xattr.Blocks
 }
 
 func (pi T) Mode() fs.FileMode {
@@ -89,12 +85,20 @@ func (pi T) ModTime() time.Time {
 	return pi.modTime
 }
 
-func (pi T) UserGroup() (uid, gid uint32) {
-	return pi.userID, pi.groupID
+func (pi T) UserGroup() (uid, gid uint64) {
+	return pi.xattr.UID, pi.xattr.GID
 }
 
 func (pi T) DevIno() (device, inode uint64) {
-	return pi.device, pi.inode
+	return pi.xattr.Device, pi.xattr.FileID
+}
+
+func (pi T) XAttr() filewalk.XAttr {
+	return pi.xattr
+}
+
+func (pi T) XAttrInfo(fi file.Info) filewalk.XAttr {
+	return pi.xAttrFromSys(fi.Sys())
 }
 
 // Info returns the list of file.Info's available for this prefix.
@@ -142,17 +146,15 @@ func (pi *T) MarshalBinary() ([]byte, error) {
 }
 
 func (pi *T) AppendBinary(buf *bytes.Buffer) error {
-	if err := pi.finalize(); err != nil {
-		return err
-	}
+	pi.finalize()
 
 	var storage [128]byte
 	data := storage[:0]
-	data = append(data, 0x2)                              // version
-	data = binary.AppendVarint(data, pi.size)             // size
-	data = binary.AppendVarint(data, pi.nblocks)          // nblocks
-	data = binary.AppendUvarint(data, uint64(pi.userID))  // user id
-	data = binary.AppendUvarint(data, uint64(pi.groupID)) // groupd id
+	data = append(data, 0x2)                                // version
+	data = binary.AppendVarint(data, pi.size)               // size
+	data = binary.AppendVarint(data, pi.xattr.Blocks)       // nblocks
+	data = binary.AppendUvarint(data, uint64(pi.xattr.UID)) // user id
+	data = binary.AppendUvarint(data, uint64(pi.xattr.GID)) // groupd id
 
 	data = binary.LittleEndian.AppendUint32(data, uint32(pi.mode)) // filemode
 	out, err := pi.modTime.MarshalBinary()                         // modtime
@@ -173,8 +175,8 @@ func (pi *T) AppendBinary(buf *bytes.Buffer) error {
 	}
 
 	data = storage[:0]
-	data = binary.AppendUvarint(data, pi.device) // pi.device
-	data = binary.AppendUvarint(data, pi.inode)  // pi.inode
+	data = binary.AppendUvarint(data, pi.xattr.Device) // pi.device
+	data = binary.AppendUvarint(data, pi.xattr.FileID) // pi.inode
 	for _, ino := range pi.inodes {
 		data = binary.AppendUvarint(data, ino) // inodes
 	}
@@ -199,7 +201,7 @@ func (pi *T) UnmarshalBinary(data []byte) error {
 	pi.size, n = binary.Varint(data) // size
 	data = data[n:]
 
-	pi.nblocks, n = binary.Varint(data) // nblocks
+	pi.xattr.Blocks, n = binary.Varint(data) // nblocks
 	data = data[n:]
 
 	uid, n := binary.Uvarint(data) // userid
@@ -207,7 +209,7 @@ func (pi *T) UnmarshalBinary(data []byte) error {
 
 	gid, n := binary.Uvarint(data) // groupid
 	data = data[n:]
-	pi.userID, pi.groupID = uint32(uid), uint32(gid)
+	pi.xattr.UID, pi.xattr.GID = uid, gid
 
 	pi.mode = fs.FileMode(binary.LittleEndian.Uint32(data)) // filemode
 	data = data[4:]
@@ -232,9 +234,9 @@ func (pi *T) UnmarshalBinary(data []byte) error {
 	if err != nil {
 		return err
 	}
-	pi.device, n = binary.Uvarint(data)
+	pi.xattr.Device, n = binary.Uvarint(data)
 	data = data[n:]
-	pi.inode, n = binary.Uvarint(data)
+	pi.xattr.FileID, n = binary.Uvarint(data)
 	data = data[n:]
 	pi.inodes = make([]uint64, len(pi.entries))
 	for i := range pi.inodes {
@@ -249,7 +251,7 @@ func (pi *T) UnmarshalBinary(data []byte) error {
 	return pi.finalizeOnUnmarshal()
 }
 
-func newIDMapIfNeeded(idms *idMaps, id uint32, n int) int {
+func newIDMapIfNeeded(idms *idMaps, id uint64, n int) int {
 	if mi := idms.idMapFor(id); mi >= 0 {
 		return mi
 	}
@@ -257,28 +259,28 @@ func newIDMapIfNeeded(idms *idMaps, id uint32, n int) int {
 	return len(*idms) - 1
 }
 
-func (pi *T) createIDMapsAndInodes() {
-	prefixUserMap := newIDMap(pi.userID, len(pi.entries))
-	prefixGroupMap := newIDMap(pi.groupID, len(pi.entries))
+func (pi *T) createIDMapsAndInodes() error {
+	prefixUserMap := newIDMap(pi.xattr.UID, len(pi.entries))
+	prefixGroupMap := newIDMap(pi.xattr.GID, len(pi.entries))
 
 	pi.inodes = make([]uint64, len(pi.entries))
 	pi.blocks = make([]int64, len(pi.entries))
 	for i, file := range pi.entries {
-		uid, gid, _, ino, blks := pi.SysInfo(file)
-		if pi.userID == uid {
+		xattr := pi.xAttrFromSys(file.Sys())
+		if pi.xattr.UID == xattr.UID {
 			prefixUserMap.set(i)
 		} else {
-			mi := newIDMapIfNeeded(&pi.userIDMap, uid, len(pi.entries))
+			mi := newIDMapIfNeeded(&pi.userIDMap, xattr.UID, len(pi.entries))
 			pi.userIDMap[mi].set(i)
 		}
-		if pi.groupID == gid {
+		if pi.xattr.GID == xattr.GID {
 			prefixGroupMap.set(i)
 		} else {
-			mi := newIDMapIfNeeded(&pi.groupIDMap, gid, len(pi.entries))
+			mi := newIDMapIfNeeded(&pi.groupIDMap, xattr.GID, len(pi.entries))
 			pi.groupIDMap[mi].set(i)
 		}
-		pi.inodes[i] = ino
-		pi.blocks[i] = blks
+		pi.inodes[i] = xattr.FileID
+		pi.blocks[i] = xattr.Blocks
 	}
 
 	if len(pi.userIDMap) > 0 {
@@ -287,10 +289,11 @@ func (pi *T) createIDMapsAndInodes() {
 	if len(pi.groupIDMap) > 0 {
 		pi.groupIDMap = append([]idMap{prefixGroupMap}, pi.groupIDMap...)
 	}
+	return nil
 }
 
 func (pi *T) validateSingleIDMaps(idms idMaps) error {
-	ids := map[uint32]struct{}{}
+	ids := map[uint64]struct{}{}
 	for _, idm := range idms {
 		if _, ok := ids[idm.ID]; ok {
 			return fmt.Errorf("duplicate id: %v", idm.ID)
@@ -333,8 +336,9 @@ func (pi *T) finalizePerFileInfo() {
 		}
 		return
 	}
+
 	for i := range pi.entries {
-		uid, gid := pi.userID, pi.groupID
+		uid, gid := pi.xattr.UID, pi.xattr.GID
 		if len(pi.userIDMap) > 0 {
 			uid, _ = pi.userIDMap.idForPos(i)
 		}
@@ -344,13 +348,16 @@ func (pi *T) finalizePerFileInfo() {
 		(&pi.entries[i]).SetSys(idAndFS{
 			uid: uid, gid: gid, fsOnly: fsOnly{pi.inodes[i], pi.blocks[i]}})
 	}
+
 }
 
 func (pi *T) finalize() error {
 	if pi.finalized {
 		return nil
 	}
-	pi.createIDMapsAndInodes()
+	if err := pi.createIDMapsAndInodes(); err != nil {
+		return err
+	}
 	pi.finalized = true
 	return pi.validateIDMaps()
 }
@@ -407,25 +414,25 @@ func (s *idmapScanner) Info() file.Info {
 
 // UserIDScan returns an IDSanner for the supplied user id. It can
 // only be used after Finalize has been called.
-func (pi *T) UserIDScan(id uint32) (IDSanner, error) {
+func (pi *T) UserIDScan(id uint64) (IDSanner, error) {
 	return pi.newIDScan(id, true, pi.userIDMap)
 }
 
 // GroupIDScan returns an IDSanner for the supplied group id.
-func (pi *T) GroupIDScan(id uint32) (IDSanner, error) {
+func (pi *T) GroupIDScan(id uint64) (IDSanner, error) {
 	return pi.newIDScan(id, false, pi.groupIDMap)
 }
 
-func (pi *T) newIDScan(id uint32, userID bool, idms idMaps) (IDSanner, error) {
+func (pi *T) newIDScan(id uint64, userID bool, idms idMaps) (IDSanner, error) {
 	if !pi.finalized {
 		return nil, fmt.Errorf("prefix info not finalized")
 	}
 	idm := idms.idMapFor(id)
 	if idm < 0 {
-		if userID && id == pi.userID {
+		if userID && id == pi.xattr.UID {
 			return &nullScanner{entries: pi.entries}, nil
 		}
-		if !userID && id == pi.groupID {
+		if !userID && id == pi.xattr.GID {
 			return &nullScanner{entries: pi.entries}, nil
 		}
 		if userID {

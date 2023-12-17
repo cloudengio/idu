@@ -14,7 +14,7 @@ import (
 type exprCmd struct{}
 
 func (ec *exprCmd) explain(ctx context.Context, values interface{}, args []string) error {
-	p := boolexpr.NewParser(nil)
+	p := boolexpr.NewParser(ctx, nil)
 	fmt.Printf("idu commands accept boolean expressions using || && and ( and ) to combine any of the following operands:\n\n")
 	for _, op := range p.ListOperands() {
 		fmt.Printf("  %v\n", op.Document())

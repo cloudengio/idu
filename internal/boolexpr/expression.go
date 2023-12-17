@@ -7,6 +7,7 @@
 package boolexpr
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"strings"
@@ -16,10 +17,11 @@ import (
 	"cloudeng.io/cmd/idu/internal/usernames"
 	"cloudeng.io/cmdutil/boolexpr"
 	"cloudeng.io/file"
+	"cloudeng.io/file/filewalk"
 	"cloudeng.io/file/matcher"
 )
 
-func NewParser(fs fs.FS) *boolexpr.Parser {
+func NewParser(ctx context.Context, fs filewalk.FS) *boolexpr.Parser {
 	parser := matcher.New()
 
 	parser.RegisterOperand("user",
@@ -32,7 +34,7 @@ func NewParser(fs fs.FS) *boolexpr.Parser {
 	})
 
 	parser.RegisterOperand("hardlink", func(n, v string) boolexpr.Operand {
-		return NewHardlink(n, v, fs)
+		return NewHardlink(ctx, n, v, fs)
 	})
 
 	return parser
@@ -115,8 +117,8 @@ func (m match) IsHardlink(prefix string, info *prefixinfo.T, fi file.Info) bool 
 	if m.hl == nil {
 		return false
 	}
-	_, _, dev, ino, _ := info.SysInfo(fi)
-	return m.hl.Ref(dev, ino)
+	xattr := info.XAttrInfo(fi)
+	return m.hl.Ref(xattr.Device, xattr.FileID)
 }
 
 func (m match) IsPrefixSet() bool {
@@ -147,14 +149,8 @@ type withsys struct {
 	fi file.Info
 }
 
-func (w withsys) UserGroup() (uid, gid uint32) {
-	uid, gid, _, _, _ = w.pi.SysInfo(w.fi)
-	return
-}
-
-func (w withsys) DevIno() (dev, ino uint64) {
-	_, _, dev, ino, _ = w.pi.SysInfo(w.fi)
-	return
+func (w withsys) XAttr() filewalk.XAttr {
+	return w.pi.XAttrInfo(w.fi)
 }
 
 func (w withsys) Name() string {

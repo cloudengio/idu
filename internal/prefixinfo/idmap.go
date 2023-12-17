@@ -15,7 +15,7 @@ import (
 // idMap is a bit map of file positions for a given id. They are used
 // to encode/decode user/group information in a space efficient manner.
 type idMap struct {
-	ID  uint32
+	ID  uint64
 	Pos []uint64
 }
 
@@ -38,7 +38,7 @@ func (idm idMap) appendBinary(buf *bytes.Buffer) {
 func (idm *idMap) decodeBinary(data []byte) ([]byte, error) {
 	uid, n := binary.Uvarint(data)
 	data = data[n:]
-	idm.ID = uint32(uid)
+	idm.ID = uid
 	l, n := binary.Uvarint(data)
 	data = data[n:]
 	if l > 0 {
@@ -87,7 +87,7 @@ func (idms *idMaps) decodeBinary(data []byte) ([]byte, error) {
 	return data, nil
 }
 
-func (idms idMaps) idMapFor(id uint32) int {
+func (idms idMaps) idMapFor(id uint64) int {
 	for i, idm := range idms {
 		if idm.ID == id {
 			return i
@@ -96,7 +96,7 @@ func (idms idMaps) idMapFor(id uint32) int {
 	return -1
 }
 
-func (idms idMaps) idForPos(pos int) (uint32, bool) {
+func (idms idMaps) idForPos(pos int) (uint64, bool) {
 	for _, idm := range idms {
 		if idm.isSet(pos) {
 			return idm.ID, true
@@ -105,7 +105,7 @@ func (idms idMaps) idForPos(pos int) (uint32, bool) {
 	return 0, false
 }
 
-func newIDMap(id uint32, n int) idMap {
+func newIDMap(id uint64, n int) idMap {
 	return idMap{
 		ID:  id,
 		Pos: make([]uint64, n/64+1),
