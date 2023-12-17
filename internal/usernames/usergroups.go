@@ -34,7 +34,7 @@ func (um *IDManager) UIDForName(name string) (uint64, error) {
 		name = info.UID
 	}
 	id, err := strconv.ParseUint(name, 10, 32)
-	return uint64(id), err
+	return id, err
 }
 
 func (um *IDManager) GIDForName(name string) (uint64, error) {
@@ -43,7 +43,7 @@ func (um *IDManager) GIDForName(name string) (uint64, error) {
 		name = grp.Gid
 	}
 	id, err := strconv.ParseUint(name, 10, 32)
-	return uint64(id), err
+	return id, err
 }
 
 func (um *IDManager) NameForGID(gid uint64) string {

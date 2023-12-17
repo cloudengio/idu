@@ -288,11 +288,10 @@ func (w *walker) processStats(ctx context.Context, prefix string, toStat []filew
 	}
 	for i, fi := range all {
 		filename := w.fs.Join(prefix, fi.Name())
-		xattr, err := w.fs.XAttr(ctx, filename, fi)
-		if err != nil {
-			w.dbLogErr(ctx, filename, []byte(err.Error()))
-			continue
-		}
+		xattr, _ := w.fs.XAttr(ctx, filename, fi)
+		// Regardless of any error, set the system information
+		// to be of type filewalk.XAttr since all other code
+		// assumes it so.
 		all[i].SetSys(xattr)
 	}
 	return children, all, nil

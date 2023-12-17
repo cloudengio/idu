@@ -42,7 +42,7 @@ func (op UserOrGroup) Prepare() (boolexpr.Operand, error) {
 		}
 		return op, fmt.Errorf("failed to lookup user: %q: %v", op.text, err)
 	}
-	op.id = uint64(nid)
+	op.id = nid
 	return op, nil
 }
 
