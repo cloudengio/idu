@@ -61,6 +61,8 @@ cloudeng.io/file v0.0.0-20231213200048-831633bb3d35 h1:y7cRql7ln6qEz0V5fRR6/BvLj
 cloudeng.io/file v0.0.0-20231213200048-831633bb3d35/go.mod h1:Ci207/QAmfBsnKIwnTUy3BqsLt+Pqoil/FH0j/ek6Ug=
 cloudeng.io/file v0.0.0-20231215173023-0b284985cfae h1:tZTReg45yZFn80/YwM7ICV1skbAtfFYqEv1+2JvqOgE=
 cloudeng.io/file v0.0.0-20231215173023-0b284985cfae/go.mod h1:wWRNWpwzRg34QzMy58SqhFeB3tKdAmi6AUW+Dxz1OSU=
+cloudeng.io/file v0.0.0-20231218033530-28c223bc0b1f h1:hhehW0R09DORn+KzqDehB3oZZxNWrYDttbypA0npIUA=
+cloudeng.io/file v0.0.0-20231218033530-28c223bc0b1f/go.mod h1:wWRNWpwzRg34QzMy58SqhFeB3tKdAmi6AUW+Dxz1OSU=
 cloudeng.io/os v0.0.0-20230913164637-56a6ca867a22 h1:pnuvao+ZW8CQulpOZBQn3Z1/KVTBRuvDRtA4EbZzPq0=
 cloudeng.io/os v0.0.0-20230913164637-56a6ca867a22/go.mod h1:VaeqTUuJjqsGWuUAz4ZK9e2/RVXvV138F1X+8t+UyoI=
 cloudeng.io/os v0.0.0-20230921004931-53b96e0659c8 h1:ksQml77vBoD5xesSjxmBx0vx3EzYkdfV4/KRtcEMZHA=

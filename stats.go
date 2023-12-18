@@ -112,8 +112,9 @@ func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *comput
 
 	match, err := boolexpr.CreateMatcher(parser,
 		boolexpr.WithEntryExpression(args[1:]...),
-		boolexpr.WithPrefixExpression(cf.Prefix.Values...),
-		boolexpr.WithHardlinkHandling(cfg.CountHardlinkAsFiles)) // Move to config.
+		boolexpr.WithEmptyEntryValue(true),
+		boolexpr.WithFilewalkFS(fwfs),
+		boolexpr.WithHardlinkHandling(cfg.CountHardlinkAsFiles))
 	if err != nil {
 		return err
 	}
@@ -151,7 +152,11 @@ func (st *statsCmds) computeStats(ctx context.Context, db database.DB, match boo
 			fmt.Fprintf(os.Stderr, "failed to unmarshal value for %v: %v\n", k, err)
 			return
 		}
-		if err := sdb.Update(k, pi, calc, match); err != nil {
+		entryMatcher := match
+		if match.Prefix(k, &pi) {
+			entryMatcher = boolexpr.AlwaysMatch{}
+		}
+		if err := sdb.Update(k, pi, calc, entryMatcher); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to compute stats for %v: %v\n", k, err)
 			return
 		}

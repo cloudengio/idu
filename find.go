@@ -5,7 +5,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io/fs"
@@ -13,7 +12,6 @@ import (
 
 	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/boolexpr"
-	"cloudeng.io/cmd/idu/internal/database"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmdutil/flags"
 	"cloudeng.io/errors"
@@ -52,57 +50,17 @@ func printEntry(pi prefixinfo.T, fi file.Info, long bool, sep, k string) {
 	}
 }
 
-func handleDirEntry(ctx context.Context, db database.DB, match boolexpr.Matcher, pi *prefixinfo.T, fi file.Info, long bool, k, nk string) (bool, error) {
-	var buf bytes.Buffer
-	if err := db.Get(ctx, nk, &buf); err != nil {
-		return false, fmt.Errorf("failed to fetch directory entry for %v: %v", k, err)
-	}
-	npi := prefixinfo.T{}
-	if err := npi.UnmarshalBinary(buf.Bytes()); err != nil {
-		return false, fmt.Errorf("failed to unmarshal directory entry for %v: %v", k, err)
-	}
-	return match.Prefix(nk, &npi) && match.Entry(k, pi, fi), nil
-}
-
-func isEmptyExpression(expr []string) bool {
-	if len(expr) == 0 {
-		return true
-	}
-	if len(strings.TrimSpace(strings.Join(expr, " "))) == 0 {
-		return true
-	}
-	return false
-}
-
 func (fc *findCmds) findFS(ctx context.Context, fwfs filewalk.FS, ff *findFlags, args []string) error {
 
 	parser := boolexpr.NewParser(ctx, fwfs)
 
-	emptyPrefix := isEmptyExpression(ff.Prefix.Values)
-
-	emptyEntry := isEmptyExpression(args[1:])
-	var emptyPrefixValue, emptyEntryValue bool
-	if emptyEntry {
-		// There is no entry expression, so
-		//   either match all entries if there is no prefix expression,
-		//   or match only the prefixes.
-		emptyEntryValue = emptyPrefix
-	} else {
-		// There is an entry expression, so
-		//
-		emptyPrefixValue = !emptyPrefix
-	}
-
 	match, err := boolexpr.CreateMatcher(parser,
-		boolexpr.WithEmptyEntryValue(emptyEntryValue),
-		boolexpr.WithEmptyPrefixValue(emptyPrefixValue),
-		boolexpr.WithEntryExpression(args[1:]...),
-		boolexpr.WithPrefixExpression(ff.Prefix.Values...))
+		boolexpr.WithEmptyEntryValue(true),
+		boolexpr.WithFilewalkFS(fwfs),
+		boolexpr.WithEntryExpression(args[1:]...))
 	if err != nil {
 		return err
 	}
-
-	fmt.Printf("match: %v\n", match)
 
 	ctx, cfg, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
 	if err != nil {
@@ -121,33 +79,13 @@ func (fc *findCmds) findFS(ctx context.Context, fwfs filewalk.FS, ff *findFlags,
 			errs.Append(fmt.Errorf("failed to unmarshal value for %v: %v", k, err))
 			return false
 		}
-
-		/*		if !emptyPrefix && args[0] == k {
-				printPrefix(pi, ff.Long, k)
-			}*/
-
 		if match.Prefix(k, &pi) {
 			printPrefix(pi, ff.Long, k)
 		}
-
 		for _, fi := range pi.InfoList() {
 			if fi.IsDir() {
 				continue
 			}
-			/*
-				if !emptyPrefix && fi.IsDir() && k != args[0] {
-					nextPrefix := k + sep + fi.Name()
-					// Need to fetch the directory entry to see if it matches or not
-					matched, err := handleDirEntry(ctx, db, match, &pi, fi, ff.Long, k, nextPrefix)
-					if err != nil {
-						errs.Append(err)
-						return false
-					}
-					if matched {
-						printPrefix(pi, ff.Long, nextPrefix)
-					}
-					continue
-				}*/
 			if match.Entry(k, &pi, fi) {
 				printEntry(pi, fi, ff.Long, sep, k)
 			}

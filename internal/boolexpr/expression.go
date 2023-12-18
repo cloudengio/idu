@@ -48,21 +48,15 @@ func WithEntryExpression(expr ...string) Option {
 	}
 }
 
-func WithPrefixExpression(expr ...string) Option {
-	return func(o *options) {
-		o.prefix = append(o.prefix, expr...)
-	}
-}
-
 func WithEmptyEntryValue(v bool) Option {
 	return func(o *options) {
 		o.emptyEntryValue = v
 	}
 }
 
-func WithEmptyPrefixValue(v bool) Option {
+func WithFilewalkFS(fs filewalk.FS) Option {
 	return func(o *options) {
-		o.emptyPrefixValue = v
+		o.fs = fs
 	}
 }
 
@@ -79,9 +73,10 @@ func WithHardlinkHandling(v bool) Option {
 }
 
 type options struct {
-	entry, prefix                     []string
-	hardlinks                         bool
-	emptyEntryValue, emptyPrefixValue bool
+	entry           []string
+	fs              filewalk.FS
+	hardlinks       bool
+	emptyEntryValue bool
 }
 
 func createExpr(p *boolexpr.Parser, args []string) (boolexpr.T, bool, error) {
@@ -106,25 +101,19 @@ func CreateMatcher(parser *boolexpr.Parser, opts ...Option) (Matcher, error) {
 	if m.hardlinks {
 		m.hl = &hardlinks.Incremental{}
 	}
-
 	var err error
-	m.entryExpr, m.entrySet, err = createExpr(parser, m.entry)
+	m.expr, m.exprSet, err = createExpr(parser, m.entry)
 	if err != nil {
 		return match{}, err
 	}
-	m.prefixExpr, m.prefixSet, err = createExpr(parser, m.prefix)
-	if err != nil {
-		return match{}, err
-	}
-
 	return m, nil
 }
 
 type match struct {
 	options
-	prefixSet, entrySet   bool
-	prefixExpr, entryExpr boolexpr.T
-	hl                    *hardlinks.Incremental
+	exprSet bool
+	expr    boolexpr.T
+	hl      *hardlinks.Incremental
 }
 
 func (m match) IsHardlink(prefix string, info *prefixinfo.T, fi file.Info) bool {
@@ -136,21 +125,25 @@ func (m match) IsHardlink(prefix string, info *prefixinfo.T, fi file.Info) bool 
 }
 
 func (m match) Prefix(prefix string, pi *prefixinfo.T) bool {
-	if !m.prefixSet {
-		return m.emptyPrefixValue
+	if !m.exprSet {
+		return m.emptyEntryValue
 	}
-	return m.prefixExpr.Eval(prefixinfo.NewNamed(prefix, pi))
+	name := prefix
+	if m.fs != nil {
+		name = m.fs.Base(prefix)
+	}
+	return m.expr.Eval(prefixWithName{T: pi, name: name, path: prefix})
 }
 
 func (m match) Entry(prefix string, pi *prefixinfo.T, fi file.Info) bool {
-	if !m.entrySet {
+	if !m.exprSet {
 		return m.emptyEntryValue
 	}
-	v := m.entryExpr.Eval(withsys{pi, fi})
-	if v {
-		fmt.Printf("PI %v FI %v - %v\n", prefix, fi.Name(), fi.Mode())
+	path := prefix
+	if m.fs != nil {
+		path = m.fs.Join(prefix, fi.Name())
 	}
-	return v
+	return m.expr.Eval(entryWithXattr{pi: pi, fi: fi, path: path})
 }
 
 func (m match) String() string {
@@ -158,28 +151,51 @@ func (m match) String() string {
 	if m.hl != nil {
 		ph = "[hardlink handling enabled]:"
 	}
-	return fmt.Sprintf("%v: prefix: %v (default: %v), entry: %v (default: %v)", ph, m.prefixExpr.String(), m.emptyPrefixValue, m.entryExpr.String(), m.emptyEntryValue)
+	return fmt.Sprintf("%v: pentry: %v (default: %v)", ph, m.expr.String(), m.emptyEntryValue)
 }
 
-type withsys struct {
-	pi *prefixinfo.T
-	fi file.Info
+type entryWithXattr struct {
+	pi   *prefixinfo.T
+	fi   file.Info
+	path string
 }
 
-func (w withsys) XAttr() filewalk.XAttr {
+func (w entryWithXattr) XAttr() filewalk.XAttr {
 	return w.pi.XAttrInfo(w.fi)
 }
 
-func (w withsys) Name() string {
+func (w entryWithXattr) Name() string {
 	return w.fi.Name()
 }
 
-func (w withsys) Type() fs.FileMode {
+func (w entryWithXattr) Path() string {
+	return w.path
+}
+
+func (w entryWithXattr) Type() fs.FileMode {
 	return w.fi.Type()
 }
 
-func (w withsys) Mode() fs.FileMode {
+func (w entryWithXattr) Mode() fs.FileMode {
 	return w.fi.Mode()
+}
+
+type prefixWithName struct {
+	*prefixinfo.T
+	name string
+	path string
+}
+
+func (pi prefixWithName) Name() string {
+	return pi.name
+}
+
+func (pi prefixWithName) Path() string {
+	return pi.path
+}
+
+func (pi prefixWithName) NumEntries() int64 {
+	return int64(len(pi.T.InfoList()))
 }
 
 type AlwaysMatch struct{}
@@ -203,7 +219,6 @@ func (AlwaysMatch) String() string {
 type Matcher interface {
 	IsHardlink(prefix string, info *prefixinfo.T, fi file.Info) bool
 	Entry(prefix string, info *prefixinfo.T, fi file.Info) bool
-	//NeedsNumEntries() bool
 	Prefix(prefix string, info *prefixinfo.T) bool
 	String() string
 }
