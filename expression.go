@@ -7,21 +7,42 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"cloudeng.io/cmd/idu/internal/boolexpr"
+	"cloudeng.io/text/linewrap"
 )
 
 type exprCmd struct{}
 
 func (ec *exprCmd) explain(ctx context.Context, values interface{}, args []string) error {
 	p := boolexpr.NewParser(ctx, nil)
-	fmt.Printf("idu commands accept boolean expressions using || && and ( and ) to combine any of the following operands:\n\n")
+	var out strings.Builder
+	out.WriteString("idu commands accept boolean expressions using || && ! and ( and ) to combine any of the following operands:\n\n")
+
 	for _, op := range p.ListOperands() {
-		fmt.Printf("  %v\n", op.Document())
+		out.WriteString("  ")
+		out.WriteString(op.Document())
+		out.WriteRune('\n')
+		out.WriteRune('\n')
 	}
-	fmt.Printf("\nNote that directories are evaluated both using their full path name as well as their name within a parent, whereas files use evaluated just using their name within a directory.\n")
 
-	fmt.Printf("\nThe expression may span multiple arguments which are concatenated together using spaces. Operand values may be quoted using single quotes or may contain escaped characters using \\. For example re='a b.pdf' or re=a\\ b.pdf\n")
+	out.WriteString(`
+Note that the name operand evaluates both the name of a file or directory
+within the directory that contains it as well as its full path name. The re
+(regexp) operand evaluates the full path name of a file or directory.
 
+For example 'name=bar' will match a file named 'bar' in directory '/foo',
+as will 'name=/foo/bar'. Since name uses glob matching all directory
+levels must be specified, i.e. 'name=/*/*/baz' is required to match
+/foo/bar/baz. The re (regexp) operator can be used to match any level,
+ for example 're=bar' will match '/foo/bar/baz' as will 're=bar/baz.
+`)
+
+	out.WriteString(`
+The expression may span multiple arguments which are concatenated together using spaces. Operand values may be quoted using single quotes or may contain escaped characters using. For example re='a b.pdf' or re=a\\ b.pdf\n
+`)
+
+	fmt.Println(linewrap.Block(4, 80, out.String()))
 	return nil
 }
