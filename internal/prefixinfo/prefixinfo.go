@@ -442,23 +442,3 @@ func (pi *T) newIDScan(id uint64, userID bool, idms idMaps) (IDSanner, error) {
 	}
 	return &idmapScanner{sc: newIdMapScanner(idms[idm]), entries: pi.entries}, nil
 }
-
-// Named represents a PrefixInfo that has a name associated with it
-// and also a NumEntries() method that returns the number of entries
-// in the prefix.
-type Named struct {
-	*T
-	name string
-}
-
-func (pi Named) Name() string {
-	return pi.name
-}
-
-func (pi Named) NumEntries() int64 {
-	return int64(len(pi.entries))
-}
-
-func NewNamed(name string, pi *T) Named {
-	return Named{name: name, T: pi}
-}
