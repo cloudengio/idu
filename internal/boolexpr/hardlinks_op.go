@@ -6,23 +6,11 @@ package boolexpr
 
 import (
 	"context"
-	"reflect"
 
 	"cloudeng.io/cmdutil/boolexpr"
 	"cloudeng.io/file"
-	"cloudeng.io/file/filewalk"
 	"cloudeng.io/file/matcher"
 )
-
-type Hardlink struct {
-	ctx      context.Context
-	text     string
-	name     string
-	document string
-	fs       filewalk.FS
-	dev, ino uint64
-	requires reflect.Type
-}
 
 func prepare(ctx context.Context, name string, fs file.FS) (file.XAttr, error) {
 	f, err := fs.Open(name)

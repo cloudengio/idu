@@ -54,7 +54,7 @@ func TestdataIDCombinationsDirs(modTime time.Time, uid, gid int64, inode uint64)
 
 func TestdataNewInfo(name string, size, blocks int64, mode fs.FileMode, modTime time.Time, uid, gid int64, device, inode uint64) file.Info {
 	return file.NewInfo(name, size, mode, modTime,
-		prefixinfo.NewSysInfo(int64(uid), int64(gid), device, inode, blocks))
+		prefixinfo.NewSysInfo(uid, gid, device, inode, blocks))
 }
 
 func TestdataNewPrefixInfo(name string, size, blocks int64, mode fs.FileMode, modTime time.Time, uid, gid int64, dev, inode uint64) prefixinfo.T {

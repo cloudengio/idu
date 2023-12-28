@@ -27,7 +27,7 @@ type PerIDTotals []Totals
 
 func (t *Totals) AppendBinary(data []byte) []byte {
 	// Add a version etc for windows since IDs will be strings there.
-	data = binary.AppendVarint(data, int64(t.ID))
+	data = binary.AppendVarint(data, t.ID)
 	data = binary.AppendVarint(data, t.Files)
 	data = binary.AppendVarint(data, t.Bytes)
 	data = binary.AppendVarint(data, t.StorageBytes)
