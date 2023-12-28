@@ -21,7 +21,7 @@ import (
 )
 
 func createMatcher(t *testing.T, fs filewalk.FS, expr string) boolexpr.Matcher {
-	parser := boolexpr.NewParser(context.Background(), fs)
+	parser := boolexpr.NewParserTests(context.Background(), fs)
 	matcher, err := boolexpr.CreateMatcher(parser,
 		boolexpr.WithEntryExpression(expr))
 	if err != nil {

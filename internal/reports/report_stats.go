@@ -34,7 +34,7 @@ type PerIDStats struct {
 	Prefix          string
 	MaxN            int
 	HasStorageBytes bool
-	ByPrefix        map[uint64]*Heaps[string]
+	ByPrefix        map[int64]*Heaps[string]
 }
 
 // AllStats is a collection of statistics for a given prefix and includes:
@@ -47,11 +47,11 @@ type AllStats struct {
 	Prefix   *Heaps[string]
 	PerUser  PerIDStats
 	PerGroup PerIDStats
-	ByUser   *Heaps[uint64]
-	ByGroup  *Heaps[uint64]
+	ByUser   *Heaps[int64]
+	ByGroup  *Heaps[int64]
 
-	userTotals  map[uint64]stats.Totals
-	groupTotals map[uint64]stats.Totals
+	userTotals  map[int64]stats.Totals
+	groupTotals map[int64]stats.Totals
 }
 
 func newHeaps[T comparable](prefix string, storageBytes bool, n int) *Heaps[T] {
@@ -119,7 +119,7 @@ func ZipN[T comparable](h *heap.MinMax[int64, T], n int) (z []Zipped[T]) {
 
 type MergedStats struct {
 	Prefix      string `json:"prefix,omitempty"`
-	ID          uint64 `json:"id,omitempty"`
+	ID          int64  `json:"id,omitempty"`
 	IDName      string `json:"name,omitempty"`
 	Bytes       int64  `json:"bytes"`
 	Storage     int64  `json:"storage,omitempty"`
@@ -174,11 +174,11 @@ func newPerIDStats(prefix string, storageBytes bool, n int) PerIDStats {
 		Prefix:          prefix,
 		HasStorageBytes: storageBytes,
 		MaxN:            n,
-		ByPrefix:        make(map[uint64]*Heaps[string]),
+		ByPrefix:        make(map[int64]*Heaps[string]),
 	}
 }
 
-func (s *PerIDStats) Push(id uint64, prefix string, size, storageBytes, prefixBytes, files, children int64) {
+func (s *PerIDStats) Push(id int64, prefix string, size, storageBytes, prefixBytes, files, children int64) {
 	if _, ok := s.ByPrefix[id]; !ok {
 		s.ByPrefix[id] = newHeaps[string](s.Prefix, s.HasStorageBytes, s.MaxN)
 	}
@@ -191,14 +191,14 @@ func NewAllStats(prefix string, withStorageBytes bool, n int) *AllStats {
 		Prefix:      newHeaps[string](prefix, withStorageBytes, n),
 		PerUser:     newPerIDStats(prefix, withStorageBytes, n),
 		PerGroup:    newPerIDStats(prefix, withStorageBytes, n),
-		ByUser:      newHeaps[uint64](prefix, withStorageBytes, n),
-		ByGroup:     newHeaps[uint64](prefix, withStorageBytes, n),
-		userTotals:  map[uint64]stats.Totals{},
-		groupTotals: map[uint64]stats.Totals{},
+		ByUser:      newHeaps[int64](prefix, withStorageBytes, n),
+		ByGroup:     newHeaps[int64](prefix, withStorageBytes, n),
+		userTotals:  map[int64]stats.Totals{},
+		groupTotals: map[int64]stats.Totals{},
 	}
 }
 
-func addToMap(stats map[uint64]stats.Totals, uid uint64, size, storageBytes, prefixBytes, files, children int64) {
+func addToMap(stats map[int64]stats.Totals, uid int64, size, storageBytes, prefixBytes, files, children int64) {
 	s := stats[uid]
 	s.Bytes += size
 	s.StorageBytes += storageBytes

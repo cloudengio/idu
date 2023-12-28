@@ -13,8 +13,9 @@ import (
 	"cloudeng.io/file/diskusage"
 )
 
+// TODO: parametize the ID type to be int64 or string for non-posix system.
 type Totals struct {
-	ID           uint64
+	ID           int64
 	Files        int64 // number of files
 	Prefixes     int64 // number of prefixes/directories
 	Bytes        int64 // total size of files
@@ -25,7 +26,8 @@ type Totals struct {
 type PerIDTotals []Totals
 
 func (t *Totals) AppendBinary(data []byte) []byte {
-	data = binary.AppendUvarint(data, t.ID)
+	// Add a version etc for windows since IDs will be strings there.
+	data = binary.AppendVarint(data, t.ID)
 	data = binary.AppendVarint(data, t.Files)
 	data = binary.AppendVarint(data, t.Bytes)
 	data = binary.AppendVarint(data, t.StorageBytes)
@@ -40,7 +42,7 @@ func (t *Totals) MarshalBinary() (data []byte, err error) {
 
 func (t *Totals) DecodeBinary(data []byte) []byte {
 	var n int
-	id, n := binary.Uvarint(data)
+	id, n := binary.Varint(data)
 	data = data[n:]
 	t.ID = id
 	t.Files, n = binary.Varint(data)
@@ -104,7 +106,7 @@ func (t Totals) update(fi file.Info, hardlink bool, blocks int64, du diskusage.C
 	return t
 }
 
-type perID map[uint64]Totals
+type perID map[int64]Totals
 
 func (pid perID) flatten() PerIDTotals {
 	tl := make(PerIDTotals, 0, len(pid))

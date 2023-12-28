@@ -24,11 +24,11 @@ import (
 	"golang.org/x/exp/maps"
 )
 
-func newInfo(name string, size, blocks int64, mode fs.FileMode, modTime time.Time, uid, gid uint64) file.Info {
+func newInfo(name string, size, blocks int64, mode fs.FileMode, modTime time.Time, uid, gid int64) file.Info {
 	return file.NewInfo(name, size, mode, modTime, prefixinfo.NewSysInfo(uid, gid, 0, 0, blocks))
 }
 
-func createPrefixInfo(t *testing.T, uid, gid uint64, name string, contents ...[]file.Info) prefixinfo.T {
+func createPrefixInfo(t *testing.T, uid, gid int64, name string, contents ...[]file.Info) prefixinfo.T {
 	now := time.Now().Truncate(0)
 	info := newInfo(name, 3, 4, fs.ModeDir|0700, now.Truncate(0), uid, gid)
 	pi := prefixinfo.New(name, info)
@@ -70,7 +70,7 @@ func computeStats(t *testing.T, sdb *reports.AllStats, calc diskusage.Calculator
 	sdb.Finalize()
 }
 
-func compareIDs[T comparable](t *testing.T, m map[uint64]*reports.Heaps[T], want ...uint64) {
+func compareIDs[T comparable](t *testing.T, m map[int64]*reports.Heaps[T], want ...int64) {
 	got := maps.Keys(m)
 	slices.Sort(got)
 	if !slices.Equal(got, want) {
@@ -137,7 +137,7 @@ func comparePerIDTotals(t *testing.T, pis reports.PerIDStats, totals testStats) 
 
 }
 
-func nInfos(n int, mode fs.FileMode, uid, gid uint64) (fis []file.Info) {
+func nInfos(n int, mode fs.FileMode, uid, gid int64) (fis []file.Info) {
 	modTime := time.Now()
 	for i := 0; i < n; i++ {
 		fis = append(fis, newInfo(fmt.Sprintf("f%v", i), int64(i+1), int64(i+1), mode, modTime, uid, gid))
@@ -146,11 +146,11 @@ func nInfos(n int, mode fs.FileMode, uid, gid uint64) (fis []file.Info) {
 	return
 }
 
-func nInfoF(n int, uid, gid uint64) (fis []file.Info) {
+func nInfoF(n int, uid, gid int64) (fis []file.Info) {
 	return nInfos(n, 0700, uid, gid)
 }
 
-func nInfoD(n int, uid, gid uint64) (fis []file.Info) {
+func nInfoD(n int, uid, gid int64) (fis []file.Info) {
 	return nInfos(n, 0700|os.ModeDir, uid, gid)
 }
 
@@ -164,7 +164,7 @@ func fib(n int) int64 {
 
 func TestReportStatsSingleID(t *testing.T) {
 	calc := sumSizeAndBlocks{}
-	var uid, gid uint64 = 100, 2
+	var uid, gid int64 = 100, 2
 
 	npi := createPrefixInfo
 
@@ -181,7 +181,7 @@ func TestReportStatsSingleID(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		uid, gid uint64
+		uid, gid int64
 	}{
 		{uid, gid},
 		{uid + 1, gid + 1},
@@ -211,8 +211,8 @@ func TestReportStatsSingleID(t *testing.T) {
 		}
 
 		for _, tcid := range []struct {
-			h  *reports.Heaps[uint64]
-			id uint64
+			h  *reports.Heaps[int64]
+			id int64
 		}{
 			{sdb.ByUser, tc.uid},
 			{sdb.ByGroup, tc.gid},
@@ -226,7 +226,7 @@ func TestReportStatsSingleID(t *testing.T) {
 		}
 
 		sdb = reports.NewAllStats("test", true, 5)
-		matcher, err := boolexpr.CreateMatcher(boolexpr.NewParser(context.Background(), nil), boolexpr.WithEntryExpression("user=33"))
+		matcher, err := boolexpr.CreateMatcher(boolexpr.NewParserTests(context.Background(), nil), boolexpr.WithEntryExpression("user=1000000"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -249,8 +249,8 @@ func TestReportStatsSingleID(t *testing.T) {
 	}
 }
 
-func cloneIDDetails(d map[uint64][]testStats) map[uint64][]testStats {
-	n := map[uint64][]testStats{}
+func cloneIDDetails(d map[int64][]testStats) map[int64][]testStats {
+	n := map[int64][]testStats{}
 	for k, v := range d {
 		n[k] = slices.Clone(v)
 	}
@@ -258,14 +258,14 @@ func cloneIDDetails(d map[uint64][]testStats) map[uint64][]testStats {
 }
 
 func TestReportStatsMultipleIDs(t *testing.T) {
-	var uid, gid uint64 = 100, 2
+	var uid, gid int64 = 100, 2
 
 	nf, nd := []int{2, 6, 9, 7, 3, 10, 5}, []int{2, 7, 5, 3, 10, 6, 4}
 
 	// Create the prefixes
 	nuid, ngid := uid, gid
-	uids, gids := []uint64{uid}, []uint64{gid} // unique ids
-	uidl, gidl := []uint64{}, []uint64{}       // lists of ids, used to compute stats below
+	uids, gids := []int64{uid}, []int64{gid} // unique ids
+	uidl, gidl := []int64{}, []int64{}       // lists of ids, used to compute stats below
 	pikeys := []string{}
 	pis := []prefixinfo.T{}
 	for i := 0; i < len(nf); i++ {
@@ -290,10 +290,10 @@ func TestReportStatsMultipleIDs(t *testing.T) {
 	}
 
 	// Compute the per id stats.
-	perIDTotals := map[uint64]testStats{}
-	perIDDetails := map[uint64][]testStats{}
+	perIDTotals := map[int64]testStats{}
+	perIDDetails := map[int64][]testStats{}
 	for i := 0; i < len(nf); i++ {
-		for _, id := range []uint64{uidl[i], gidl[i]} {
+		for _, id := range []int64{uidl[i], gidl[i]} {
 			ut := perIDTotals[id]
 			ut.update(fib(nf[i]), fib(nf[i])*2, int64(nf[i]), int64(nd[i]), fib(nd[i]))
 			perIDTotals[id] = ut
@@ -321,12 +321,13 @@ func TestReportStatsMultipleIDs(t *testing.T) {
 	testIDExpr(t, pikeys, pis, uids, gids, perIDTotals, sizeOrdered, fileOrdered, prefixedOrdered)
 }
 
-func testSingleID(t *testing.T, match boolexpr.Matcher, group bool, pikeys []string, pis []prefixinfo.T, id uint64, perIDTotal testStats, sizeOrdered, fileOrdered, prefixedOrdered []testStats) {
+func testSingleID(t *testing.T, match boolexpr.Matcher, group bool, pikeys []string, pis []prefixinfo.T, id int64, perIDTotal testStats, sizeOrdered, fileOrdered, prefixedOrdered []testStats) {
 	calc := sumSizeAndBlocks{}
 
 	sdb := reports.NewAllStats("test", true, 5)
 
 	computeStats(t, sdb, calc, pikeys, match, pis...)
+	fmt.Printf("H: %v %v - %v %v\n", group, sdb, sdb.PerGroup, sdb.PerUser)
 
 	compareHeapTotals(t, sdb.Prefix, perIDTotal)
 
@@ -359,8 +360,8 @@ func testSingleID(t *testing.T, match boolexpr.Matcher, group bool, pikeys []str
 	}
 }
 
-func testIDExpr(t *testing.T, pikeys []string, pis []prefixinfo.T, uids, gids []uint64, perIDTotals map[uint64]testStats, sizeOrdered, fileOrdered, prefixedOrdered map[uint64][]testStats) {
-	parser := boolexpr.NewParser(context.Background(), nil)
+func testIDExpr(t *testing.T, pikeys []string, pis []prefixinfo.T, uids, gids []int64, perIDTotals map[int64]testStats, sizeOrdered, fileOrdered, prefixedOrdered map[int64][]testStats) {
+	parser := boolexpr.NewParserTests(context.Background(), nil)
 
 	for _, uid := range uids {
 		matcher, err := boolexpr.CreateMatcher(parser, boolexpr.WithEntryExpression(fmt.Sprintf("user=%d", uid)))
@@ -379,7 +380,7 @@ func testIDExpr(t *testing.T, pikeys []string, pis []prefixinfo.T, uids, gids []
 	}
 }
 
-func testAllIDs(t *testing.T, pikeys []string, pis []prefixinfo.T, totals testStats, uids, gids []uint64, perIDTotals map[uint64]testStats, sizeOrdered, fileOrdered, prefixedOrdered map[uint64][]testStats) {
+func testAllIDs(t *testing.T, pikeys []string, pis []prefixinfo.T, totals testStats, uids, gids []int64, perIDTotals map[int64]testStats, sizeOrdered, fileOrdered, prefixedOrdered map[int64][]testStats) {
 	calc := sumSizeAndBlocks{}
 
 	sdb := reports.NewAllStats("test", true, 5)

@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"strconv"
 	"strings"
 
 	"cloudeng.io/cmd/idu/internal/hardlinks"
@@ -24,14 +25,55 @@ import (
 func NewParser(ctx context.Context, fs filewalk.FS) *boolexpr.Parser {
 	parser := matcher.New()
 
-	parser.RegisterOperand("user",
-		func(_, v string) boolexpr.Operand {
-			return NewUID("user", v, usernames.Manager.UIDForName)
+	uid := func(n, v string) boolexpr.Operand {
+		return matcher.NewUser(n, v, func(text string) (file.XAttr, error) {
+			return matcher.ParseUsernameOrID(text, usernames.IDM.LookupUser)
 		})
+	}
 
-	parser.RegisterOperand("group", func(_, v string) boolexpr.Operand {
-		return NewGID("group", v, usernames.Manager.GIDForName)
+	gid := func(n, v string) boolexpr.Operand {
+		return matcher.NewGroup(n, v, func(text string) (file.XAttr, error) {
+			return matcher.ParseGroupnameOrID(text, usernames.IDM.LookupGroup)
+		})
+	}
+
+	parser.RegisterOperand("user", uid)
+	parser.RegisterOperand("group", gid)
+
+	parser.RegisterOperand("hardlink", func(n, v string) boolexpr.Operand {
+		return NewHardlink(ctx, n, v, fs)
 	})
+
+	return parser
+}
+
+// NewParserTests registers user and group operands that will accept
+// any uid/gid rather than testing to ensure that they exist.
+func NewParserTests(ctx context.Context, fs filewalk.FS) *boolexpr.Parser {
+	parser := matcher.New()
+
+	uid := func(n, v string) boolexpr.Operand {
+		return matcher.NewUser(n, v, func(text string) (file.XAttr, error) {
+			id, err := strconv.ParseInt(v, 10, 64)
+			if err != nil {
+				return file.XAttr{UID: -1, User: v}, nil
+			}
+			return file.XAttr{UID: id}, nil
+		})
+	}
+
+	gid := func(n, v string) boolexpr.Operand {
+		return matcher.NewGroup(n, v, func(text string) (file.XAttr, error) {
+			id, err := strconv.ParseInt(v, 10, 64)
+			if err != nil {
+				return file.XAttr{GID: -1, Group: v}, nil
+			}
+			return file.XAttr{GID: id}, nil
+		})
+	}
+
+	parser.RegisterOperand("user", uid)
+	parser.RegisterOperand("group", gid)
 
 	parser.RegisterOperand("hardlink", func(n, v string) boolexpr.Operand {
 		return NewHardlink(ctx, n, v, fs)
@@ -151,7 +193,7 @@ func (m match) String() string {
 	if m.hl != nil {
 		ph = "[hardlink handling enabled]:"
 	}
-	return fmt.Sprintf("%v: pentry: %v (default: %v)", ph, m.expr.String(), m.emptyEntryValue)
+	return fmt.Sprintf("%v: %v (default: %v)", ph, m.expr.String(), m.emptyEntryValue)
 }
 
 type entryWithXattr struct {
@@ -160,7 +202,7 @@ type entryWithXattr struct {
 	path string
 }
 
-func (w entryWithXattr) XAttr() filewalk.XAttr {
+func (w entryWithXattr) XAttr() file.XAttr {
 	return w.pi.XAttrInfo(w.fi)
 }
 
