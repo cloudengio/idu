@@ -11,6 +11,7 @@ import (
 	"cloudeng.io/cmdutil/boolexpr"
 	"cloudeng.io/file"
 	"cloudeng.io/file/filewalk"
+	"cloudeng.io/file/matcher"
 )
 
 type Hardlink struct {
@@ -23,57 +24,37 @@ type Hardlink struct {
 	requires reflect.Type
 }
 
-func (hl *Hardlink) Prepare() (boolexpr.Operand, error) {
-	f, err := hl.fs.Open(hl.text)
+func prepare(ctx context.Context, name string, fs file.FS) (file.XAttr, error) {
+	f, err := fs.Open(name)
 	if err != nil {
-		return nil, err
+		return file.XAttr{}, err
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
-		return nil, err
+		return file.XAttr{}, err
 	}
 	fi := file.NewInfoFromFileInfo(info)
-	xattr, err := hl.fs.XAttr(hl.ctx, hl.text, fi)
+	xattr, err := fs.XAttr(ctx, name, fi)
 	if err != nil {
-		return nil, err
+		return file.XAttr{}, err
 	}
-	hl.dev, hl.ino = xattr.Device, xattr.FileID
-	return hl, nil
-}
-
-func (hl Hardlink) Eval(v any) bool {
-	var dev, ino uint64
-	switch t := v.(type) {
-	case xattrIfc:
-		xattr := t.XAttr()
-		dev, ino = xattr.Device, xattr.FileID
-	default:
-		return false
-	}
-	return dev == hl.dev && ino == hl.ino
-}
-
-func (hl *Hardlink) String() string {
-	return hl.name + "=" + hl.text
-}
-
-func (hl *Hardlink) Document() string {
-	return hl.document
-}
-
-func (hl *Hardlink) Needs(t reflect.Type) bool {
-	return t.Implements(hl.requires)
+	return file.XAttr{
+		Device: xattr.Device,
+		FileID: xattr.FileID,
+	}, nil
 }
 
 // NewHardlink returns an operand that determines if the supplied value is,
 // or is not, a hardlink to the specified file or directory.
-func NewHardlink(ctx context.Context, n, v string, fs filewalk.FS) boolexpr.Operand {
-	return &Hardlink{
-		ctx:      ctx,
-		fs:       fs,
-		name:     n,
-		text:     v,
-		document: n + `=<pathname>. Returns true if the evaluated value refers to the same file or directory as <pathname>, ie. if they share the same device and inode numbers.`,
-	}
+func NewHardlink(ctx context.Context, n, v string, fs file.FS) boolexpr.Operand {
+	return matcher.XAttr(
+		n, v, `=<pathname>. Returns true if the evaluated value refers to the same file or directory as <pathname>, ie. if they share the same device and inode numbers.`,
+		func(text string) (file.XAttr, error) {
+			return prepare(ctx, text, fs)
+		},
+		func(opVal, val file.XAttr) bool {
+			return opVal.Device == val.Device && opVal.FileID == val.FileID
+		},
+	)
 }

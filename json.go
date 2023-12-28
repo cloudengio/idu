@@ -28,7 +28,7 @@ func (jr *jsonReports) formatMerged(merged map[string]reports.MergedStats) []byt
 	return out.Bytes()
 }
 
-func (jr *jsonReports) formatUserGroupMerged(merged map[uint64]reports.MergedStats, nameForID func(uint64) string) []byte {
+func (jr *jsonReports) formatUserGroupMerged(merged map[int64]reports.MergedStats, nameForID func(int64) string) []byte {
 	out := &bytes.Buffer{}
 	wr := json.NewEncoder(out)
 	for k, v := range merged {

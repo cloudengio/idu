@@ -24,7 +24,7 @@ func scanFilesByID(ids prefixinfo.IDSanner) []string {
 	return n
 }
 
-func scanUsers(t *testing.T, pi *prefixinfo.T, uid uint64) []string {
+func scanUsers(t *testing.T, pi *prefixinfo.T, uid int64) []string {
 	sc, err := pi.UserIDScan(uid)
 	if err != nil {
 		t.Fatal(err)
@@ -32,7 +32,7 @@ func scanUsers(t *testing.T, pi *prefixinfo.T, uid uint64) []string {
 	return scanFilesByID(sc)
 }
 
-func scanAndMatchUsers(t *testing.T, pi *prefixinfo.T, uid uint64, want []string) {
+func scanAndMatchUsers(t *testing.T, pi *prefixinfo.T, uid int64, want []string) {
 	_, _, l, _ := runtime.Caller(1)
 	if want == nil {
 		_, err := pi.UserIDScan(uid)
@@ -47,7 +47,7 @@ func scanAndMatchUsers(t *testing.T, pi *prefixinfo.T, uid uint64, want []string
 	}
 }
 
-func scanGroups(t *testing.T, pi *prefixinfo.T, gid uint64) []string {
+func scanGroups(t *testing.T, pi *prefixinfo.T, gid int64) []string {
 	sc, err := pi.GroupIDScan(gid)
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +55,7 @@ func scanGroups(t *testing.T, pi *prefixinfo.T, gid uint64) []string {
 	return scanFilesByID(sc)
 }
 
-func scanAndMatchGroups(t *testing.T, pi *prefixinfo.T, gid uint64, want []string) {
+func scanAndMatchGroups(t *testing.T, pi *prefixinfo.T, gid int64, want []string) {
 	_, _, l, _ := runtime.Caller(1)
 	if want == nil {
 		_, err := pi.GroupIDScan(gid)
@@ -95,7 +95,7 @@ func cmpInfoList(t *testing.T, npi prefixinfo.T, got, want file.InfoList) {
 
 func TestBinaryEncoding(t *testing.T) {
 	modTime := time.Now().Truncate(0)
-	var uid, gid uint64 = 100, 2
+	var uid, gid int64 = 100, 2
 
 	ug00, ug10, ug01, ug11, ugOther := testutil.TestdataIDCombinationsFiles(modTime, uid, gid, 100)
 

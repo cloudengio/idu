@@ -17,32 +17,32 @@ import (
 func TestCreateIDMaps(t *testing.T) {
 	modTime := time.Now().Truncate(0)
 
-	var uid, gid uint64 = 100, 1
+	var uid, gid int64 = 100, 1
 	ug00, ug10, ug01, ug11, ugOther := testutil.TestdataIDCombinationsFiles(modTime, uid, gid, 100)
 
 	for i, tc := range []struct {
 		fi                   []file.Info
 		uidMapLen, gidMapLen int
 		uidPos, gidPos       []int
-		uidMap, gidMap       []uint64
-		uidFile, gidFile     []uint64
+		uidMap, gidMap       []int64
+		uidFile, gidFile     []int64
 	}{
 		{ug00, 0, 0, []int{-1, -1}, []int{-1, -1},
-			[]uint64{uid}, []uint64{gid},
-			[]uint64{uid, uid}, []uint64{gid, gid}},
+			[]int64{uid}, []int64{gid},
+			[]int64{uid, uid}, []int64{gid, gid}},
 		{ug10, 2, 0, []int{0, 1}, []int{-1, -1},
-			[]uint64{uid, uid + 1}, []uint64{gid},
-			[]uint64{uid, uid + 1}, []uint64{gid, gid},
+			[]int64{uid, uid + 1}, []int64{gid},
+			[]int64{uid, uid + 1}, []int64{gid, gid},
 		},
 		{ug01, 0, 2, []int{-1, -1}, []int{0, 1},
-			[]uint64{uid}, []uint64{gid, gid + 1},
-			[]uint64{uid, uid}, []uint64{gid, gid + 1}},
+			[]int64{uid}, []int64{gid, gid + 1},
+			[]int64{uid, uid}, []int64{gid, gid + 1}},
 		{ug11, 2, 2, []int{0, 1}, []int{0, 1},
-			[]uint64{uid, uid + 1}, []uint64{gid, gid + 1},
-			[]uint64{uid, uid + 1}, []uint64{gid, gid + 1}},
+			[]int64{uid, uid + 1}, []int64{gid, gid + 1},
+			[]int64{uid, uid + 1}, []int64{gid, gid + 1}},
 		{ugOther, 2, 2, []int{1, 1}, []int{1, 1},
-			[]uint64{uid + 1, uid + 1}, []uint64{gid + 1, gid + 1},
-			[]uint64{uid + 1, uid + 1}, []uint64{gid + 1, gid + 1}},
+			[]int64{uid + 1, uid + 1}, []int64{gid + 1, gid + 1},
+			[]int64{uid + 1, uid + 1}, []int64{gid + 1, gid + 1}},
 	} {
 		info := testutil.TestdataNewInfo("dir", 1, 2, 0700, time.Now().Truncate(0), uid, gid, 37, 200)
 		pi := prefixinfo.New("dir", info)
@@ -83,7 +83,7 @@ func TestCreateIDMaps(t *testing.T) {
 }
 
 func TestSysTypes(t *testing.T) {
-	var uid, gid uint64 = 100, 1
+	var uid, gid int64 = 100, 1
 	modTime := time.Now().Truncate(0)
 
 	info := testutil.TestdataNewInfo("dir", 1, 2, 0700, modTime, uid, gid, 37, 200)

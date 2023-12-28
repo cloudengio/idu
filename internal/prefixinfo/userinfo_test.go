@@ -75,10 +75,10 @@ func TestXAttr(t *testing.T) {
 	fi.SetSys(NewSysInfo(600, 6, 33, 44, 1))
 
 	xattr = pi.XAttrInfo(fi)
-	if got, want := xattr.UID, uint64(600); got != want {
+	if got, want := xattr.UID, int64(600); got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	if got, want := xattr.GID, uint64(6); got != want {
+	if got, want := xattr.GID, int64(6); got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 

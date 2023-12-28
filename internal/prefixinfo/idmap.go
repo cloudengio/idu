@@ -15,7 +15,7 @@ import (
 // idMap is a bit map of file positions for a given id. They are used
 // to encode/decode user/group information in a space efficient manner.
 type idMap struct {
-	ID  uint64
+	ID  int64
 	Pos []uint64
 }
 
@@ -26,7 +26,7 @@ func (idm idMap) String() string {
 func (idm idMap) appendBinary(buf *bytes.Buffer) {
 	var storage [16]byte
 	data := storage[:0]
-	data = binary.AppendUvarint(data, idm.ID)
+	data = binary.AppendVarint(data, idm.ID)
 	data = binary.AppendUvarint(data, uint64(len(idm.Pos)))
 	buf.Write(data)
 	for _, p := range idm.Pos {
@@ -36,7 +36,7 @@ func (idm idMap) appendBinary(buf *bytes.Buffer) {
 }
 
 func (idm *idMap) decodeBinary(data []byte) ([]byte, error) {
-	uid, n := binary.Uvarint(data)
+	uid, n := binary.Varint(data)
 	data = data[n:]
 	idm.ID = uid
 	l, n := binary.Uvarint(data)
@@ -87,7 +87,7 @@ func (idms *idMaps) decodeBinary(data []byte) ([]byte, error) {
 	return data, nil
 }
 
-func (idms idMaps) idMapFor(id uint64) int {
+func (idms idMaps) idMapFor(id int64) int {
 	for i, idm := range idms {
 		if idm.ID == id {
 			return i
@@ -96,7 +96,7 @@ func (idms idMaps) idMapFor(id uint64) int {
 	return -1
 }
 
-func (idms idMaps) idForPos(pos int) (uint64, bool) {
+func (idms idMaps) idForPos(pos int) (int64, bool) {
 	for _, idm := range idms {
 		if idm.isSet(pos) {
 			return idm.ID, true
@@ -105,7 +105,7 @@ func (idms idMaps) idForPos(pos int) (uint64, bool) {
 	return 0, false
 }
 
-func newIDMap(id uint64, n int) idMap {
+func newIDMap(id int64, n int) idMap {
 	return idMap{
 		ID:  id,
 		Pos: make([]uint64, n/64+1),

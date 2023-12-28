@@ -7,7 +7,7 @@ package prefixinfo
 import (
 	"fmt"
 
-	"cloudeng.io/file/filewalk"
+	"cloudeng.io/file"
 )
 
 type fsOnly struct {
@@ -17,36 +17,36 @@ type fsOnly struct {
 
 type idAndFS struct {
 	fsOnly
-	uid, gid uint64
+	uid, gid int64
 }
 
-func (pi *T) xAttrFromSys(v any) filewalk.XAttr {
+func (pi *T) xAttrFromSys(v any) file.XAttr {
 	switch s := v.(type) {
 	case fsOnly:
-		return filewalk.XAttr{
+		return file.XAttr{
 			UID:    pi.xattr.UID,
 			GID:    pi.xattr.GID,
 			Device: pi.xattr.Device,
 			FileID: s.ino,
 			Blocks: s.blocks}
 	case idAndFS:
-		return filewalk.XAttr{
+		return file.XAttr{
 			UID:    s.uid,
 			GID:    s.gid,
 			Device: pi.xattr.Device,
 			FileID: s.ino,
 			Blocks: s.blocks}
-	case *filewalk.XAttr:
+	case *file.XAttr:
 		return *s
-	case filewalk.XAttr:
+	case file.XAttr:
 		return s
 	}
 	panic(fmt.Sprintf("unrecognised system information %T", v))
 }
 
 // NewSysInfo is intended to be used by tests.
-func NewSysInfo(uid, gid uint64, dev, ino uint64, blocks int64) any {
-	return &filewalk.XAttr{
+func NewSysInfo(uid, gid int64, dev, ino uint64, blocks int64) any {
+	return &file.XAttr{
 		UID:    uid,
 		GID:    gid,
 		Device: dev,

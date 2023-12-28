@@ -205,16 +205,16 @@ func (st *statsCmds) view(ctx context.Context, values interface{}, args []string
 	heapFormatter[string]{}.formatHeaps(sdb.Prefix, os.Stdout, func(v string) string { return v }, af.DisplayN)
 
 	banner(os.Stdout, "=", "\nUsage by top %v users as of: %v\n", af.DisplayN, when)
-	heapFormatter[uint64]{}.formatHeaps(sdb.ByUser, os.Stdout,
+	heapFormatter[int64]{}.formatHeaps(sdb.ByUser, os.Stdout,
 		usernames.Manager.NameForUID, af.DisplayN)
 
 	banner(os.Stdout, "=", "\nUsage by top %v groups as of: %v\n", af.DisplayN, when)
-	heapFormatter[uint64]{}.formatHeaps(sdb.ByGroup, os.Stdout,
+	heapFormatter[int64]{}.formatHeaps(sdb.ByGroup, os.Stdout,
 		usernames.Manager.NameForGID, af.DisplayN)
 	return nil
 }
 
-func (st *statsCmds) userOrGroup(ctx context.Context, af *viewFlags, stats statsFileFormat, name string, mapper func(string) (uint64, error)) error {
+func (st *statsCmds) userOrGroup(ctx context.Context, af *viewFlags, stats statsFileFormat, name string, mapper func(string) (int64, error)) error {
 	sdb := stats.Stats
 	when := stats.Date
 
@@ -224,7 +224,7 @@ func (st *statsCmds) userOrGroup(ctx context.Context, af *viewFlags, stats stats
 	}
 
 	banner(os.Stdout, "=", "Usage by %v as of: %v\n", name, when)
-	st.formatPerIDStats(sdb.PerUser, os.Stdout, usernames.Manager.NameForUID, map[uint64]bool{id: true}, af.DisplayN)
+	st.formatPerIDStats(sdb.PerUser, os.Stdout, usernames.Manager.NameForUID, map[int64]bool{id: true}, af.DisplayN)
 	return nil
 }
 
@@ -266,7 +266,7 @@ func (hf heapFormatter[T]) formatTotals(h *reports.Heaps[T], out io.Writer) {
 	fmt.Fprintf(out, "Total:    %v\n\n", fmtCount(h.TotalFiles+h.TotalPrefixes))
 }
 
-func (st *statsCmds) formatPerIDStats(s reports.PerIDStats, out io.Writer, nameForID func(uint64) string, ids map[uint64]bool, n int) {
+func (st *statsCmds) formatPerIDStats(s reports.PerIDStats, out io.Writer, nameForID func(int64) string, ids map[int64]bool, n int) {
 	for id, h := range s.ByPrefix {
 		if len(ids) != 0 && !ids[id] {
 			continue
