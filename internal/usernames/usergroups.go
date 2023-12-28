@@ -11,14 +11,13 @@ import (
 	"cloudeng.io/os/userid"
 )
 
+var Manager IDManager
 var IDM *userid.IDManager
 
 func init() {
 	IDM = userid.NewIDManager()
-}
-
-var Manager = IDManager{
-	idmanager: IDM,
+	Manager = IDManager{IDM}
+	fmt.Printf("IDM: %v\n", IDM)
 }
 
 type IDManager struct {
