@@ -17,7 +17,6 @@ var IDM *userid.IDManager
 func init() {
 	IDM = userid.NewIDManager()
 	Manager = IDManager{IDM}
-	fmt.Printf("IDM: %v\n", IDM)
 }
 
 type IDManager struct {
