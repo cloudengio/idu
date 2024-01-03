@@ -114,7 +114,7 @@ func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *comput
 		boolexpr.WithEntryExpression(args[1:]...),
 		boolexpr.WithEmptyEntryValue(true),
 		boolexpr.WithFilewalkFS(fwfs),
-		boolexpr.WithHardlinkHandling(cfg.CountHardlinkAsFiles))
+		boolexpr.WithHardlinkHandling(!cfg.CountHardlinkAsFiles))
 	if err != nil {
 		return err
 	}
@@ -137,11 +137,8 @@ func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *comput
 }
 
 func (st *statsCmds) computeStats(ctx context.Context, db database.DB, match boolexpr.Matcher, prefix string, calc diskusage.Calculator, topN int, progress bool) (*reports.AllStats, error) {
-
-	hasStorabeBytes := calc.String() != "identity"
-	sdb := reports.NewAllStats(prefix, hasStorabeBytes, topN)
+	sdb := reports.NewAllStats(prefix, topN)
 	n := 0
-
 	err := db.Stream(ctx, prefix, func(_ context.Context, k string, v []byte) {
 		if progress && (n != 0 && n%1000 == 0) {
 			fmt.Printf("processed % 10v entries\n", fmtCount(int64(n)))
@@ -152,11 +149,10 @@ func (st *statsCmds) computeStats(ctx context.Context, db database.DB, match boo
 			fmt.Fprintf(os.Stderr, "failed to unmarshal value for %v: %v\n", k, err)
 			return
 		}
-		entryMatcher := match
-		if match.Prefix(k, &pi) {
-			entryMatcher = boolexpr.AlwaysMatch{}
+		if !match.Prefix(k, &pi) {
+			return
 		}
-		if err := sdb.Update(k, pi, calc, entryMatcher); err != nil {
+		if err := sdb.Update(k, pi, calc, match); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to compute stats for %v: %v\n", k, err)
 			return
 		}
@@ -245,10 +241,8 @@ func (hf heapFormatter[T]) formatHeap(heap *heap.MinMax[int64, T], out io.Writer
 func (hf heapFormatter[T]) formatHeaps(h *reports.Heaps[T], out io.Writer, valueFormatter func(T) string, n int) {
 	banner(out, "-", "Bytes used\n")
 	hf.formatHeap(h.Bytes, out, fmtSize, valueFormatter, n)
-	if h.StorageBytes != nil {
-		banner(out, "-", "\nBytes used on underlying filesystem\n")
-		hf.formatHeap(h.StorageBytes, out, fmtSize, valueFormatter, n)
-	}
+	banner(out, "-", "\nBytes used on underlying filesystem\n")
+	hf.formatHeap(h.StorageBytes, out, fmtSize, valueFormatter, n)
 	banner(out, "-", "\nNumber of Files\n")
 	hf.formatHeap(h.Files, out, fmtCount, valueFormatter, n)
 	banner(out, "-", "\nNumber of Prefixes/Directories\n")
@@ -257,13 +251,13 @@ func (hf heapFormatter[T]) formatHeaps(h *reports.Heaps[T], out io.Writer, value
 
 func (hf heapFormatter[T]) formatTotals(h *reports.Heaps[T], out io.Writer) {
 	banner(out, "-", "Totals\n")
-	fmt.Fprintf(out, "Bytes:    %v\n", fmtSize(h.TotalBytes))
-	if h.StorageBytes != nil {
-		fmt.Fprintf(out, "Storage:  %v\n", fmtSize(h.TotalStorageBytes))
-	}
-	fmt.Fprintf(out, "Files:    %v\n", fmtCount(h.TotalFiles))
-	fmt.Fprintf(out, "Prefixes: %v\n", fmtCount(h.TotalPrefixes))
-	fmt.Fprintf(out, "Total:    %v\n\n", fmtCount(h.TotalFiles+h.TotalPrefixes))
+	fmt.Fprintf(out, "Bytes:     %v (%v)\n", fmtSize(h.TotalBytes), fmtKiBytes(h.TotalBytes))
+	fmt.Fprintf(out, "Storage:   %v (%v)\n", fmtSize(h.TotalStorageBytes), fmtKiBytes(h.TotalStorageBytes))
+	fmt.Fprintf(out, "Files:     %v\n", fmtCount(h.TotalFiles))
+	fmt.Fprintf(out, "Prefixes:  %v\n", fmtCount(h.TotalPrefixes))
+	fmt.Fprintf(out, "Total:     %v\n", fmtCount(h.TotalFiles+h.TotalPrefixes))
+	fmt.Fprintf(out, "Links:     %v\n", fmtCount(h.TotalHardlinks))
+	fmt.Fprintf(out, "Link dirs: %v\n\n", fmtCount(h.TotalHardlinkDirs))
 }
 
 func (st *statsCmds) formatPerIDStats(s reports.PerIDStats, out io.Writer, nameForID func(int64) string, ids map[int64]bool, n int) {

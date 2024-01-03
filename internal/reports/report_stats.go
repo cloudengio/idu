@@ -22,6 +22,8 @@ type Heaps[T comparable] struct {
 	TotalBytes, TotalStorageBytes int64
 	TotalFiles, TotalPrefixes     int64
 	TotalPrefixBytes              int64
+	TotalHardlinks                int64
+	TotalHardlinkDirs             int64
 	Bytes                         *heap.MinMax[int64, T]
 	StorageBytes                  *heap.MinMax[int64, T]
 	PrefixBytes                   *heap.MinMax[int64, T]
@@ -31,10 +33,9 @@ type Heaps[T comparable] struct {
 
 // PerIDStats is a collection of statistics on a per user/group basis.
 type PerIDStats struct {
-	Prefix          string
-	MaxN            int
-	HasStorageBytes bool
-	ByPrefix        map[int64]*Heaps[string]
+	Prefix   string
+	MaxN     int
+	ByPrefix map[int64]*Heaps[string]
 }
 
 // AllStats is a collection of statistics for a given prefix and includes:
@@ -54,17 +55,15 @@ type AllStats struct {
 	groupTotals map[int64]stats.Totals
 }
 
-func newHeaps[T comparable](prefix string, storageBytes bool, n int) *Heaps[T] {
+func newHeaps[T comparable](prefix string, n int) *Heaps[T] {
 	h := &Heaps[T]{
-		MaxN:        n,
-		Prefix:      prefix,
-		Bytes:       heap.NewMinMax[int64, T](),
-		PrefixBytes: heap.NewMinMax[int64, T](),
-		Files:       heap.NewMinMax[int64, T](),
-		Prefixes:    heap.NewMinMax[int64, T](),
-	}
-	if storageBytes {
-		h.StorageBytes = heap.NewMinMax[int64, T]()
+		MaxN:         n,
+		Prefix:       prefix,
+		Bytes:        heap.NewMinMax[int64, T](),
+		PrefixBytes:  heap.NewMinMax[int64, T](),
+		Files:        heap.NewMinMax[int64, T](),
+		Prefixes:     heap.NewMinMax[int64, T](),
+		StorageBytes: heap.NewMinMax[int64, T](),
 	}
 	return h
 }
@@ -169,30 +168,29 @@ func (h *Heaps[T]) Merge(n int) map[T]MergedStats {
 	return merged
 }
 
-func newPerIDStats(prefix string, storageBytes bool, n int) PerIDStats {
+func newPerIDStats(prefix string, n int) PerIDStats {
 	return PerIDStats{
-		Prefix:          prefix,
-		HasStorageBytes: storageBytes,
-		MaxN:            n,
-		ByPrefix:        make(map[int64]*Heaps[string]),
+		Prefix:   prefix,
+		MaxN:     n,
+		ByPrefix: make(map[int64]*Heaps[string]),
 	}
 }
 
 func (s *PerIDStats) Push(id int64, prefix string, size, storageBytes, prefixBytes, files, children int64) {
 	if _, ok := s.ByPrefix[id]; !ok {
-		s.ByPrefix[id] = newHeaps[string](s.Prefix, s.HasStorageBytes, s.MaxN)
+		s.ByPrefix[id] = newHeaps[string](s.Prefix, s.MaxN)
 	}
 	s.ByPrefix[id].Push(prefix, size, storageBytes, prefixBytes, files, children)
 }
 
-func NewAllStats(prefix string, withStorageBytes bool, n int) *AllStats {
+func NewAllStats(prefix string, n int) *AllStats {
 	return &AllStats{
 		MaxN:        n,
-		Prefix:      newHeaps[string](prefix, withStorageBytes, n),
-		PerUser:     newPerIDStats(prefix, withStorageBytes, n),
-		PerGroup:    newPerIDStats(prefix, withStorageBytes, n),
-		ByUser:      newHeaps[int64](prefix, withStorageBytes, n),
-		ByGroup:     newHeaps[int64](prefix, withStorageBytes, n),
+		Prefix:      newHeaps[string](prefix, n),
+		PerUser:     newPerIDStats(prefix, n),
+		PerGroup:    newPerIDStats(prefix, n),
+		ByUser:      newHeaps[int64](prefix, n),
+		ByGroup:     newHeaps[int64](prefix, n),
 		userTotals:  map[int64]stats.Totals{},
 		groupTotals: map[int64]stats.Totals{},
 	}
@@ -239,6 +237,8 @@ func (s *AllStats) Update(prefix string, pi prefixinfo.T, calc diskusage.Calcula
 		totals.PrefixBytes,
 		totals.Files,
 		totals.Prefixes)
+	s.Prefix.TotalHardlinks += totals.Hardlinks
+	s.Prefix.TotalHardlinkDirs += totals.HardlinkDirs
 	s.PushPerUserStats(prefix, users)
 	s.PushPerGroupStats(prefix, groups)
 	return nil
