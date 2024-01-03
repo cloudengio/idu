@@ -207,7 +207,7 @@ func TestTotalsMatch(t *testing.T) {
 		t.Errorf("got %#v, want %#v", got, want)
 	}
 
-	totals, us, gs = computeWithExpression(t, &pi, "user=100")
+	_, us, gs = computeWithExpression(t, &pi, "user=100")
 
 	testLens(t, us, gs, 1, 2)
 

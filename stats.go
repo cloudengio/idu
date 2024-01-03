@@ -149,10 +149,8 @@ func (st *statsCmds) computeStats(ctx context.Context, db database.DB, match boo
 			fmt.Fprintf(os.Stderr, "failed to unmarshal value for %v: %v\n", k, err)
 			return
 		}
-		//entryMatcher := match
 		if !match.Prefix(k, &pi) {
 			return
-			//entryMatcher = boolexpr.AlwaysMatch{}
 		}
 		if err := sdb.Update(k, pi, calc, match); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to compute stats for %v: %v\n", k, err)
