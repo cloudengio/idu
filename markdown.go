@@ -13,14 +13,21 @@ import (
 
 	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/cmd/idu/internal/usernames"
+	"cloudeng.io/file/diskusage"
 	"golang.org/x/exp/maps"
 )
 
 func tpl(name string) *template.Template {
 	return template.New(name).Funcs(template.FuncMap{
-		"fmtBytes": fmtSize,
-		"fmtCount": fmtCount,
+		"fmtBytes":   fmtSize,
+		"fmtKiBytes": fmtKiBytes,
+		"fmtCount":   fmtCount,
 	})
+}
+
+func fmtKiBytes(size int64) string {
+	size /= int64(diskusage.KiB)
+	return printer.Sprintf("%v KiB", size)
 }
 
 const mdTOC = `
@@ -40,8 +47,8 @@ const mdTotals = `
 
 | Metric | Value |
 | :--- | ---: |
-| Bytes | {{fmtBytes .Heaps.TotalBytes}} |
-| Storage Bytes | {{fmtBytes .Heaps.TotalStorageBytes}} |
+| Bytes | {{fmtBytes .Heaps.TotalBytes}} ({{fmtKiBytes .Heaps.TotalBytes}}) |
+| Storage Bytes | {{fmtBytes .Heaps.TotalStorageBytes}} ({{fmtKiBytes .Heaps.TotalStorageBytes}}) |
 | Files | {{fmtCount .Heaps.TotalFiles }} |
 | Prefixes | {{fmtCount .Heaps.TotalPrefixes}} |
 | Prefixes + Files | {{fmtCount .TotalPrefixesAndFiles}} |

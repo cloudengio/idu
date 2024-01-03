@@ -158,11 +158,10 @@ type match struct {
 	hl      *hardlinks.Incremental
 }
 
-func (m match) IsHardlink(prefix string, info *prefixinfo.T, fi file.Info) bool {
+func (m match) IsHardlink(xattr file.XAttr) bool {
 	if m.hl == nil {
 		return false
 	}
-	xattr := info.XAttrInfo(fi)
 	return m.hl.Ref(xattr.Device, xattr.FileID)
 }
 
@@ -240,26 +239,13 @@ func (pi prefixWithName) NumEntries() int64 {
 	return int64(len(pi.T.InfoList()))
 }
 
-type AlwaysMatch struct{}
-
-func (AlwaysMatch) IsHardlink(prefix string, info *prefixinfo.T, fi file.Info) bool {
-	return false
-}
-
-func (AlwaysMatch) Entry(prefix string, info *prefixinfo.T, fi file.Info) bool {
-	return true
-}
-
-func (AlwaysMatch) Prefix(prefix string, info *prefixinfo.T) bool {
-	return true
-}
-
-func (AlwaysMatch) String() string {
-	return "always match"
+func AlwaysMatch(p *boolexpr.Parser) Matcher {
+	m, _ := CreateMatcher(p, WithEmptyEntryValue(true))
+	return m
 }
 
 type Matcher interface {
-	IsHardlink(prefix string, info *prefixinfo.T, fi file.Info) bool
+	IsHardlink(xattr file.XAttr) bool
 	Entry(prefix string, info *prefixinfo.T, fi file.Info) bool
 	Prefix(prefix string, info *prefixinfo.T) bool
 	String() string

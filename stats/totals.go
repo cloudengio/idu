@@ -6,10 +6,10 @@ package stats
 
 import (
 	"encoding/binary"
+	"fmt"
 
 	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
-	"cloudeng.io/file"
 	"cloudeng.io/file/diskusage"
 )
 
@@ -21,18 +21,23 @@ type Totals struct {
 	Bytes        int64 // total size of files
 	StorageBytes int64 // total size of files on disk
 	PrefixBytes  int64 // total size of prefixes
+	Hardlinks    int64 // number of hardlinks
+	HardlinkDirs int64 // number of hardlinks to directories
 }
 
 type PerIDTotals []Totals
 
 func (t *Totals) AppendBinary(data []byte) []byte {
 	// Add a version etc for windows since IDs will be strings there.
+	data = binary.AppendVarint(data, 0x1) // Version
 	data = binary.AppendVarint(data, t.ID)
 	data = binary.AppendVarint(data, t.Files)
 	data = binary.AppendVarint(data, t.Bytes)
 	data = binary.AppendVarint(data, t.StorageBytes)
 	data = binary.AppendVarint(data, t.PrefixBytes)
 	data = binary.AppendVarint(data, t.Prefixes)
+	data = binary.AppendVarint(data, t.Hardlinks)
+	data = binary.AppendVarint(data, t.HardlinkDirs)
 	return data
 }
 
@@ -42,6 +47,11 @@ func (t *Totals) MarshalBinary() (data []byte, err error) {
 
 func (t *Totals) DecodeBinary(data []byte) []byte {
 	var n int
+	ver, n := binary.Varint(data)
+	if ver != 0x1 {
+		panic(fmt.Sprintf("unsupported version: %v", ver))
+	}
+	data = data[n:]
 	id, n := binary.Varint(data)
 	data = data[n:]
 	t.ID = id
@@ -54,6 +64,10 @@ func (t *Totals) DecodeBinary(data []byte) []byte {
 	t.PrefixBytes, n = binary.Varint(data)
 	data = data[n:]
 	t.Prefixes, n = binary.Varint(data)
+	data = data[n:]
+	t.Hardlinks, n = binary.Varint(data)
+	data = data[n:]
+	t.HardlinkDirs, n = binary.Varint(data)
 	return data[n:]
 }
 
@@ -90,19 +104,15 @@ func (tl *PerIDTotals) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-func (t Totals) update(fi file.Info, hardlink bool, blocks int64, du diskusage.Calculator) Totals {
-	if fi.IsDir() {
-		t.Prefixes++
-		if !hardlink {
-			t.PrefixBytes += fi.Size()
-		}
-		return t
-	}
+func (t Totals) update(bytes, storageBytes int64) Totals {
 	t.Files++
-	if !hardlink {
-		t.Bytes += fi.Size()
-		t.StorageBytes += du.Calculate(fi.Size(), blocks)
-	}
+	t.Bytes += bytes
+	t.StorageBytes += storageBytes
+	return t
+}
+
+func (t Totals) incHardlinks() Totals {
+	t.Hardlinks++
 	return t
 }
 
@@ -120,17 +130,66 @@ func (pid perID) flatten() PerIDTotals {
 	return tl
 }
 
+const verbose = false
+
+// ComputeTotals computes the totals for the prefix itself and any non-directory
+// contents. Hardlinks are handled as per match.IsHardlink. Note that the number
+// of prefixes is always 1, ie. the prefix itself. The size of the directory
+// is included in the total.
 func ComputeTotals(prefix string, pi *prefixinfo.T, du diskusage.Calculator, match boolexpr.Matcher) (totals Totals, perUser, perGroup PerIDTotals) {
+	if !match.Prefix(prefix, pi) {
+		return
+	}
+	xattr := pi.XAttr()
+	if match.IsHardlink(xattr) {
+		totals.HardlinkDirs = 1
+		return
+	}
+	// Count prefixes/dirs here, and here only.
+	totals.Prefixes = 1
+	totals.PrefixBytes = pi.Size()
+	totals.Bytes = pi.Size()
+	totals.StorageBytes = du.Calculate(pi.Size(), xattr.Blocks)
+
 	user, group := make(perID), make(perID)
+	user[xattr.UID] = totals
+	group[xattr.GID] = totals
+
+	var blocks int64
+	if verbose {
+		blocks = xattr.Blocks
+	}
+
 	for _, fi := range pi.InfoList() {
+		if fi.IsDir() {
+			continue
+		}
+		xattr := pi.XAttrInfo(fi)
+		if match.IsHardlink(xattr) {
+			totals.Hardlinks++
+			user[xattr.UID] = user[xattr.UID].incHardlinks()
+			group[xattr.GID] = group[xattr.GID].incHardlinks()
+			continue
+		}
 		if !match.Entry(prefix, pi, fi) {
 			continue
 		}
-		hl := match.IsHardlink(prefix, pi, fi)
-		xattr := pi.XAttrInfo(fi)
-		totals = totals.update(fi, hl, xattr.Blocks, du)
-		user[xattr.UID] = user[xattr.UID].update(fi, hl, xattr.Blocks, du)
-		group[xattr.GID] = group[xattr.GID].update(fi, hl, xattr.Blocks, du)
+		bytes := fi.Size()
+		storageBytes := du.Calculate(bytes, xattr.Blocks)
+		totals = totals.update(bytes, storageBytes)
+		user[xattr.UID] = user[xattr.UID].update(bytes, storageBytes)
+		group[xattr.GID] = group[xattr.GID].update(bytes, storageBytes)
+
+		if verbose {
+			fmt.Printf("%v\t%v/%v\n", (xattr.Blocks*512)/1024, prefix, fi.Name())
+			blocks += xattr.Blocks
+		}
 	}
+
+	if verbose {
+		kb := (blocks * 512) / 1024
+		fmt.Printf("%v\t%v/\n", kb, prefix)
+	}
+
 	return totals, user.flatten(), group.flatten()
 }
