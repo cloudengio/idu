@@ -136,7 +136,7 @@ func createExpr(p *boolexpr.Parser, args []string) (boolexpr.T, bool, error) {
 }
 
 func CreateMatcher(parser *boolexpr.Parser, opts ...Option) (Matcher, error) {
-	m := match{}
+	m := Matcher{}
 	for _, fn := range opts {
 		fn(&m.options)
 	}
@@ -146,26 +146,26 @@ func CreateMatcher(parser *boolexpr.Parser, opts ...Option) (Matcher, error) {
 	var err error
 	m.expr, m.exprSet, err = createExpr(parser, m.entry)
 	if err != nil {
-		return match{}, err
+		return Matcher{}, err
 	}
 	return m, nil
 }
 
-type match struct {
+type Matcher struct {
 	options
 	exprSet bool
 	expr    boolexpr.T
 	hl      *hardlinks.Incremental
 }
 
-func (m match) IsHardlink(xattr file.XAttr) bool {
+func (m Matcher) IsHardlink(xattr file.XAttr) bool {
 	if m.hl == nil {
 		return false
 	}
 	return m.hl.Ref(xattr.Device, xattr.FileID)
 }
 
-func (m match) Prefix(prefix string, pi *prefixinfo.T) bool {
+func (m Matcher) Prefix(prefix string, pi *prefixinfo.T) bool {
 	if !m.exprSet {
 		return m.emptyEntryValue
 	}
@@ -176,7 +176,7 @@ func (m match) Prefix(prefix string, pi *prefixinfo.T) bool {
 	return m.expr.Eval(prefixWithName{T: pi, name: name, path: prefix})
 }
 
-func (m match) Entry(prefix string, pi *prefixinfo.T, fi file.Info) bool {
+func (m Matcher) Entry(prefix string, pi *prefixinfo.T, fi file.Info) bool {
 	if !m.exprSet {
 		return m.emptyEntryValue
 	}
@@ -187,7 +187,7 @@ func (m match) Entry(prefix string, pi *prefixinfo.T, fi file.Info) bool {
 	return m.expr.Eval(entryWithXattr{pi: pi, fi: fi, path: path})
 }
 
-func (m match) String() string {
+func (m Matcher) String() string {
 	ph := "[hardlink handling disabled]:"
 	if m.hl != nil {
 		ph = "[hardlink handling enabled]:"
@@ -242,11 +242,4 @@ func (pi prefixWithName) NumEntries() int64 {
 func AlwaysMatch(p *boolexpr.Parser) Matcher {
 	m, _ := CreateMatcher(p, WithEmptyEntryValue(true))
 	return m
-}
-
-type Matcher interface {
-	IsHardlink(xattr file.XAttr) bool
-	Entry(prefix string, info *prefixinfo.T, fi file.Info) bool
-	Prefix(prefix string, info *prefixinfo.T) bool
-	String() string
 }
