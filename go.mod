@@ -3,11 +3,11 @@ module cloudeng.io/cmd/idu
 go 1.21
 
 require (
-	cloudeng.io/algo v0.0.0-20231228180232-6a68a2f584f4
-	cloudeng.io/cmdutil v0.0.0-20231228180232-6a68a2f584f4
+	cloudeng.io/algo v0.0.0-20240104192724-ff629ed569a9
+	cloudeng.io/cmdutil v0.0.0-20240103041157-5d845366d788
 	cloudeng.io/errors v0.0.9
-	cloudeng.io/file v0.0.0-20231228180232-6a68a2f584f4
-	cloudeng.io/os v0.0.0-20231228180232-6a68a2f584f4
+	cloudeng.io/file v0.0.0-20240104192724-ff629ed569a9
+	cloudeng.io/os v0.0.0-20240104192724-ff629ed569a9
 	cloudeng.io/path v0.0.8
 	cloudeng.io/sync v0.0.8
 	cloudeng.io/text v0.0.11
@@ -15,15 +15,15 @@ require (
 	github.com/dgraph-io/badger/v4 v4.2.0
 	github.com/dgraph-io/ristretto v0.1.1
 	go.etcd.io/bbolt v1.3.8
-	golang.org/x/exp v0.0.0-20231226003508-02704c960a9b
-	golang.org/x/sys v0.15.0
+	golang.org/x/exp v0.0.0-20240103183307-be819d1f06fc
+	golang.org/x/sys v0.16.0
 	golang.org/x/text v0.14.0
 	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
-	cloudeng.io/sys v0.0.0-20231228180232-6a68a2f584f4 // indirect
+	cloudeng.io/sys v0.0.0-20240104192724-ff629ed569a9 // indirect
 	github.com/AndreasBriese/bbloom v0.0.0-20190825152654-46b345b51c96 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/dgraph-io/badger v1.6.2 // indirect
