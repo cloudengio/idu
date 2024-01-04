@@ -36,6 +36,7 @@ func showDefaults() {
 
 type analyzeFlags struct {
 	Progress  bool          `subcmd:"progress,true,show progress"`
+	Force     bool          `subcmd:"force,false,reanalyze even if the database is up to date"`
 	SlowScans time.Duration `subcmd:"slow-scan-duration,10s,duration at which scans are reported as slow"`
 	Defaults  bool          `subcmd:"show-defaults,false,display default scanning options and exit"`
 }
@@ -92,11 +93,12 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *anal
 	pt := newProgressTracker(pctx, time.Second, af.Progress, true, &wg)
 
 	w := &walker{
-		cfg:      cfg,
-		db:       sdb,
-		fs:       fwfs,
-		pt:       pt,
-		slowScan: af.SlowScans,
+		cfg:       cfg,
+		db:        sdb,
+		fs:        fwfs,
+		pt:        pt,
+		slowScan:  af.SlowScans,
+		reAnalyze: af.Force,
 	}
 
 	w.lsi = asyncstat.New(fwfs,
@@ -159,13 +161,14 @@ func (alz *analyzeCmd) summarizeAndLog(ctx context.Context, sdb internal.ScanDB,
 }
 
 type walker struct {
-	cfg      config.Prefix
-	db       internal.ScanDB
-	fs       filewalk.FS
-	fw       *filewalk.Walker[prefixState]
-	pt       *progressTracker
-	slowScan time.Duration
-	lsi      *asyncstat.T
+	cfg       config.Prefix
+	db        internal.ScanDB
+	fs        filewalk.FS
+	fw        *filewalk.Walker[prefixState]
+	pt        *progressTracker
+	slowScan  time.Duration
+	lsi       *asyncstat.T
+	reAnalyze bool
 }
 
 type prefixState struct {
@@ -230,7 +233,7 @@ func (w *walker) handlePrefix(ctx context.Context, state *prefixState, prefix st
 		return true, false, err
 	}
 
-	if state.existing.Unchanged(state.current) {
+	if !w.reAnalyze && state.existing.Unchanged(state.current) {
 		// Cam reuse all file entries, but will need to restat all
 		// prefixes/directories in any case.
 		state.current.SetInfoList(state.existing.FilesOnly())
