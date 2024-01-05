@@ -35,18 +35,18 @@ func TestTotals(t *testing.T) {
 	ug00d, ug10d, ug01d, ug11d, ugOtherd := testutil.TestdataIDCombinationsDirs(modTime, uid, gid, 200)
 
 	perUserStats := []stats.PerIDTotals{
-		{{uid, 2, 1, 4, 8, 1, 0, 0}},
-		{{uid, 1, 1, 2, 4, 1, 0, 0}, {uid + 1, 1, 0, 2, 4, 0, 0, 0}},
-		{{uid, 2, 1, 4, 8, 1, 0, 0}},
-		{{uid, 1, 1, 2, 4, 1, 0, 0}, {uid + 1, 1, 0, 2, 4, 0, 0, 0}},
-		{{uid, 0, 1, 1, 2, 1, 0, 0}, {uid + 1, 2, 0, 3, 6, 0, 0, 0}},
+		{{uid, 2, 1, 1, 4, 8, 1, 0, 0}},
+		{{uid, 1, 1, 1, 2, 4, 1, 0, 0}, {uid + 1, 1, 1, 0, 2, 4, 0, 0, 0}},
+		{{uid, 2, 1, 1, 4, 8, 1, 0, 0}},
+		{{uid, 1, 1, 1, 2, 4, 1, 0, 0}, {uid + 1, 1, 1, 0, 2, 4, 0, 0, 0}},
+		{{uid, 0, 1, 2, 1, 2, 1, 0, 0}, {uid + 1, 2, 0, 0, 3, 6, 0, 0, 0}},
 	}
 	perGroupStats := []stats.PerIDTotals{
-		{{gid, 2, 1, 4, 8, 1, 0, 0}},
-		{{gid, 2, 1, 4, 8, 1, 0, 0}},
-		{{gid, 1, 1, 2, 4, 1, 0, 0}, {gid + 1, 1, 0, 2, 4, 0, 0, 0}},
-		{{gid, 1, 1, 2, 4, 1, 0, 0}, {gid + 1, 1, 0, 2, 4, 0, 0, 0}},
-		{{gid, 0, 1, 1, 2, 1, 0, 0}, {gid + 1, 2, 0, 3, 6, 0, 0, 0}},
+		{{gid, 2, 1, 1, 4, 8, 1, 0, 0}},
+		{{gid, 2, 1, 1, 4, 8, 1, 0, 0}},
+		{{gid, 1, 1, 1, 2, 4, 1, 0, 0}, {gid + 1, 1, 1, 0, 2, 4, 0, 0, 0}},
+		{{gid, 1, 1, 1, 2, 4, 1, 0, 0}, {gid + 1, 1, 1, 0, 2, 4, 0, 0, 0}},
+		{{gid, 0, 1, 2, 1, 2, 1, 0, 0}, {gid + 1, 2, 0, 0, 3, 6, 0, 0, 0}},
 	}
 
 	parser := boolexpr.NewParserTests(context.Background(), nil)
@@ -75,7 +75,7 @@ func TestTotals(t *testing.T) {
 		sort.Slice(us, func(i, j int) bool { return us[i].ID < us[j].ID })
 		sort.Slice(gs, func(i, j int) bool { return gs[i].ID < gs[j].ID })
 
-		if got, want := totals, (stats.Totals{Files: 2, Prefixes: 1, Bytes: 4, StorageBytes: 4 * 2, PrefixBytes: 1}); !reflect.DeepEqual(got, want) {
+		if got, want := totals, (stats.Totals{Files: 2, Prefix: 1, SubPrefixes: 2, Bytes: 4, StorageBytes: 4 * 2, PrefixBytes: 1}); !reflect.DeepEqual(got, want) {
 			t.Errorf("got %#v, want %#v", got, want)
 		}
 
@@ -96,21 +96,22 @@ func TestTotals(t *testing.T) {
 			for _, s := range ugs {
 				sum.Bytes += s.Bytes
 				sum.PrefixBytes += s.PrefixBytes
-				sum.Prefixes += s.Prefixes
+				sum.SubPrefixes += 1
 				sum.StorageBytes += s.StorageBytes
 				sum.Files += s.Files
 			}
+			sum.Prefix = 1
 			if got, want := sum, totals; !reflect.DeepEqual(got, want) {
 				t.Errorf("got %v, want %v", got, want)
 			}
 		}
 
 		if got, want := us, perUserStats[tc.perIDStats]; !reflect.DeepEqual(got, want) {
-			t.Errorf("%v: got %v, want %v", i, got, want)
+			t.Errorf("%v: got %#v, want %#v", i, got, want)
 		}
 
 		if got, want := gs, perGroupStats[tc.perIDStats]; !reflect.DeepEqual(got, want) {
-			t.Errorf("%v: got %v, want %v", i, got, want)
+			t.Errorf("%v: got %#v, want %#v", i, got, want)
 		}
 
 		if got, want := IDsFromStats(us), tc.uids; !slices.Equal(got, want) {
@@ -131,7 +132,7 @@ func IDsFromStats(s stats.PerIDTotals) []int64 {
 	return r
 }
 
-func computeWithExpression(t *testing.T, pi *prefixinfo.T, expr string) (totals stats.Totals, perUser, perGroup stats.PerIDTotals) {
+func computeWithExpression(t *testing.T, prefix string, pi *prefixinfo.T, expr string) (totals stats.Totals, perUser, perGroup stats.PerIDTotals) {
 	t.Helper()
 	parser := boolexpr.NewParserTests(context.Background(), nil)
 	matcher, err := boolexpr.CreateMatcher(parser,
@@ -139,7 +140,7 @@ func computeWithExpression(t *testing.T, pi *prefixinfo.T, expr string) (totals 
 	if err != nil {
 		t.Fatal(err)
 	}
-	totals, perUser, perGroup = stats.ComputeTotals("", pi, sumSizeAndBlocks{}, matcher)
+	totals, perUser, perGroup = stats.ComputeTotals(prefix, pi, sumSizeAndBlocks{}, matcher)
 
 	sort.Slice(perUser,
 		func(i, j int) bool { return perUser[i].ID < perUser[j].ID })
@@ -171,16 +172,16 @@ func TestTotalsMatch(t *testing.T) {
 	pi.AppendInfoList(ug10)
 	pi.AppendInfoList(ug10d)
 
-	totals, us, gs := computeWithExpression(t, &pi, "(user=100||user=101) && (group=2||group=3)")
+	totals, us, gs := computeWithExpression(t, "my-prefix", &pi, "(user=100||user=101) && (group=2||group=3)")
 
-	if got, want := totals, (stats.Totals{Files: 4, Prefixes: 1, Bytes: 3 + 6, StorageBytes: 7 + 2 + 4 + 2 + 4, PrefixBytes: 3}); !reflect.DeepEqual(got, want) {
+	if got, want := totals, (stats.Totals{Files: 4, Prefix: 1, SubPrefixes: 4, Bytes: 3 + 6, StorageBytes: 7 + 2 + 4 + 2 + 4, PrefixBytes: 3}); !reflect.DeepEqual(got, want) {
 		t.Errorf("got %#v, want %#v", got, want)
 	}
 
 	testLens(t, us, gs, 2, 2)
 
-	totalsA := stats.Totals{Files: 3, Prefixes: 1, Bytes: 3 + 4, StorageBytes: 7 + 2 + 2 + 4, PrefixBytes: 3}
-	totalsB := stats.Totals{Files: 1, Prefixes: 0, Bytes: 2, StorageBytes: 4, PrefixBytes: 0}
+	totalsA := stats.Totals{Files: 3, Prefix: 1, SubPrefixes: 4, Bytes: 3 + 4, StorageBytes: 7 + 2 + 2 + 4, PrefixBytes: 3}
+	totalsB := stats.Totals{Files: 1, SubPrefixes: 0, Bytes: 2, StorageBytes: 4, PrefixBytes: 0}
 
 	uid100 := totalsA
 	uid100.ID = 100
@@ -207,15 +208,17 @@ func TestTotalsMatch(t *testing.T) {
 		t.Errorf("got %#v, want %#v", got, want)
 	}
 
-	_, us, gs = computeWithExpression(t, &pi, "user=100")
+	_, us, gs = computeWithExpression(t, "my-prefix", &pi, "user=100")
 
 	testLens(t, us, gs, 1, 2)
+
+	uid100.SubPrefixes = 3
 
 	if got, want := us[0], uid100; !reflect.DeepEqual(got, want) {
 		t.Errorf("got %#v, want %#v", got, want)
 	}
 
-	gid2User100 := stats.Totals{ID: 2, Files: 2, Prefixes: 1, Bytes: 3 + 2, StorageBytes: 7 + 2 + 2, PrefixBytes: 3}
+	gid2User100 := stats.Totals{ID: 2, Files: 2, Prefix: 1, SubPrefixes: 3, Bytes: 3 + 2, StorageBytes: 7 + 2 + 2, PrefixBytes: 3}
 	if got, want := gs[0], gid2User100; !reflect.DeepEqual(got, want) {
 		t.Errorf("got %#v, want %#v", got, want)
 	}
@@ -224,7 +227,7 @@ func TestTotalsMatch(t *testing.T) {
 		t.Errorf("got %#v, want %#v", got, want)
 	}
 
-	totals, us, gs = computeWithExpression(t, &pi, "name=not-there")
+	totals, us, gs = computeWithExpression(t, "my-prefix", &pi, "name=not-there")
 
 	if got, want := totals, (stats.Totals{}); !reflect.DeepEqual(got, want) {
 		t.Errorf("got %#v, want %#v", got, want)

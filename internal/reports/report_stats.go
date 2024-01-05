@@ -68,13 +68,11 @@ func newHeaps[T comparable](prefix string, n int) *Heaps[T] {
 	return h
 }
 
-func (h *Heaps[T]) Push(item T, bytes, storageBytes, prefixBytes, files, prefixes int64) {
+func (h *Heaps[T]) Push(item T, bytes, storageBytes, prefixBytes, files, prefixes, children int64) {
 	h.Bytes.PushMaxN(bytes, item, h.MaxN)
-	if h.StorageBytes != nil {
-		h.StorageBytes.PushMaxN(storageBytes, item, h.MaxN)
-	}
+	h.StorageBytes.PushMaxN(storageBytes, item, h.MaxN)
 	h.Files.PushMaxN(files, item, h.MaxN)
-	h.Prefixes.PushMaxN(prefixes, item, h.MaxN)
+	h.Prefixes.PushMaxN(children, item, h.MaxN)
 	h.PrefixBytes.PushMaxN(prefixBytes, item, h.MaxN)
 	h.TotalBytes += bytes
 	h.TotalStorageBytes += storageBytes
@@ -176,11 +174,11 @@ func newPerIDStats(prefix string, n int) PerIDStats {
 	}
 }
 
-func (s *PerIDStats) Push(id int64, prefix string, size, storageBytes, prefixBytes, files, children int64) {
+func (s *PerIDStats) Push(id int64, prefix string, size, storageBytes, prefixBytes, files, prefixCount, children int64) {
 	if _, ok := s.ByPrefix[id]; !ok {
 		s.ByPrefix[id] = newHeaps[string](s.Prefix, s.MaxN)
 	}
-	s.ByPrefix[id].Push(prefix, size, storageBytes, prefixBytes, files, children)
+	s.ByPrefix[id].Push(prefix, size, storageBytes, prefixBytes, files, prefixCount, children)
 }
 
 func NewAllStats(prefix string, n int) *AllStats {
@@ -196,36 +194,37 @@ func NewAllStats(prefix string, n int) *AllStats {
 	}
 }
 
-func addToMap(stats map[int64]stats.Totals, uid int64, size, storageBytes, prefixBytes, files, children int64) {
-	s := stats[uid]
+func addToMap(stats map[int64]stats.Totals, id int64, size, storageBytes, prefixBytes, files, prefix, children int64) {
+	s := stats[id]
 	s.Bytes += size
 	s.StorageBytes += storageBytes
 	s.Files += files
-	s.Prefixes += children
+	s.SubPrefixes += children
 	s.PrefixBytes += prefixBytes
-	stats[uid] = s
+	s.Prefix += prefix
+	stats[id] = s
 }
 
 func (s *AllStats) PushPerUserStats(prefix string, us stats.PerIDTotals) {
 	for _, u := range us {
-		s.PerUser.Push(u.ID, prefix, u.Bytes, u.StorageBytes, u.PrefixBytes, u.Files, u.Prefixes)
-		addToMap(s.userTotals, u.ID, u.Bytes, u.StorageBytes, u.PrefixBytes, u.Files, u.Prefixes)
+		s.PerUser.Push(u.ID, prefix, u.Bytes, u.StorageBytes, u.PrefixBytes, u.Files, u.Prefix, u.SubPrefixes)
+		addToMap(s.userTotals, u.ID, u.Bytes, u.StorageBytes, u.PrefixBytes, u.Files, u.Prefix, u.SubPrefixes)
 	}
 }
 
 func (s *AllStats) PushPerGroupStats(prefix string, ug stats.PerIDTotals) {
 	for _, g := range ug {
-		s.PerGroup.Push(g.ID, prefix, g.Bytes, g.StorageBytes, g.PrefixBytes, g.Files, g.Prefixes)
-		addToMap(s.groupTotals, g.ID, g.Bytes, g.StorageBytes, g.PrefixBytes, g.Files, g.Prefixes)
+		s.PerGroup.Push(g.ID, prefix, g.Bytes, g.StorageBytes, g.PrefixBytes, g.Files, g.Prefix, g.SubPrefixes)
+		addToMap(s.groupTotals, g.ID, g.Bytes, g.StorageBytes, g.PrefixBytes, g.Files, g.Prefix, g.SubPrefixes)
 	}
 }
 
 func (s *AllStats) Finalize() {
 	for id, stats := range s.userTotals {
-		s.ByUser.Push(id, stats.Bytes, stats.StorageBytes, stats.PrefixBytes, stats.Files, stats.Prefixes)
+		s.ByUser.Push(id, stats.Bytes, stats.StorageBytes, stats.PrefixBytes, stats.Files, stats.Prefix, stats.SubPrefixes)
 	}
 	for id, stats := range s.groupTotals {
-		s.ByGroup.Push(id, stats.Bytes, stats.StorageBytes, stats.PrefixBytes, stats.Files, stats.Prefixes)
+		s.ByGroup.Push(id, stats.Bytes, stats.StorageBytes, stats.PrefixBytes, stats.Files, stats.Prefix, stats.SubPrefixes)
 	}
 }
 
@@ -236,7 +235,8 @@ func (s *AllStats) Update(prefix string, pi prefixinfo.T, calc diskusage.Calcula
 		totals.StorageBytes,
 		totals.PrefixBytes,
 		totals.Files,
-		totals.Prefixes)
+		totals.Prefix,
+		totals.SubPrefixes)
 	s.Prefix.TotalHardlinks += totals.Hardlinks
 	s.Prefix.TotalHardlinkDirs += totals.HardlinkDirs
 	s.PushPerUserStats(prefix, users)

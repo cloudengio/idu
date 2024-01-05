@@ -17,7 +17,8 @@ import (
 type Totals struct {
 	ID           int64
 	Files        int64 // number of files
-	Prefixes     int64 // number of prefixes/directories
+	Prefix       int64 // will be 1 or 0
+	SubPrefixes  int64 // number of prefixes/directories
 	Bytes        int64 // total size of files
 	StorageBytes int64 // total size of files on disk
 	PrefixBytes  int64 // total size of prefixes
@@ -35,7 +36,8 @@ func (t *Totals) AppendBinary(data []byte) []byte {
 	data = binary.AppendVarint(data, t.Bytes)
 	data = binary.AppendVarint(data, t.StorageBytes)
 	data = binary.AppendVarint(data, t.PrefixBytes)
-	data = binary.AppendVarint(data, t.Prefixes)
+	data = binary.AppendVarint(data, t.Prefix)
+	data = binary.AppendVarint(data, t.SubPrefixes)
 	data = binary.AppendVarint(data, t.Hardlinks)
 	data = binary.AppendVarint(data, t.HardlinkDirs)
 	return data
@@ -63,7 +65,9 @@ func (t *Totals) DecodeBinary(data []byte) []byte {
 	data = data[n:]
 	t.PrefixBytes, n = binary.Varint(data)
 	data = data[n:]
-	t.Prefixes, n = binary.Varint(data)
+	t.Prefix, n = binary.Varint(data)
+	data = data[n:]
+	t.SubPrefixes, n = binary.Varint(data)
 	data = data[n:]
 	t.Hardlinks, n = binary.Varint(data)
 	data = data[n:]
@@ -116,6 +120,11 @@ func (t Totals) incHardlinks() Totals {
 	return t
 }
 
+func (t Totals) incSubPrefixes() Totals {
+	t.SubPrefixes++
+	return t
+}
+
 type perID map[int64]Totals
 
 func (pid perID) flatten() PerIDTotals {
@@ -133,20 +142,21 @@ func (pid perID) flatten() PerIDTotals {
 const verbose = false
 
 // ComputeTotals computes the totals for the prefix itself and any non-directory
-// contents. Hardlinks are handled as per match.IsHardlink. Note that the number
-// of prefixes is always 1, ie. the prefix itself. The size of the directory
-// is included in the total.
+// contents. Hardlinks are handled as per match.IsHardlink. Note that:
+//  1. Prefixes is one if the prefix matched the expression and zero otherwise.
+//  2. SubPrefixes is the number of prefixes this prefix contains
+//  3. The size of this prefix is included in the totals for the prefix, but
+//     the sizes of prefixes it contains are not.
 func ComputeTotals(prefix string, pi *prefixinfo.T, du diskusage.Calculator, match boolexpr.Matcher) (totals Totals, perUser, perGroup PerIDTotals) {
 	if !match.Prefix(prefix, pi) {
 		return
 	}
+	totals.Prefix = 1
 	xattr := pi.XAttr()
 	if match.IsHardlink(xattr) {
 		totals.HardlinkDirs = 1
 		return
 	}
-	// Count prefixes/dirs here, and here only.
-	totals.Prefixes = 1
 	totals.PrefixBytes = pi.Size()
 	totals.Bytes = pi.Size()
 	totals.StorageBytes = du.Calculate(pi.Size(), xattr.Blocks)
@@ -161,7 +171,13 @@ func ComputeTotals(prefix string, pi *prefixinfo.T, du diskusage.Calculator, mat
 	}
 
 	for _, fi := range pi.InfoList() {
+		if !match.Entry(prefix, pi, fi) {
+			continue
+		}
 		if fi.IsDir() {
+			totals.SubPrefixes++
+			user[xattr.UID] = user[xattr.UID].incSubPrefixes()
+			group[xattr.GID] = group[xattr.GID].incSubPrefixes()
 			continue
 		}
 		xattr := pi.XAttrInfo(fi)
@@ -171,9 +187,7 @@ func ComputeTotals(prefix string, pi *prefixinfo.T, du diskusage.Calculator, mat
 			group[xattr.GID] = group[xattr.GID].incHardlinks()
 			continue
 		}
-		if !match.Entry(prefix, pi, fi) {
-			continue
-		}
+
 		bytes := fi.Size()
 		storageBytes := du.Calculate(bytes, xattr.Blocks)
 		totals = totals.update(bytes, storageBytes)
