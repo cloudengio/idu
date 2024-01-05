@@ -39,14 +39,14 @@ func TestTotals(t *testing.T) {
 		{{uid, 1, 1, 2, 4, 1, 0, 0}, {uid + 1, 1, 0, 2, 4, 0, 0, 0}},
 		{{uid, 2, 1, 4, 8, 1, 0, 0}},
 		{{uid, 1, 1, 2, 4, 1, 0, 0}, {uid + 1, 1, 0, 2, 4, 0, 0, 0}},
-		{{uid, 0, 1, 1, 2, 1, 0, 0}, {uid + 1, 2, 0, 3, 6, 0, 0, 0}},
+		{{uid, 0, 0, 1, 2, 1, 0, 0}, {uid + 1, 2, 0, 3, 6, 0, 0, 0}},
 	}
 	perGroupStats := []stats.PerIDTotals{
 		{{gid, 2, 1, 4, 8, 1, 0, 0}},
 		{{gid, 2, 1, 4, 8, 1, 0, 0}},
 		{{gid, 1, 1, 2, 4, 1, 0, 0}, {gid + 1, 1, 0, 2, 4, 0, 0, 0}},
 		{{gid, 1, 1, 2, 4, 1, 0, 0}, {gid + 1, 1, 0, 2, 4, 0, 0, 0}},
-		{{gid, 0, 1, 1, 2, 1, 0, 0}, {gid + 1, 2, 0, 3, 6, 0, 0, 0}},
+		{{gid, 0, 0, 1, 2, 1, 0, 0}, {gid + 1, 2, 0, 3, 6, 0, 0, 0}},
 	}
 
 	parser := boolexpr.NewParserTests(context.Background(), nil)
@@ -75,7 +75,7 @@ func TestTotals(t *testing.T) {
 		sort.Slice(us, func(i, j int) bool { return us[i].ID < us[j].ID })
 		sort.Slice(gs, func(i, j int) bool { return gs[i].ID < gs[j].ID })
 
-		if got, want := totals, (stats.Totals{Files: 2, Prefixes: 1, Bytes: 4, StorageBytes: 4 * 2, PrefixBytes: 1}); !reflect.DeepEqual(got, want) {
+		if got, want := totals, (stats.Totals{Files: 2, SubPrefixes: 2, Bytes: 4, StorageBytes: 4 * 2, PrefixBytes: 1}); !reflect.DeepEqual(got, want) {
 			t.Errorf("got %#v, want %#v", got, want)
 		}
 
@@ -96,7 +96,7 @@ func TestTotals(t *testing.T) {
 			for _, s := range ugs {
 				sum.Bytes += s.Bytes
 				sum.PrefixBytes += s.PrefixBytes
-				sum.Prefixes += s.Prefixes
+				sum.SubPrefixes += 1
 				sum.StorageBytes += s.StorageBytes
 				sum.Files += s.Files
 			}
@@ -173,14 +173,14 @@ func TestTotalsMatch(t *testing.T) {
 
 	totals, us, gs := computeWithExpression(t, &pi, "(user=100||user=101) && (group=2||group=3)")
 
-	if got, want := totals, (stats.Totals{Files: 4, Prefixes: 1, Bytes: 3 + 6, StorageBytes: 7 + 2 + 4 + 2 + 4, PrefixBytes: 3}); !reflect.DeepEqual(got, want) {
+	if got, want := totals, (stats.Totals{Files: 4, SubPrefixes: 4, Bytes: 3 + 6, StorageBytes: 7 + 2 + 4 + 2 + 4, PrefixBytes: 3}); !reflect.DeepEqual(got, want) {
 		t.Errorf("got %#v, want %#v", got, want)
 	}
 
 	testLens(t, us, gs, 2, 2)
 
-	totalsA := stats.Totals{Files: 3, Prefixes: 1, Bytes: 3 + 4, StorageBytes: 7 + 2 + 2 + 4, PrefixBytes: 3}
-	totalsB := stats.Totals{Files: 1, Prefixes: 0, Bytes: 2, StorageBytes: 4, PrefixBytes: 0}
+	totalsA := stats.Totals{Files: 3, SubPrefixes: 0, Bytes: 3 + 4, StorageBytes: 7 + 2 + 2 + 4, PrefixBytes: 3}
+	totalsB := stats.Totals{Files: 1, SubPrefixes: 0, Bytes: 2, StorageBytes: 4, PrefixBytes: 0}
 
 	uid100 := totalsA
 	uid100.ID = 100
@@ -215,7 +215,7 @@ func TestTotalsMatch(t *testing.T) {
 		t.Errorf("got %#v, want %#v", got, want)
 	}
 
-	gid2User100 := stats.Totals{ID: 2, Files: 2, Prefixes: 1, Bytes: 3 + 2, StorageBytes: 7 + 2 + 2, PrefixBytes: 3}
+	gid2User100 := stats.Totals{ID: 2, Files: 2, SubPrefixes: 0, Bytes: 3 + 2, StorageBytes: 7 + 2 + 2, PrefixBytes: 3}
 	if got, want := gs[0], gid2User100; !reflect.DeepEqual(got, want) {
 		t.Errorf("got %#v, want %#v", got, want)
 	}
@@ -231,3 +231,5 @@ func TestTotalsMatch(t *testing.T) {
 	}
 	testLens(t, us, gs, 0, 0)
 }
+
+// test sub prefixes.

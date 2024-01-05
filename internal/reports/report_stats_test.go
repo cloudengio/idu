@@ -48,15 +48,16 @@ func (sumSizeAndBlocks) String() string {
 }
 
 type testStats struct {
-	prefix                                            string
-	bytes, storageBytes, files, prefixes, prefixBytes int64
+	prefix                                                         string
+	bytes, storageBytes, files, subPrefixes, prefixes, prefixBytes int64
 }
 
-func (ts *testStats) update(bytes, storageBytes, files, prefixes, prefixBytes int64) {
+func (ts *testStats) update(bytes, storageBytes, files, children, prefixBytes int64) {
 	ts.bytes += bytes
 	ts.storageBytes += storageBytes
 	ts.files += files
-	ts.prefixes += prefixes
+	ts.subPrefixes += children
+	ts.prefixes += 1
 	ts.prefixBytes += prefixBytes
 }
 
@@ -114,7 +115,7 @@ func compareHeapTotals[T comparable](t *testing.T, h *reports.Heaps[T], totals t
 		t.Errorf("line %v: files: got %v, want %v", l, h.TotalFiles, totals.files)
 	}
 	if h.TotalPrefixes != totals.prefixes {
-		t.Errorf("line %v: prefixes: got %v, want %v", l, h.TotalPrefixes, totals.prefixes)
+		t.Errorf("line %v: sub prefixes: got %v, want %v", l, h.TotalPrefixes, totals.prefixes)
 	}
 	if h.TotalPrefixBytes != totals.prefixBytes {
 		t.Errorf("line %v: prefix bytes: got %v, want %v", l, h.TotalPrefixBytes, totals.prefixBytes)
@@ -152,7 +153,11 @@ func comparePerIDTotals(t *testing.T, pis reports.PerIDStats, totals testStats) 
 func nInfos(n int, mode fs.FileMode, uid, gid int64) (fis []file.Info) {
 	modTime := time.Now()
 	for i := 0; i < n; i++ {
-		fis = append(fis, newInfo(fmt.Sprintf("f%v", i), int64(i+1), int64(i+1), mode, modTime, uid, gid))
+		name := fmt.Sprintf("f%v", i)
+		if mode.IsDir() {
+			name = fmt.Sprintf("d%v", i)
+		}
+		fis = append(fis, newInfo(name, int64(i+1), int64(i+1), mode, modTime, uid, gid))
 
 	}
 	return
@@ -201,16 +206,25 @@ func TestReportStatsSingleID(t *testing.T) {
 		{uid, gid},
 		{uid + 1, gid + 1},
 	} {
-
-		if i != 1 {
-			continue
-		}
+		_ = i
 		pis := []prefixinfo.T{}
 		for i := 0; i < len(nf); i++ {
 			pis = append(pis, npi(t, tc.uid, tc.gid, pikeys[i], nInfoF(nf[i], tc.uid, tc.gid), nInfoD(nd[i], tc.uid, tc.gid)))
 		}
 
 		sdb := reports.NewAllStats("test", 5)
+
+		/*
+			for _, p := range pis {
+				x := p.XAttr()
+				t.Logf("P: (%v, %v)\n", x.UID, x.GID)
+				for _, fi := range p.InfoList() {
+					x := p.XAttrInfo(fi)
+					t.Logf("\t%v (%v, %v) - %v\n", fi.Name(), x.UID, x.GID, fi.IsDir())
+				}
+			}
+		*/
+
 		computeStats(t, sdb, calc, pikeys, boolexpr.AlwaysMatch(parser), pis...)
 
 		compareIDs(t, sdb.PerUser.ByPrefix, tc.uid)
@@ -226,7 +240,7 @@ func TestReportStatsSingleID(t *testing.T) {
 			compareHeap(t, h.Bytes, 3, []int64{3 + fib(9), 3 + fib(7), 3 + fib(6)}, "p2", "p3", "p1")
 			compareHeap(t, h.StorageBytes, 3, []int64{7 + (fib(9) * 2), 7 + (fib(7) * 2), 7 + (fib(6) * 2)}, "p2", "p3", "p1")
 			compareHeap(t, h.Files, 3, []int64{9, 7, 6}, "p2", "p3", "p1")
-			compareHeap(t, h.Prefixes, 10, []int64{1, 1, 1, 1}, "p1", "p3", "p2", "p0")
+			compareHeap(t, h.Prefixes, 10, []int64{7, 5, 3, 2}, "p1", "p2", "p3", "p0")
 			compareHeap(t, h.PrefixBytes, 10, []int64{3, 3, 3, 3}, "p1", "p3", "p2", "p0")
 		}
 
