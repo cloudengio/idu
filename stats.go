@@ -53,9 +53,18 @@ func loadStats(filename string) (statsFileFormat, error) {
 	return stats, nil
 }
 
-func saveStats(dir string, stdout bool, stats statsFileFormat) error {
-	if stdout {
-		return gob.NewEncoder(os.Stdout).Encode(stats)
+func saveStats(dir, file string, stats statsFileFormat) error {
+	if len(file) > 0 {
+		out := os.Stdout
+		if file != "-" {
+			var err error
+			out, err = os.Create(file)
+			if err != nil {
+				return err
+			}
+			defer out.Close()
+		}
+		return gob.NewEncoder(out).Encode(stats)
 	}
 	buf := &bytes.Buffer{}
 	if err := gob.NewEncoder(buf).Encode(stats); err != nil {
@@ -81,11 +90,11 @@ type StatsFlags struct {
 }
 
 type computeFlags struct {
-	ComputeN int             `subcmd:"n,2000,number of top entries to compute"`
-	Progress bool            `subcmd:"progress,false,show progress"`
-	StatsDir string          `subcmd:"stats-dir,stats,'directory that stats files are written to'"`
-	Stdout   bool            `subcmd:"stdout,false,'write stats to stdout'"`
-	Prefix   flags.Repeating `subcmd:"prefix,,'prefix match expression'"`
+	ComputeN  int             `subcmd:"n,2000,number of top entries to compute"`
+	Progress  bool            `subcmd:"progress,false,show progress"`
+	StatsDir  string          `subcmd:"stats-dir,stats,'directory that stats files are written to'"`
+	StatsFile string          `subcmd:"stats-file,,'write stats to the specified file, rather than a directory, use - for stdout'"`
+	Prefix    flags.Repeating `subcmd:"prefix,,'prefix match expression'"`
 }
 
 type viewFlags struct {
@@ -133,7 +142,7 @@ func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *comput
 		Expression: match.String(),
 		Stats:      sdb,
 	}
-	return saveStats(cf.StatsDir, cf.Stdout, stats)
+	return saveStats(cf.StatsDir, cf.StatsFile, stats)
 }
 
 func (st *statsCmds) computeStats(ctx context.Context, db database.DB, match boolexpr.Matcher, prefix string, calc diskusage.Calculator, topN int, progress bool) (*reports.AllStats, error) {

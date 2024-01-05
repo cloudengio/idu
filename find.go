@@ -21,7 +21,7 @@ import (
 )
 
 type findFlags struct {
-	Long   bool            `subcmd:"long,false,'show long listing for each result'"`
+	Long   bool            `subcmd:"l,false,'show long listing for each result'"`
 	Prefix flags.Repeating `subcmd:"prefix,,'prefix match expression'"`
 }
 
@@ -35,7 +35,8 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 
 func printPrefix(pi prefixinfo.T, long bool, k string) {
 	if long {
-		fmt.Println(fs.FormatFileInfo(internal.PrefixInfoAsFSInfo(pi, k)))
+		xattr := pi.XAttr()
+		fmt.Printf("%s uid: %v gid: %v\n", fs.FormatFileInfo(internal.PrefixInfoAsFSInfo(pi, k)), xattr.UID, xattr.GID)
 	} else {
 		fmt.Printf("%v\n", k)
 	}
@@ -43,7 +44,8 @@ func printPrefix(pi prefixinfo.T, long bool, k string) {
 
 func printEntry(pi prefixinfo.T, fi file.Info, long bool, sep, k string) {
 	if long {
-		fmt.Println("    ", fs.FormatFileInfo(fi))
+		xattr := pi.XAttrInfo(fi)
+		fmt.Printf("    %s uid: %v gid: %v\n", fs.FormatFileInfo(fi), xattr.UID, xattr.GID)
 	} else {
 		n := strings.TrimSuffix(k, sep) + sep + fi.Name()
 		fmt.Printf("%v\n", n)
