@@ -25,7 +25,7 @@ import (
 	"cloudeng.io/cmdutil/flags"
 	"cloudeng.io/file/diskusage"
 	"cloudeng.io/file/filewalk"
-	"cloudeng.io/file/filewalk/localfs"
+	"cloudeng.io/file/localfs"
 )
 
 type statsFileFormat struct {

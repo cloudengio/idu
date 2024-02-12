@@ -23,7 +23,7 @@ import (
 	"cloudeng.io/cmd/idu/internal/database"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/file/filewalk"
-	"cloudeng.io/file/filewalk/localfs"
+	"cloudeng.io/file/localfs"
 )
 
 func setupAnalyze(t *testing.T) (tmpDir, config, prefix string, tt *testtree) {

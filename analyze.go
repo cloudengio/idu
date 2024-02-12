@@ -24,7 +24,7 @@ import (
 	"cloudeng.io/file"
 	"cloudeng.io/file/filewalk"
 	"cloudeng.io/file/filewalk/asyncstat"
-	"cloudeng.io/file/filewalk/localfs"
+	"cloudeng.io/file/localfs"
 )
 
 func showDefaults() {

@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"cloudeng.io/file"
-	"cloudeng.io/file/filewalk/localfs"
+	"cloudeng.io/file/localfs"
 )
 
 func TestXAttr(t *testing.T) {

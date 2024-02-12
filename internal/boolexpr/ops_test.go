@@ -17,7 +17,7 @@ import (
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/file"
 	"cloudeng.io/file/filewalk"
-	"cloudeng.io/file/filewalk/localfs"
+	"cloudeng.io/file/localfs"
 )
 
 func createMatcher(t *testing.T, fs filewalk.FS, expr string) boolexpr.Matcher {
