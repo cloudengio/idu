@@ -17,7 +17,7 @@ import (
 	"cloudeng.io/errors"
 	"cloudeng.io/file"
 	"cloudeng.io/file/filewalk"
-	"cloudeng.io/file/filewalk/localfs"
+	"cloudeng.io/file/localfs"
 )
 
 type findFlags struct {
