@@ -11,13 +11,12 @@ jobs:
     uses: cloudengio/.github/.github/workflows/go-test.yml@main
     with:
       go-versions: |
-        - "1.22.x"
-        - "1.23.x"
+        - 1.22.x
+        - 1.23.x
       os-version: ubuntu-latest
 
   lint:
     uses: cloudengio/.github/.github/workflows/go-lint.yml@main
     with:
-      go-versions: |
-        - "1.23.x"
+      go-versions: 1.23.x
       os-version: ubuntu-latest
