@@ -2,21 +2,16 @@ run:
   timeout: 5m
   issues-exit-code: 1
   tests: true
-  skip-dirs:
-    - x/ref/services/internal/restsigner/signer
 
 linters-settings:
   gocyclo:
     min-complexity: 15
-  revive:
-    rules:
-      - name: unused-parameter
-        disabled: true
+  gosec:
+    excludes:
+      - G115 # this is just too poorly implemented to be useful.
 
 linters:
   enable:
-    - bodyclose
-    - gosec
     - gocritic
     - gocyclo
     - gofmt
@@ -26,9 +21,9 @@ linters:
     - govet
     - ineffassign
     - misspell
-    - exportloopref
+    - copyloopvar
     - staticcheck
     - typecheck
     - unconvert
     - unused
-  disable-all: true
+    - gosec
