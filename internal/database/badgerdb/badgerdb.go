@@ -18,7 +18,7 @@ import (
 	"cloudeng.io/errors"
 	"cloudeng.io/os/lockedfile"
 	"github.com/dgraph-io/badger/v4"
-	"github.com/dgraph-io/ristretto/z"
+	"github.com/dgraph-io/ristretto/v2/z"
 )
 
 // Option represents a specific option accepted by Open.
@@ -191,26 +191,6 @@ func (db *Database) Get(ctx context.Context, prefix string, buf *bytes.Buffer) e
 	}
 	return nil
 }
-
-/*
-func (db *Database) Delete(ctx context.Context, keys ...string) error {
-	if err := db.canceled(ctx); err != nil {
-		return err
-	}
-	return db.bdb.Update(func(tx *badger.Txn) error {
-		kb := bufPool.Get().(*bytes.Buffer)
-		defer bufPool.Put(kb)
-		for _, key := range keys {
-			kb.Reset()
-			kb.WriteByte(prefixBucket)
-			kb.WriteString(key)
-			if err := tx.Delete(kb.Bytes()); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}*/
 
 func (db *Database) DeletePrefix(ctx context.Context, prefix string) error {
 	kb := keyForBucket(prefixBucket, []byte(prefix))
