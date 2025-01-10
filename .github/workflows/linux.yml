@@ -7,7 +7,8 @@ on:
     branches: [ main ]
 
 jobs:
-  uses: cloudengio/.github/workflows/go-test-lint.yml@main
-  with:
-    go-versions: ["1.22.x", "1.23.x"]
-    os-version: ubuntu-latest
+  go-test-lint:
+    uses: cloudengio/.github/workflows/go-test-lint.yml@main
+    with:
+      go-versions: ["1.22.x", "1.23.x"]
+      os-version: ubuntu-latest
