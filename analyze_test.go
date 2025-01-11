@@ -102,7 +102,6 @@ func scanDB(ctx context.Context, t *testing.T, db database.DB, lfs filewalk.FS, 
 				l, err := os.Readlink(path)
 				if err != nil {
 					t.Fatalf("%v: %v", path, err)
-					continue
 				}
 				size = int64(len(l))
 			}
@@ -131,7 +130,7 @@ func scanDB(ctx context.Context, t *testing.T, db database.DB, lfs filewalk.FS, 
 func scanErrors(ctx context.Context, t *testing.T, db database.DB, _ filewalk.FS, arg0 string) []string {
 	errors := []string{}
 	err := db.VisitErrors(ctx, arg0,
-		func(_ context.Context, key string, when time.Time, detail []byte) bool {
+		func(_ context.Context, key string, _ time.Time, detail []byte) bool {
 			errors = append(errors, fmt.Sprintf("%s: %s", key, detail))
 			return true
 		})

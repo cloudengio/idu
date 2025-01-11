@@ -39,7 +39,7 @@ func (l *lister) errors(ctx context.Context, values interface{}, args []string) 
 	}
 
 	return db.VisitErrors(ctx, args[0],
-		func(_ context.Context, key string, when time.Time, detail []byte) bool {
+		func(_ context.Context, key string, _ time.Time, detail []byte) bool {
 			fmt.Printf("%s: %s\n", key, detail)
 			return true
 		})

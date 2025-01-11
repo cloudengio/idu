@@ -15,7 +15,7 @@ type sysMemstats struct {
 }
 
 func (s *sysMemstats) update() {
-	syscall.Getrusage(0, &s.Rusage)
+	_ = syscall.Getrusage(0, &s.Rusage)
 }
 
 func (s *sysMemstats) MaxRSSGiB() float64 {

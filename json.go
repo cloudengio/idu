@@ -6,7 +6,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 
 	"cloudeng.io/cmd/idu/internal/reports"
@@ -14,7 +13,7 @@ import (
 
 type jsonReports struct{}
 
-func (jr *jsonReports) generateReports(ctx context.Context, rf *generateReportsFlags, filenames *reportFilenames, stats statsFileFormat) error {
+func (jr *jsonReports) generateReports(rf *generateReportsFlags, filenames *reportFilenames, stats statsFileFormat) error {
 	return writeReportFiles(stats.Stats, filenames, jr.formatMerged, jr.formatUserGroupMerged, rf.JSON)
 }
 
@@ -23,7 +22,7 @@ func (jr *jsonReports) formatMerged(merged map[string]reports.MergedStats) []byt
 	wr := json.NewEncoder(out)
 	for k, v := range merged {
 		v.Prefix = k
-		wr.Encode(v)
+		_ = wr.Encode(v)
 	}
 	return out.Bytes()
 }
@@ -34,7 +33,7 @@ func (jr *jsonReports) formatUserGroupMerged(merged map[int64]reports.MergedStat
 	for k, v := range merged {
 		v.ID = k
 		v.IDName = nameForID(k)
-		wr.Encode(v)
+		_ = wr.Encode(v)
 	}
 	return out.Bytes()
 }

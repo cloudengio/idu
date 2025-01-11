@@ -15,7 +15,7 @@ import (
 
 type exprCmd struct{}
 
-func (ec *exprCmd) explain(ctx context.Context, values interface{}, args []string) error {
+func (ec *exprCmd) explain(ctx context.Context, _ interface{}, _ []string) error {
 	p := boolexpr.NewParser(ctx, nil)
 	var out strings.Builder
 	out.WriteString("idu commands accept boolean expressions using || && ! and ( and ) to combine any of the following operands:\n\n")

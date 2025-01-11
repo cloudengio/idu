@@ -96,7 +96,7 @@ func TestTotals(t *testing.T) {
 			for _, s := range ugs {
 				sum.Bytes += s.Bytes
 				sum.PrefixBytes += s.PrefixBytes
-				sum.SubPrefixes += 1
+				sum.SubPrefixes++
 				sum.StorageBytes += s.StorageBytes
 				sum.Files += s.Files
 			}

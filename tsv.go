@@ -6,7 +6,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/csv"
 	"strconv"
 
@@ -16,7 +15,7 @@ import (
 type tsvReports struct {
 }
 
-func (tr *tsvReports) generateReports(ctx context.Context, rf *generateReportsFlags, filenames *reportFilenames, stats statsFileFormat) error {
+func (tr *tsvReports) generateReports(rf *generateReportsFlags, filenames *reportFilenames, stats statsFileFormat) error {
 	return writeReportFiles(stats.Stats, filenames, tr.formatMerged, tr.formatUserGroupMerged, rf.TSV)
 }
 
@@ -24,9 +23,9 @@ func (tr *tsvReports) formatMerged(merged map[string]reports.MergedStats) []byte
 	out := &bytes.Buffer{}
 	wr := csv.NewWriter(out)
 	wr.Comma = '\t'
-	wr.Write([]string{"prefix", "bytes", "storage bytes", "files", "directories", "directory bytes"})
+	wr.Write([]string{"prefix", "bytes", "storage bytes", "files", "directories", "directory bytes"}) //nolint:errcheck
 	for k, v := range merged {
-		wr.Write([]string{k,
+		wr.Write([]string{k, //nolint:errcheck
 			strconv.FormatInt(v.Bytes, 10),
 			strconv.FormatInt(v.Storage, 10),
 			strconv.FormatInt(v.Files, 10),
@@ -41,9 +40,9 @@ func (tr *tsvReports) formatUserGroupMerged(merged map[int64]reports.MergedStats
 	out := &bytes.Buffer{}
 	wr := csv.NewWriter(out)
 	wr.Comma = '\t'
-	wr.Write([]string{"id", "idname", "bytes", "storage bytes", "files", "directories", "directory bytes"})
+	wr.Write([]string{"id", "idname", "bytes", "storage bytes", "files", "directories", "directory bytes"}) //nolint:errcheck
 	for k, v := range merged {
-		wr.Write([]string{
+		wr.Write([]string{ //nolint:errcheck
 			strconv.FormatInt(k, 10),
 			nameForID(k),
 			strconv.FormatInt(v.Bytes, 10),
