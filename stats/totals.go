@@ -103,8 +103,8 @@ func (pid *PerIDTotals) DecodeBinary(data []byte) []byte {
 	return data
 }
 
-func (tl *PerIDTotals) UnmarshalBinary(data []byte) error {
-	tl.DecodeBinary(data)
+func (pid *PerIDTotals) UnmarshalBinary(data []byte) error {
+	pid.DecodeBinary(data)
 	return nil
 }
 

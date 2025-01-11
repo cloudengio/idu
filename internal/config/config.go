@@ -89,7 +89,9 @@ func ParseConfig(buf []byte) (T, error) {
 	}
 
 	raw := []map[string]any{}
-	yaml.Unmarshal(buf, &raw)
+	if err := yaml.Unmarshal(buf, &raw); err != nil {
+		return T{}, err
+	}
 
 	for i, p := range cfg.Prefixes {
 		cfg.Prefixes[i].Prefix = os.ExpandEnv(p.Prefix)
@@ -148,7 +150,7 @@ type layoutConfig struct {
 	describeLayout func() string
 }
 
-func bytesCalc(n yaml.Node) (diskusage.Calculator, error) {
+func bytesCalc(yaml.Node) (diskusage.Calculator, error) {
 	return diskusage.NewIdentity(), nil
 }
 

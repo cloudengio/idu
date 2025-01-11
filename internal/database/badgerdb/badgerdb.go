@@ -18,7 +18,7 @@ import (
 	"cloudeng.io/errors"
 	"cloudeng.io/os/lockedfile"
 	"github.com/dgraph-io/badger/v4"
-	"github.com/dgraph-io/ristretto/z"
+	"github.com/dgraph-io/ristretto/v2/z"
 )
 
 // Option represents a specific option accepted by Open.
@@ -92,7 +92,9 @@ func keyForBucket(bucket byte, key []byte) *bytes.Buffer {
 // be created.
 func Open[T Options](location string, opts ...Option) (database.DB, error) {
 	if len(location) > 0 && location != "." {
-		os.MkdirAll(location, 0770)
+		if err := os.MkdirAll(location, 0770); err != nil {
+			return nil, err
+		}
 	}
 	db := &Database{
 		location: location,
@@ -191,26 +193,6 @@ func (db *Database) Get(ctx context.Context, prefix string, buf *bytes.Buffer) e
 	}
 	return nil
 }
-
-/*
-func (db *Database) Delete(ctx context.Context, keys ...string) error {
-	if err := db.canceled(ctx); err != nil {
-		return err
-	}
-	return db.bdb.Update(func(tx *badger.Txn) error {
-		kb := bufPool.Get().(*bytes.Buffer)
-		defer bufPool.Put(kb)
-		for _, key := range keys {
-			kb.Reset()
-			kb.WriteByte(prefixBucket)
-			kb.WriteString(key)
-			if err := tx.Delete(kb.Bytes()); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}*/
 
 func (db *Database) DeletePrefix(ctx context.Context, prefix string) error {
 	kb := keyForBucket(prefixBucket, []byte(prefix))
@@ -470,7 +452,7 @@ func (db *Database) VisitLogs(ctx context.Context, start, stop time.Time, visito
 }
 
 // Close closes the database.
-func (db *Database) Close(ctx context.Context) error {
+func (db *Database) Close(_ context.Context) error {
 	db.unlockMu.Lock()
 	defer db.unlockMu.Unlock()
 	if db.unlock == nil {

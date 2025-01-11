@@ -21,14 +21,16 @@ const (
 	LogError    = slog.LevelError
 )
 
-var levelNames = map[slog.Leveler]string{
-	LogProgress: "PROGRESS",
-	LogError:    "ERROR",
-	LogPrefix:   "PREFIX",
-}
+var (
+	levelNames = map[slog.Leveler]string{
+		LogProgress: "PROGRESS",
+		LogError:    "ERROR",
+		LogPrefix:   "PREFIX",
+	}
 
-var Verbosity slog.Level = LogError
-var LogDir string
+	Verbosity = LogError
+	LogDir    string
+)
 
 type logger struct {
 	sync.Mutex
@@ -37,7 +39,7 @@ type logger struct {
 
 var globalLogger = &logger{}
 
-func getOrCreateLogger(name string, ctx context.Context) *slog.Logger {
+func getOrCreateLogger(name string) *slog.Logger {
 	globalLogger.Lock()
 	defer globalLogger.Unlock()
 	if globalLogger.Logger != nil {
@@ -61,7 +63,7 @@ func Log(ctx context.Context, level slog.Level, msg string, args ...interface{})
 	}
 	r := slog.NewRecord(time.Now(), level, msg, pcs[0])
 	r.Add(args...)
-	_ = getOrCreateLogger(defaultLogName, ctx).Handler().Handle(ctx, r)
+	_ = getOrCreateLogger(defaultLogName).Handler().Handle(ctx, r)
 }
 
 var (
@@ -91,8 +93,8 @@ func createNamedLogfile(name, dir string, t time.Time) (f *os.File, fname string
 	f, err = os.Create(fname)
 	if err == nil {
 		symlink := filepath.Join(dir, link)
-		os.Remove(symlink)        // ignore err
-		os.Symlink(name, symlink) // ignore err
+		_ = os.Remove(symlink)        // ignore err
+		_ = os.Symlink(name, symlink) // ignore err
 		return f, fname, nil
 	}
 	return nil, fname, fmt.Errorf("log: cannot create log: %v", err)
@@ -101,7 +103,7 @@ func createNamedLogfile(name, dir string, t time.Time) (f *os.File, fname string
 func newLogger(f *os.File) *slog.Logger {
 	opts := &slog.HandlerOptions{
 		AddSource: logSourceCode,
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
 			if a.Key == slog.LevelKey {
 				level := a.Value.Any().(slog.Level)
 				levelLabel, exists := levelNames[level]

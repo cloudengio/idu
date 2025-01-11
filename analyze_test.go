@@ -81,7 +81,7 @@ func getExpectedErrors(c []string) []string {
 	return errors
 }
 
-func scanDB(t *testing.T, ctx context.Context, db database.DB, lfs filewalk.FS, arg0 string) []string {
+func scanDB(ctx context.Context, t *testing.T, db database.DB, lfs filewalk.FS, arg0 string) []string {
 	scanned := []string{}
 	err := db.Scan(ctx, arg0, func(_ context.Context, k string, v []byte) bool {
 		var pi prefixinfo.T
@@ -102,7 +102,6 @@ func scanDB(t *testing.T, ctx context.Context, db database.DB, lfs filewalk.FS, 
 				l, err := os.Readlink(path)
 				if err != nil {
 					t.Fatalf("%v: %v", path, err)
-					continue
 				}
 				size = int64(len(l))
 			}
@@ -128,10 +127,10 @@ func scanDB(t *testing.T, ctx context.Context, db database.DB, lfs filewalk.FS, 
 	return scanned
 }
 
-func scanErrors(t *testing.T, ctx context.Context, db database.DB, fs filewalk.FS, arg0 string) []string {
+func scanErrors(ctx context.Context, t *testing.T, db database.DB, _ filewalk.FS, arg0 string) []string {
 	errors := []string{}
 	err := db.VisitErrors(ctx, arg0,
-		func(_ context.Context, key string, when time.Time, detail []byte) bool {
+		func(_ context.Context, key string, _ time.Time, detail []byte) bool {
 			errors = append(errors, fmt.Sprintf("%s: %s", key, detail))
 			return true
 		})
@@ -142,7 +141,7 @@ func scanErrors(t *testing.T, ctx context.Context, db database.DB, fs filewalk.F
 	return errors
 }
 
-func getLastLog(t *testing.T, ctx context.Context, db database.DB) (start, stop time.Time, s anaylzeSummary) {
+func getLastLog(ctx context.Context, t *testing.T, db database.DB) (start, stop time.Time, s anaylzeSummary) {
 	start, stop, detail, err := db.LastLog(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -153,7 +152,7 @@ func getLastLog(t *testing.T, ctx context.Context, db database.DB) (start, stop 
 	return
 }
 
-func verifyDB(t *testing.T, ctx context.Context, cfg config.T, fs filewalk.FS, arg0 string, scannable []string) ([]string, anaylzeSummary) {
+func verifyDB(ctx context.Context, t *testing.T, cfg config.T, fs filewalk.FS, arg0 string, scannable []string) ([]string, anaylzeSummary) {
 	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, cfg, arg0, true)
 	if err != nil {
 		t.Fatal(err)
@@ -161,12 +160,12 @@ func verifyDB(t *testing.T, ctx context.Context, cfg config.T, fs filewalk.FS, a
 	defer db.Close(ctx)
 
 	_, _, l, _ := runtime.Caller(1)
-	scanned := scanDB(t, ctx, db, fs, arg0)
+	scanned := scanDB(ctx, t, db, fs, arg0)
 	if got, want := scanned, scannable; !slices.Equal(got, want) {
 		t.Errorf("line %v, got %v, want %v", l, len(got), len(want))
 	}
 
-	storedErrors := scanErrors(t, ctx, db, fs, arg0)
+	storedErrors := scanErrors(ctx, t, db, fs, arg0)
 	expectedErrors := getExpectedErrors(scannable)
 	if got, want := len(storedErrors), len(expectedErrors); got != want {
 		t.Errorf("line %v, got %v, want %v", l, got, want)
@@ -179,7 +178,7 @@ func verifyDB(t *testing.T, ctx context.Context, cfg config.T, fs filewalk.FS, a
 		}
 	}
 
-	start, stop, summary := getLastLog(t, ctx, db)
+	start, stop, summary := getLastLog(ctx, t, db)
 
 	if took := stop.Sub(start); took > 10*time.Minute {
 		t.Errorf("line %v, unexpected duration: %v", l, took)
@@ -245,7 +244,9 @@ func testAnalyze(ctx context.Context, t *testing.T) {
 		t.Fatal(err)
 	}
 	internal.LogDir = filepath.Join(tmpDir, "logs")
-	os.MkdirAll(internal.LogDir, 0700)
+	if err := os.MkdirAll(internal.LogDir, 0700); err != nil {
+		t.Fatal(err)
+	}
 	globalConfig = cfg
 
 	fs := localfs.New()
@@ -255,7 +256,7 @@ func testAnalyze(ctx context.Context, t *testing.T) {
 		t.Fatal(err)
 	}
 
-	scanned, summary := verifyDB(t, ctx, cfg, fs, arg0, scannable)
+	scanned, summary := verifyDB(ctx, t, cfg, fs, arg0, scannable)
 	nDirs, nFiles := numDirsAndFiles(scanned)
 
 	compareSummary(t, summary, nDirs, nFiles, 0, 0, 0, nDirs+nFiles)
@@ -269,7 +270,7 @@ func testAnalyze(ctx context.Context, t *testing.T) {
 		t.Fatal(err)
 	}
 
-	scannedUnchanged, summaryUnchanged := verifyDB(t, ctx, cfg, fs, arg0, scannable)
+	scannedUnchanged, summaryUnchanged := verifyDB(ctx, t, cfg, fs, arg0, scannable)
 
 	if got, want := scannedUnchanged, scanned; !slices.Equal(got, want) {
 		t.Errorf("got %v, want %v", got, want)
@@ -300,7 +301,7 @@ func testAnalyze(ctx context.Context, t *testing.T) {
 	expanded = append(expanded, tt.additional()...)
 	sort.Strings(expanded)
 	nAddedDirs, nAddedFiles := numDirsAndFiles(tt.additional())
-	scannedAdded, summaryAdded := verifyDB(t, ctx, cfg, fs, arg0, expanded)
+	scannedAdded, summaryAdded := verifyDB(ctx, t, cfg, fs, arg0, expanded)
 
 	if got, want := scannedAdded, expanded; !slices.Equal(got, want) {
 		t.Errorf("got %v, want %v", got, want)
@@ -323,7 +324,7 @@ func testAnalyze(ctx context.Context, t *testing.T) {
 		t.Fatal(err)
 	}
 
-	scannedDeleted, summaryDeleted := verifyDB(t, ctx, cfg, fs, arg0, scannable)
+	scannedDeleted, summaryDeleted := verifyDB(ctx, t, cfg, fs, arg0, scannable)
 	if got, want := scannedDeleted, scanned; !slices.Equal(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}

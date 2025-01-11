@@ -32,7 +32,7 @@ func logDB(ctx context.Context, level slog.Level, msg string, args ...interface{
 	}
 	r := slog.NewRecord(time.Now(), level, msg, pcs[0])
 	r.Add(args...)
-	_ = getOrCreateLogger(badgerLogName, ctx).Handler().Handle(ctx, r)
+	_ = getOrCreateLogger(badgerLogName).Handler().Handle(ctx, r)
 }
 
 type badgerLogger struct{}
@@ -64,7 +64,7 @@ func badgerdbOptions(readonly bool, opts ...badgerdb.Option) []badgerdb.Option {
 	return opts
 }
 
-func openBadgerDB(ctx context.Context, cfg config.Prefix, readonly bool) (database.DB, error) {
+func openBadgerDB(_ context.Context, cfg config.Prefix, readonly bool) (database.DB, error) {
 	opts := badgerdbOptions(readonly)
 	bopts := badger.DefaultOptions(cfg.Database)
 	bopts = bopts.WithLogger(&badgerLogger{})
@@ -116,7 +116,7 @@ func OpenPrefixAndDatabase(ctx context.Context, all config.T, prefix string, rea
 	}
 	db, err := OpenDatabase(ctx, cfg, readonly)
 	if err != nil {
-		return ctx, config.Prefix{}, nil, fmt.Errorf("failed to open database for %v in %v: %v\n", cfg.Prefix, cfg.Database, err)
+		return ctx, config.Prefix{}, nil, fmt.Errorf("failed to open database for %v in %v: %v", cfg.Prefix, cfg.Database, err)
 	}
 	return ctx, cfg, db, nil
 }

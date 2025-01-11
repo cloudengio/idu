@@ -35,7 +35,7 @@ type T struct {
 
 // New creates a new PrefixInfo for the supplied file.Info. It assumes that
 // the supplied file.Info contains a file.XAttr in its Sys() value.
-func New(pathname string, info file.Info) T {
+func New(_ string, info file.Info) T {
 	pi := T{
 		size:    info.Size(),
 		modTime: info.ModTime(),
@@ -145,7 +145,9 @@ func (pi *T) MarshalBinary() ([]byte, error) {
 }
 
 func (pi *T) AppendBinary(buf *bytes.Buffer) error {
-	pi.finalize()
+	if err := pi.finalize(); err != nil {
+		return err
+	}
 
 	var storage [128]byte
 	data := storage[:0]
@@ -439,5 +441,5 @@ func (pi *T) newIDScan(id int64, userID bool, idms idMaps) (IDSanner, error) {
 		}
 		return nil, fmt.Errorf("no such group id: %v", id)
 	}
-	return &idmapScanner{sc: newIdMapScanner(idms[idm]), entries: pi.entries}, nil
+	return &idmapScanner{sc: newIDMapScanner(idms[idm]), entries: pi.entries}, nil
 }

@@ -175,7 +175,7 @@ func (st *statsCmds) computeStats(ctx context.Context, db database.DB, match boo
 	return sdb, err
 }
 
-func (st *statsCmds) view(ctx context.Context, values interface{}, args []string) error {
+func (st *statsCmds) view(_ context.Context, values interface{}, args []string) error {
 	af := values.(*viewFlags)
 	if len(af.User) != 0 && len(af.Group) != 0 {
 		return fmt.Errorf("only one of --user or --group may be specified")
@@ -197,11 +197,11 @@ func (st *statsCmds) view(ctx context.Context, values interface{}, args []string
 	when := stats.Date
 
 	if len(af.User) != 0 {
-		return st.userOrGroup(ctx, af, stats, af.User, usernames.Manager.UIDForName)
+		return st.userOrGroup(af, stats, af.User, usernames.Manager.UIDForName)
 	}
 
 	if len(af.Group) != 0 {
-		return st.userOrGroup(ctx, af, stats, af.Group, usernames.Manager.GIDForName)
+		return st.userOrGroup(af, stats, af.Group, usernames.Manager.GIDForName)
 	}
 
 	heapFormatter[string]{}.formatTotals(sdb.Prefix, os.Stdout)
@@ -219,7 +219,7 @@ func (st *statsCmds) view(ctx context.Context, values interface{}, args []string
 	return nil
 }
 
-func (st *statsCmds) userOrGroup(ctx context.Context, af *viewFlags, stats statsFileFormat, name string, mapper func(string) (int64, error)) error {
+func (st *statsCmds) userOrGroup(af *viewFlags, stats statsFileFormat, name string, mapper func(string) (int64, error)) error {
 	sdb := stats.Stats
 	when := stats.Date
 
@@ -239,7 +239,7 @@ func (hf heapFormatter[T]) formatHeap(heap *heap.MinMax[int64, T], out io.Writer
 	i := 0
 	for heap.Len() > 0 {
 		k, v := heap.PopMax()
-		fmt.Printf("%v: %v\n", kf(k), vf(v))
+		fmt.Fprintf(out, "%v: %v\n", kf(k), vf(v))
 		i++
 		if i >= n {
 			break

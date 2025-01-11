@@ -195,7 +195,7 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 			return err
 		}
 		fmt.Printf("profiling: %v %v\n", profile.Name, profile.Filename)
-		defer save()
+		defer save() //nolint: errcheck
 	}
 	defer func() {
 		if r := recover(); r != nil {
@@ -217,7 +217,7 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 			return err
 		}
 		// gosec G114
-		go http.Serve(ln, nil) //nolint:gosec
+		go http.Serve(ln, nil) //nolint:gosec,errcheck
 	}
 
 	internal.UseBadgerDB()
@@ -255,5 +255,5 @@ func banner(out io.Writer, ul string, format string, args ...any) {
 	buf.WriteString(o)
 	buf.WriteString(strings.Repeat(ul, len(o)))
 	buf.WriteRune('\n')
-	out.Write([]byte(buf.String()))
+	out.Write([]byte(buf.String())) //nolint:errcheck
 }

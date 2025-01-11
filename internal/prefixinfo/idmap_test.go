@@ -15,7 +15,7 @@ func testIDMapScanner(t *testing.T, positions ...int) {
 	for _, p := range positions {
 		idm.set(p)
 	}
-	sc := newIdMapScanner(idm)
+	sc := newIDMapScanner(idm)
 	var idx []int
 	for sc.next() {
 		idx = append(idx, sc.pos())

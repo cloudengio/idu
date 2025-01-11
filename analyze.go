@@ -184,7 +184,7 @@ type prefixState struct {
 }
 
 func (w *walker) dbLogErr(ctx context.Context, prefix string, val []byte) {
-	w.db.LogError(ctx, prefix, time.Now(), val)
+	_ = w.db.LogError(ctx, prefix, time.Now(), val)
 	w.pt.incErrors()
 }
 

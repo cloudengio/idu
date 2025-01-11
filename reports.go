@@ -64,58 +64,64 @@ func (rc *reportCmds) getStats() (statsFileFormat, error) {
 	return stats, nil
 }
 
-func (rc *reportCmds) statsFor(rf *generateReportsFlags, suffix string) (statsFileFormat, *reportFilenames, error) {
+func (rc *reportCmds) statsFor(reportDir, suffix string) (statsFileFormat, *reportFilenames, error) {
 	stats, err := rc.getStats()
 	if err != nil {
 		return statsFileFormat{}, nil, err
 	}
-	filenames, err := newReportFilenames(rf.ReportDir, stats.Date, suffix)
+	filenames, err := newReportFilenames(reportDir, stats.Date, suffix)
 	if err != nil {
 		return statsFileFormat{}, nil, err
 	}
 	return stats, filenames, nil
 }
 
-func (rc *reportCmds) generateReports(ctx context.Context, rf *generateReportsFlags) error {
+func (rc *reportCmds) reportsFor(rf *generateReportsFlags, suffix string) (*reportFilenames, error) {
+	stats, filenames, err := rc.statsFor(rf.ReportDir, suffix)
+	if err != nil {
+		return nil, err
+	}
+	switch suffix {
+	case ".tsv":
+		tr := &tsvReports{}
+		return filenames, tr.generateReports(rf, filenames, stats)
+	case ".json":
+		jr := &jsonReports{}
+		return filenames, jr.generateReports(rf, filenames, stats)
+	case ".md":
+		md := &markdownReports{}
+		return filenames, md.generateReports(rf, filenames, stats)
+	}
+	return nil, fmt.Errorf("unsupported report format: %v", suffix)
+}
+
+func (rc *reportCmds) generateReports(_ context.Context, rf *generateReportsFlags) error {
 	if rf.TSV == 0 && rf.JSON == 0 && rf.Markdown == 0 {
 		return fmt.Errorf("no report requested, please specify one of --tsv, --json or --markdown")
 	}
+
 	var err error
-	var stats statsFileFormat
 	var filenames *reportFilenames
 	if rf.TSV > 0 {
-		stats, filenames, err = rc.statsFor(rf, ".tsv")
-		if err != nil {
-			return err
-		}
-		tr := &tsvReports{}
-		if err := tr.generateReports(ctx, rf, filenames, stats); err != nil {
-			return err
-		}
+		filenames, err = rc.reportsFor(rf, ".tsv")
 	}
 	if rf.JSON > 0 {
-		stats, filenames, err = rc.statsFor(rf, ".json")
-		if err != nil {
-			return err
-		}
-		jr := &jsonReports{}
-		if err := jr.generateReports(ctx, rf, filenames, stats); err != nil {
-			return err
-		}
+		filenames, err = rc.reportsFor(rf, ".json")
 	}
 	if rf.Markdown > 0 {
-		stats, filenames, err = rc.statsFor(rf, ".md")
-		if err != nil {
-			return err
-		}
-		md := &markdownReports{}
-		if err := md.generateReports(ctx, rf, filenames, stats); err != nil {
-			return err
-		}
+		filenames, err = rc.reportsFor(rf, ".md")
 	}
+	if err != nil {
+		return err
+	}
+
 	src, dst := filenames.latest()
-	os.Remove(dst)
-	os.Symlink(src, dst)
+	if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Symlink(src, dst); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -248,7 +254,7 @@ func (rc *reportCmds) listfiles(dir, ext string) ([]string, error) {
 	return files, err
 }
 
-func (rc *reportCmds) locate(ctx context.Context, values interface{}, args []string) error {
+func (rc *reportCmds) locate(_ context.Context, values interface{}, args []string) error {
 	lf := values.(*locateReportsFlags)
 	dir := args[0]
 	dirs, err := os.ReadDir(dir)

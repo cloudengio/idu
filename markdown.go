@@ -6,7 +6,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"os"
 	"text/template"
 	"time"
@@ -243,7 +242,7 @@ func (md *markdownReports) initTemplates() {
 	md.created = true
 }
 
-func (md *markdownReports) generateReports(ctx context.Context, rf *generateReportsFlags, filenames *reportFilenames, stats statsFileFormat) error {
+func (md *markdownReports) generateReports(rf *generateReportsFlags, filenames *reportFilenames, stats statsFileFormat) error {
 	md.initTemplates()
 
 	prefix := stats.Prefix
