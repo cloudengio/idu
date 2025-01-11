@@ -16,7 +16,7 @@ type configFlags struct {
 	Documentation bool `subcmd:"document,false,documentation for the configuration file"`
 }
 
-func configManager(ctx context.Context, values interface{}, args []string) error {
+func configManager(_ context.Context, values interface{}, _ []string) error {
 	flagValues := values.(*configFlags)
 	if flagValues.Documentation {
 		fmt.Println(config.Documentation())

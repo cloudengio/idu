@@ -92,7 +92,9 @@ func keyForBucket(bucket byte, key []byte) *bytes.Buffer {
 // be created.
 func Open[T Options](location string, opts ...Option) (database.DB, error) {
 	if len(location) > 0 && location != "." {
-		os.MkdirAll(location, 0770)
+		if err := os.MkdirAll(location, 0770); err != nil {
+			return nil, err
+		}
 	}
 	db := &Database{
 		location: location,
@@ -450,7 +452,7 @@ func (db *Database) VisitLogs(ctx context.Context, start, stop time.Time, visito
 }
 
 // Close closes the database.
-func (db *Database) Close(ctx context.Context) error {
+func (db *Database) Close(_ context.Context) error {
 	db.unlockMu.Lock()
 	defer db.unlockMu.Unlock()
 	if db.unlock == nil {

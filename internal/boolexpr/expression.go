@@ -53,7 +53,7 @@ func NewParserTests(ctx context.Context, fs filewalk.FS) *boolexpr.Parser {
 	parser := matcher.New()
 
 	uid := func(n, v string) boolexpr.Operand {
-		return matcher.NewUser(n, v, func(text string) (file.XAttr, error) {
+		return matcher.NewUser(n, v, func(string) (file.XAttr, error) {
 			id, err := strconv.ParseInt(v, 10, 64)
 			if err != nil {
 				return file.XAttr{UID: -1, User: v}, nil
@@ -63,7 +63,7 @@ func NewParserTests(ctx context.Context, fs filewalk.FS) *boolexpr.Parser {
 	}
 
 	gid := func(n, v string) boolexpr.Operand {
-		return matcher.NewGroup(n, v, func(text string) (file.XAttr, error) {
+		return matcher.NewGroup(n, v, func(string) (file.XAttr, error) {
 			id, err := strconv.ParseInt(v, 10, 64)
 			if err != nil {
 				return file.XAttr{GID: -1, Group: v}, nil
@@ -130,7 +130,7 @@ func createExpr(p *boolexpr.Parser, args []string) (boolexpr.T, bool, error) {
 	}
 	expr, err := p.Parse(input)
 	if err != nil {
-		return boolexpr.T{}, false, fmt.Errorf("failed to parse expression: %v: %v\n", input, err)
+		return boolexpr.T{}, false, fmt.Errorf("failed to parse expression: %v: %v", input, err)
 	}
 	return expr, true, nil
 }

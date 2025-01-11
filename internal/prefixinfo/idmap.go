@@ -120,7 +120,7 @@ func (idm *idMap) isSet(pos int) bool {
 	return idm.Pos[pos/64]>>(pos%64)&1 == 1
 }
 
-func newIdMapScanner(idm idMap) *idMapScanner {
+func newIDMapScanner(idm idMap) *idMapScanner {
 	return &idMapScanner{
 		idMap:  idm,
 		bitPos: -1,

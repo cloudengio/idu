@@ -70,7 +70,7 @@ func scanAndMatchGroups(t *testing.T, pi *prefixinfo.T, gid int64, want []string
 	}
 }
 
-func cmpInfoList(t *testing.T, npi prefixinfo.T, got, want file.InfoList) {
+func cmpInfoList(t *testing.T, _ prefixinfo.T, got, want file.InfoList) {
 	// Can't use reflect.DeepEqual because the SysInfo field is not
 	// encoded/decoded.
 	if got, want := len(got), len(want); got != want {

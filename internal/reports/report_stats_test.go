@@ -28,7 +28,7 @@ func newInfo(name string, size, blocks int64, mode fs.FileMode, modTime time.Tim
 	return file.NewInfo(name, size, mode, modTime, prefixinfo.NewSysInfo(uid, gid, 0, 0, blocks))
 }
 
-func createPrefixInfo(t *testing.T, uid, gid int64, name string, contents ...[]file.Info) prefixinfo.T {
+func createPrefixInfo(uid, gid int64, name string, contents ...[]file.Info) prefixinfo.T {
 	now := time.Now().Truncate(0)
 	info := newInfo(name, 3, 4, fs.ModeDir|0700, now.Truncate(0), uid, gid)
 	pi := prefixinfo.New(name, info)
@@ -208,7 +208,7 @@ func TestReportStatsSingleID(t *testing.T) {
 		_ = i
 		pis := []prefixinfo.T{}
 		for i := 0; i < len(nf); i++ {
-			pis = append(pis, npi(t, tc.uid, tc.gid, pikeys[i], nInfoF(nf[i], tc.uid, tc.gid), nInfoD(nd[i], tc.uid, tc.gid)))
+			pis = append(pis, npi(tc.uid, tc.gid, pikeys[i], nInfoF(nf[i], tc.uid, tc.gid), nInfoD(nd[i], tc.uid, tc.gid)))
 		}
 
 		sdb := reports.NewAllStats("test", 5)
@@ -291,7 +291,7 @@ func TestReportStatsMultipleIDs(t *testing.T) {
 		uidl = append(uidl, nuid)
 		gidl = append(gidl, ngid)
 		pikeys = append(pikeys, fmt.Sprintf("p%v", i))
-		pis = append(pis, createPrefixInfo(t, nuid, ngid, pikeys[i],
+		pis = append(pis, createPrefixInfo(nuid, ngid, pikeys[i],
 			nInfoF(nf[i], nuid, ngid),
 			nInfoD(nd[i], nuid, ngid)))
 		if i%2 == 1 {

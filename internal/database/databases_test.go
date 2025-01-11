@@ -21,7 +21,7 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-func badgerFactory(t *testing.T, dir, prefix string, readonly bool) database.DB {
+func badgerFactory(t *testing.T, dir, _ string, readonly bool) database.DB {
 	t.Helper()
 	dbname := filepath.Join(dir, "db")
 	opts := []badgerdb.Option{}
@@ -62,8 +62,8 @@ func populateDatabase(t *testing.T, db database.DB, nItems int) {
 	if err := <-ch; err != nil {
 		t.Fatal(err)
 	}
-	db.LogError(ctx, "/a/01", time.Now(), []byte("error"))
-	db.Log(ctx, time.Now(), time.Now(), []byte("log"))
+	_ = db.LogError(ctx, "/a/01", time.Now(), []byte("error"))
+	_ = db.Log(ctx, time.Now(), time.Now(), []byte("log"))
 	db.Close(ctx)
 }
 
@@ -247,7 +247,7 @@ func testErrors(t *testing.T, factory databaseFactory) {
 		}
 	}
 
-	match := func(i int, key string, when time.Time, detail []byte) {
+	match := func(i int, _ string, when time.Time, detail []byte) {
 		if got, want := when, times[i]; !got.Equal(want) {
 			t.Errorf("got %v, want %v", got, want)
 		}
@@ -272,10 +272,10 @@ func testErrors(t *testing.T, factory databaseFactory) {
 	}
 }
 
-func visitAllErrors(t *testing.T, ctx context.Context, db database.DB) []string {
+func visitAllErrors(ctx context.Context, t *testing.T, db database.DB) []string {
 	keys := map[string]struct{}{}
 	err := db.VisitErrors(ctx, "",
-		func(_ context.Context, key string, when time.Time, detail []byte) bool {
+		func(_ context.Context, key string, _ time.Time, _ []byte) bool {
 			keys[key] = struct{}{}
 			return true
 		})
@@ -310,7 +310,7 @@ func testErrorsDelete(t *testing.T, factory databaseFactory) {
 		}
 	}
 
-	keys := visitAllErrors(t, ctx, db)
+	keys := visitAllErrors(ctx, t, db)
 	if got, want := len(keys), 100; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
@@ -319,7 +319,7 @@ func testErrorsDelete(t *testing.T, factory databaseFactory) {
 		t.Fatal(err)
 	}
 
-	keys = visitAllErrors(t, ctx, db)
+	keys = visitAllErrors(ctx, t, db)
 	if got, want := len(keys), 90; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
@@ -359,7 +359,7 @@ func testDelete(t *testing.T, factory databaseFactory) {
 
 	scan := func() []string {
 		keys := []string{}
-		err := db.Scan(ctx, "", func(_ context.Context, k string, v []byte) bool {
+		err := db.Scan(ctx, "", func(_ context.Context, k string, _ []byte) bool {
 			keys = append(keys, k)
 			return true
 		})
