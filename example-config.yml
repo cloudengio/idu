@@ -1,20 +1,35 @@
-databases:
-  - prefix: "/Users/cnicolaou"
-    location: ./local-database/cnicolaou
-  - prefix: "/Users/cnicolaou/Dropbox (Personal)"
-    location: ./local-database/dropbox
-  - prefix: "/usr/local"
-    location: ./local-database/usr-local
-  - prefix: "/tmp"
-    location: ./local-database/tmp
-parameters:
-  - type: "block"
-    prefix: "/"
-    block_size: 4096
-  - type: "block"
-    prefix: "/labs/asbhatt"
-    block_size: 4096
-exclusions:
-  - prefix: "/Users/cnicolaou"
-    regexps:
-      - ".DS_Store$"
+- prefix: /Users/cnicolaou
+  database: ./local-database/cnicolaou
+  concurrent_scans: 5000
+  concurrent_stats: 2000
+  concurrent_stats_threshold: 10
+  scan_size: 2000
+  exclusions:
+    - '.DS_Store$'
+    - '^/Users/cnicolaou/Library/CloudStorage'
+  layout:
+    calculator: block
+    parameters:
+      size: 4096
+
+- prefix: /Users/cnicolaou/Dropbox (Personal)
+  database: ./local-database/dropbox
+  layout:
+    calculator: bytes
+
+- prefix: /usr/local
+  database: ./local-database/usr-local
+  count_hardlinks_as_files: false
+
+- prefix: /tmp
+  database: ./local-database/tmp
+
+- prefix: /labs/asbhatt
+  database: ./local-database/asbhatt
+  concurrent_scans: 5000
+  concurrent_stats: 2000
+  layout:
+    calculator: raid0
+    parameters:
+      stripe_size: 65536
+      num_stripes: 4

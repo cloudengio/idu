@@ -125,6 +125,9 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *anal
 	wg.Wait()
 
 	errs.Append(alz.summarizeAndLog(ctx, sdb, pt, start))
+	if errs.Err() == nil {
+		return nil
+	}
 	return errs.Squash(context.Canceled)
 }
 
