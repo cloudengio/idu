@@ -29,7 +29,7 @@ type lister struct{}
 
 func (l *lister) errors(ctx context.Context, values interface{}, args []string) error {
 	ef := values.(*errorFlags)
-	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
+	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], !ef.Erase)
 	if err != nil {
 		return err
 	}
@@ -39,8 +39,8 @@ func (l *lister) errors(ctx context.Context, values interface{}, args []string) 
 	}
 
 	return db.VisitErrors(ctx, args[0],
-		func(_ context.Context, key string, _ time.Time, detail []byte) bool {
-			fmt.Printf("%s: %s\n", key, detail)
+		func(_ context.Context, key string, when time.Time, detail []byte) bool {
+			fmt.Printf("%s: %s (%s)\n", key, detail, when.Format(time.RFC3339))
 			return true
 		})
 }
