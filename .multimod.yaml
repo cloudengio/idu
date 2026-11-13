@@ -1,0 +1,40 @@
+test:
+  [
+    "go",
+    "test",
+    "-failfast",
+    "--covermode=atomic",
+    "--vet=off",
+    "-race",
+    "./...",
+  ]
+test-less-parallelism:
+  [
+    "go",
+    "test",
+    "-failfast",
+    "--covermode=atomic",
+    "--vet=off",
+    "-race",
+    "-p=2",
+    "./...",
+  ]
+lint: ["golangci-lint", "run", "./..."]
+govuln: ["govulnchecker", "--config=${MULTIMOD_ROOT}/govulncheck-exclusions.yml",  "./..."]
+generate: ["go", "generate", "./..."]
+markdown: ["gomarkdown", "-overwrite", "./..."]
+annotate:
+  [
+    "goannotate",
+    "--config=${MULTIMOD_ROOT}/copyright-annotation.yaml",
+    "--annotation=cloudeng-copyright",
+    "./..."
+  ]
+usage: ["gousage", "--overwrite", "./..."]
+update: ["go", "get", "-u", "./...", ";", "go", "mod", "tidy"]
+tidy: ["go", "mod", "tidy"]
+build: ["go", "build", "./..."]
+fix: ["go", "fix", "./..."]
+gomodreplace: ["gomodreplace", "--prefix=cloudeng.io", "--pkg=./...", "--apply"]
+concurrent: ["test", "build", "update", "tidy"]
+not-concurrent: ["lint"]

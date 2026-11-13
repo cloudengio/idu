@@ -19,7 +19,6 @@ import (
 	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/cmd/idu/internal/usernames"
 	"cloudeng.io/errors"
-	"golang.org/x/exp/maps"
 )
 
 type generateReportsFlags struct {
@@ -186,7 +185,7 @@ func writeReportFiles(sdb *reports.AllStats,
 	if err := os.WriteFile(filenames.summary("prefixes"), prefixFormatter(merged), 0600); err != nil {
 		return err
 	}
-	maps.Clear(merged)
+	clear(merged)
 	merged[sdb.Prefix.Prefix] = reports.MergedStats{
 		Prefix:      sdb.Prefix.Prefix,
 		Bytes:       sdb.Prefix.TotalBytes,

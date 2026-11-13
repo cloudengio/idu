@@ -173,7 +173,7 @@ func verifyDB(ctx context.Context, t *testing.T, cfg config.T, fs filewalk.FS, a
 		fmt.Printf("\n\nexpected:\n%v\n", strings.Join(expectedErrors, "\n"))
 	}
 	for _, e := range storedErrors {
-		if !(strings.Contains(e, "permission denied") || strings.Contains(e, "Access is denied")) {
+		if !strings.Contains(e, "permission denied") && !strings.Contains(e, "Access is denied") {
 			t.Errorf("line %v, unexpected error: %v", l, e)
 		}
 	}
