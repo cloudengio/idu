@@ -14,7 +14,8 @@ jobs:
     uses: cloudengio/.github/.github/workflows/go-test-multimod.yml@main
     with:
       runner: |
-        [ "self-hosted", "linux", "arm64" ]
+        [ "ubuntu-latest" ]
+        # [ "self-hosted", "linux", "arm64" ]
       go-versions: |
         [ ">=1.27.2" ]
       with-webapp: true
