@@ -179,11 +179,11 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 	switch globalFlags.Units {
 	case "decimal":
 		bytesPrinter = func(size int64) (float64, string) {
-			return diskusage.DecimalBytes(size).Standardize()
+			return diskusage.Decimal(size).Standardize()
 		}
 	case "binary":
 		bytesPrinter = func(size int64) (float64, string) {
-			return diskusage.Base2Bytes(size).Standardize()
+			return diskusage.Binary(size).Standardize()
 		}
 	}
 	for _, profile := range globalFlags.ExitProfile.Profiles {

@@ -125,6 +125,9 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *anal
 	wg.Wait()
 
 	errs.Append(alz.summarizeAndLog(ctx, sdb, pt, start))
+	if errs.Err() == nil {
+		return nil
+	}
 	return errs.Squash(context.Canceled)
 }
 
@@ -132,7 +135,7 @@ func cl() string {
 	out := strings.Builder{}
 	for _, arg := range os.Args {
 		if strings.Contains(arg, " \t") {
-			out.WriteString(fmt.Sprintf("%q", arg))
+			fmt.Fprintf(&out, "%q", arg)
 		} else {
 			out.WriteString(arg)
 		}

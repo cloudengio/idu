@@ -57,7 +57,7 @@ func (l *lister) logs(ctx context.Context, values interface{}, args []string) er
 		return db.Clear(ctx, false, true)
 	}
 
-	from, to, _, err := lf.TimeRangeFlags.FromTo()
+	from, to, _, err := lf.FromTo()
 	if err != nil {
 		return err
 	}

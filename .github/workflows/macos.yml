@@ -1,11 +1,21 @@
 name: go-macos
 
-on:   
+on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
   test:
-    uses: cloudengio/.github/.github/workflows/go-test.yml@main
+    uses: cloudengio/.github/.github/workflows/go-test-multimod.yml@main
+    with:
+      runner: |
+        [ "macos-latest" ]
+      # runner: |
+      #   [ "self-hosted", "macos", "arm64" ]
+      go-versions: |
+        [ "1.27.x" ]

@@ -19,5 +19,5 @@ func (s *sysMemstats) update() {
 }
 
 func (s *sysMemstats) MaxRSSGiB() float64 {
-	return float64(s.Rusage.Maxrss) / (1024 * 1024)
+	return float64(s.Maxrss) / (1024 * 1024)
 }
