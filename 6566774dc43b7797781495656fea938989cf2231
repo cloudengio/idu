@@ -1,0 +1,34 @@
+--- Overview
+Updates dependencies to their latest versions, raises the minimum Go version to 1.27, and moves CI to the shared multimod workflows with golangci-lint v2. Also includes the code updates needed for the newer APIs and lint rules.
+
+--- Key Changes
+  * CI
+    * Linux and macOS workflows now use the shared go-test-multimod.yml workflow and set permissions: contents: read.
+    * Linux runs tests, lint and govulncheck on Go >=1.27.2, with webapp and pebble v2.8.0 turned on.
+    * macOS runs tests on Go 1.27.x.
+    * Removed the Windows workflow.
+  * Tooling
+    * .golangci.yml is migrated to the v2 format. It adds errcheck and gocognit (min complexity 30), moves gofmt/goimports under formatters, and adds exclusion presets plus a revive rule for packages whose names match stdlib packages.
+    * New .multimod.yaml defines the test, lint, govuln, generate, annotate, update and tidy commands.
+    * New govulncheck-exclusions.yml, currently empty.
+  * Dependencies
+    * go 1.27.0; the toolchain directive is removed.
+    * cloudeng.io/, badger v4.9.6, ristretto/v2 (now a direct dependency) and golang.org/x/ are bumped.
+    * New indirect dependencies on cloudeng.io/logging, types and windows, plus OpenTelemetry and logr.
+  * Code
+    * analyzeFS returns nil explicitly when no errors were collected.
+    * Updated for API changes:
+      * diskusage.DecimalBytes/Base2Bytes are now Decimal/Binary.
+      * win32testutil moved to cloudeng.io/windows.
+    * Replaced golang.org/x/exp/maps and slices with the built-in clear and stdlib slices.
+    * Lint cleanups:
+      * Removed redundant embedded-field selectors in badgerdb, boolexpr, ls.go and progress_unix.go.
+      * Uses fmt.Fprintf instead of WriteString(fmt.Sprintf(...)).
+      * Simplified a boolean expression.
+    * Moved the TestBinaryEncoding checks into assertBinaryEncodingRoundTrip to lower the test's complexity.
+  * Docs
+    * Rewrote example-config.yml in the per-prefix list format. Each prefix now has its own database, concurrency settings, exclusions and layout calculator.
+
+--- Breaking Changes
+  * Building now requires Go 1.27 or later.
+  * CI no longer runs on Windows.
