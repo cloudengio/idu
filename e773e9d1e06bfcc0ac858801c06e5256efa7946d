@@ -1,0 +1,23 @@
+--- Overview
+This PR reworks the config package (internal/config) and updates the CLI commands, database layer, docs and example config to match. It also adds tests for the new behavior.
+
+--- Key Changes
+  * internal/config
+    * Large expansion of config.go (+753/?), with matching tests in config_test.go (+602).
+    * README.md rewritten to document the new config format.
+  * CLI (main.go, config.go, cmdusage.go, analyze.go, find.go, ls.go, stats.go, db.go)
+    * Commands moved to the new config API.
+    * Usage text updated.
+    * New coverage in main_test.go and analyze_test.go.
+  * internal/database/badgerdb
+    * New functionality in badgerdb.go (+28), with tests and README notes.
+  * internal (scandb.go, util.go)
+    * Scan database and utility helpers refactored.
+    * util_test.go extended.
+  * Docs and config
+    * README.md, internal/README.md and example-config.yml updated for the new config layout.
+
+--- Breaking Changes
+Likely: example-config.yml and the config docs were restructured, so existing config files may need to be migrated. Please confirm against the actual diff.
+
+<!-- Written from the diffstat only (file names and line counts). Check the details against the full diff before merging. -->
