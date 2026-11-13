@@ -18,7 +18,9 @@ import (
 	"cloudeng.io/errors"
 	"cloudeng.io/os/lockedfile"
 	"github.com/dgraph-io/badger/v4"
+	"github.com/dgraph-io/badger/v4/pb"
 	"github.com/dgraph-io/ristretto/v2/z"
+	"google.golang.org/protobuf/proto"
 )
 
 // Option represents a specific option accepted by Open.
@@ -43,12 +45,13 @@ type Options struct {
 // Database represents a badger database.
 type Database struct {
 	database.Options[Options]
-	location string
-	bdb      *badger.DB
-	batch    *writeBatch
-	lock     *lockedfile.Mutex
-	unlockMu sync.Mutex
-	unlock   func()
+	location  string
+	bdb       *badger.DB
+	batch     *writeBatch
+	lock      *lockedfile.Mutex
+	unlock    func()
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // The database is paritioned into 4 'buckets':
@@ -121,10 +124,14 @@ func Open[T Options](location string, opts ...Option) (database.DB, error) {
 	osopts := osOptions(db.Sub.Options)
 	bdb, err := badger.Open(osopts)
 	if err != nil {
+		unlock()
+		db.unlock = nil
 		return nil, err
 	}
 	db.bdb = bdb
-	db.batch = newWriteBatch(bdb)
+	if !db.ReadOnly {
+		db.batch = newWriteBatch(bdb)
+	}
 	return db, nil
 }
 
@@ -132,10 +139,23 @@ func (db *Database) BadgerDB() *badger.DB {
 	return db.bdb
 }
 
+// RunValueLogGC runs Badger's value log garbage collection repeatedly until
+// no more files meet discardRatio.
+func (db *Database) RunValueLogGC(discardRatio float64) error {
+	for {
+		err := db.bdb.RunValueLogGC(discardRatio)
+		if err == badger.ErrNoRewrite {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
+}
+
 func (db *Database) canceled(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
-		db.batch.flush()
 		return ctx.Err()
 	default:
 		return nil
@@ -176,6 +196,9 @@ func (db *Database) Set(ctx context.Context, prefix string, val []byte, batch bo
 	if err := db.canceled(ctx); err != nil {
 		return err
 	}
+	if db.ReadOnly {
+		return badger.ErrReadOnlyTxn
+	}
 	kb := keyForBucket(prefixBucket, []byte(prefix))
 	defer bufPool.Put(kb)
 	if batch {
@@ -203,7 +226,10 @@ func (db *Database) DeletePrefix(ctx context.Context, prefix string) error {
 func (db *Database) deleteBatch(prefix []byte) (bool, error) {
 	tx := db.bdb.NewTransaction(true)
 	defer tx.Discard()
-	it := tx.NewIterator(badger.DefaultIteratorOptions)
+	opts := badger.DefaultIteratorOptions
+	opts.PrefetchValues = false
+	opts.Prefix = prefix
+	it := tx.NewIterator(opts)
 	for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 		if err := tx.Delete(it.Item().KeyCopy(nil)); err != nil {
 			it.Close()
@@ -242,14 +268,11 @@ func (db *Database) scanFrom(ctx context.Context, bucket byte, prefix []byte, vi
 	defer bufPool.Put(kb)
 	prefix = kb.Bytes()
 	return db.bdb.View(func(tx *badger.Txn) error {
-		it := tx.NewIterator(badger.DefaultIteratorOptions)
+		opts := badger.DefaultIteratorOptions
+		opts.Prefix = []byte{bucket}
+		it := tx.NewIterator(opts)
 		defer it.Close()
-		if len(prefix) > 0 {
-			it.Seek(prefix)
-		} else {
-			it.Rewind()
-		}
-		for ; it.Valid(); it.Next() {
+		for it.Seek(prefix); it.Valid(); it.Next() {
 			item := it.Item()
 			k := item.Key()
 			err := item.Value(func(v []byte) error {
@@ -277,7 +300,9 @@ func (db *Database) scanTimeRange(ctx context.Context, bucket byte, start, stop 
 	stopKb := keyForBucket(bucket, []byte(stop.Format(time.RFC3339)))
 	defer bufPool.Put(stopKb)
 	return db.bdb.View(func(tx *badger.Txn) error {
-		it := tx.NewIterator(badger.DefaultIteratorOptions)
+		opts := badger.DefaultIteratorOptions
+		opts.Prefix = []byte{bucket}
+		it := tx.NewIterator(opts)
 		defer it.Close()
 		for it.Seek(startKb.Bytes()); it.Valid(); it.Next() {
 			k := it.Item().Key()
@@ -304,10 +329,12 @@ func (db *Database) scanTimeRange(ctx context.Context, bucket byte, start, stop 
 	})
 }
 
+const defaultStreamMaxSize = 16 << 20 // 16 MiB
+
 func (db *Database) Scan(ctx context.Context, path string, visitor func(ctx context.Context, key string, val []byte) bool) error {
 	return db.scanFrom(ctx, prefixBucket, []byte(path), func(ctx context.Context, key string, val []byte) error {
 		if key[0] != prefixBucket {
-			return nil
+			return errScanDone
 		}
 		if !visitor(ctx, key[1:], val) {
 			return errScanDone
@@ -321,21 +348,22 @@ func (db *Database) Stream(ctx context.Context, path string, visitor func(ctx co
 	kb := keyForBucket(prefixBucket, []byte(path))
 	defer bufPool.Put(kb)
 	stream.Prefix = kb.Bytes()
-	stream.ChooseKey = func(item *badger.Item) bool {
-		return item.Key()[0] == prefixBucket
-	}
 	stream.NumGo = runtime.NumCPU()
-	stream.KeyToList = nil
+	stream.MaxSize = defaultStreamMaxSize
+	var kv pb.KV
 	stream.Send = func(buf *z.Buffer) error {
-		list, err := badger.BufferToKVList(buf)
-		if err != nil {
-			return err
-		}
-		for _, kv := range list.Kv {
+		if err := buf.SliceIterate(func(s []byte) error {
+			kv.Reset()
+			if err := proto.Unmarshal(s, &kv); err != nil {
+				return err
+			}
 			if kv.StreamDone {
 				return nil
 			}
 			visitor(ctx, string(kv.Key[1:]), kv.Value)
+			return nil
+		}); err != nil {
+			return err
 		}
 		select {
 		case <-ctx.Done():
@@ -382,17 +410,20 @@ func (db *Database) VisitErrors(ctx context.Context, key string,
 func (db *Database) lastKey(prefix byte) ([]byte, error) {
 	var lastKey []byte
 	p := []byte{prefix}
+	end := []byte{prefix + 1}
 	err := db.bdb.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
 		opts.PrefetchValues = false
+		opts.Reverse = true
 		it := txn.NewIterator(opts)
 		defer it.Close()
-		var l []byte
-		for it.Seek(p); it.ValidForPrefix(p); it.Next() {
-			l = it.Item().Key()
+		it.Seek(end)
+		if it.Valid() && bytes.Equal(it.Item().Key(), end) {
+			it.Next()
 		}
-		lastKey = make([]byte, len(l))
-		copy(lastKey, l)
+		if it.ValidForPrefix(p) {
+			lastKey = it.Item().KeyCopy(nil)
+		}
 		return nil
 	})
 	return lastKey, err
@@ -453,17 +484,21 @@ func (db *Database) VisitLogs(ctx context.Context, start, stop time.Time, visito
 
 // Close closes the database.
 func (db *Database) Close(_ context.Context) error {
-	db.unlockMu.Lock()
-	defer db.unlockMu.Unlock()
-	if db.unlock == nil {
-		return nil
-	}
-	var errs errors.M
-	errs.Append(db.batch.flush())
-	errs.Append(db.bdb.Close())
-	db.unlock()
-	db.unlock = nil
-	return errs.Err()
+	db.closeOnce.Do(func() {
+		var errs errors.M
+		if db.batch != nil {
+			errs.Append(db.batch.flush())
+		}
+		if db.bdb != nil {
+			errs.Append(db.bdb.Close())
+		}
+		if db.unlock != nil {
+			db.unlock()
+			db.unlock = nil
+		}
+		db.closeErr = errs.Err()
+	})
+	return db.closeErr
 }
 
 func (db *Database) Clear(_ context.Context, logs, errors bool) error {

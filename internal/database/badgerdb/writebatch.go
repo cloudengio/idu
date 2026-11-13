@@ -11,18 +11,12 @@ import (
 )
 
 type writeBatch struct {
-	bdb      *badger.DB
-	batch    *badger.WriteBatch
-	maxSize  int64
-	maxCount int64
+	batch *badger.WriteBatch
 }
 
 func newWriteBatch(bdb *badger.DB) *writeBatch {
 	return &writeBatch{
-		bdb:      bdb,
-		batch:    bdb.NewWriteBatch(),
-		maxSize:  bdb.MaxBatchSize(),
-		maxCount: bdb.MaxBatchCount(),
+		batch: bdb.NewWriteBatch(),
 	}
 }
 

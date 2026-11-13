@@ -18,6 +18,7 @@ import (
 	"cloudeng.io/cmd/idu/internal/database/badgerdb"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"github.com/dgraph-io/badger/v4"
+	"github.com/dgraph-io/badger/v4/options"
 )
 
 var badgerLogName = defaultLogName + "-badger"
@@ -38,23 +39,31 @@ func logDB(ctx context.Context, level slog.Level, msg string, args ...interface{
 type badgerLogger struct{}
 
 func (l *badgerLogger) Errorf(f string, a ...interface{}) {
-	m := fmt.Sprintf(f, a...)
-	logDB(context.Background(), LogError, "badger", "msg", m)
+	if LogError < Verbosity {
+		return
+	}
+	logDB(context.Background(), LogError, "badger", "msg", fmt.Sprintf(f, a...))
 }
 
 func (l *badgerLogger) Warningf(f string, a ...interface{}) {
-	m := fmt.Sprintf(f, a...)
-	logDB(context.Background(), slog.LevelWarn, "badger", "msg", m)
+	if slog.LevelWarn < Verbosity {
+		return
+	}
+	logDB(context.Background(), slog.LevelWarn, "badger", "msg", fmt.Sprintf(f, a...))
 }
 
 func (l *badgerLogger) Infof(f string, a ...interface{}) {
-	m := fmt.Sprintf(f, a...)
-	logDB(context.Background(), slog.LevelInfo, "badger", "msg", m)
+	if slog.LevelInfo < Verbosity {
+		return
+	}
+	logDB(context.Background(), slog.LevelInfo, "badger", "msg", fmt.Sprintf(f, a...))
 }
 
 func (l *badgerLogger) Debugf(f string, a ...interface{}) {
-	m := fmt.Sprintf(f, a...)
-	logDB(context.Background(), slog.LevelWarn, "badger", "msg", m)
+	if slog.LevelDebug < Verbosity {
+		return
+	}
+	logDB(context.Background(), slog.LevelDebug, "badger", "msg", fmt.Sprintf(f, a...))
 }
 
 func badgerdbOptions(readonly bool, opts ...badgerdb.Option) []badgerdb.Option {
@@ -66,9 +75,17 @@ func badgerdbOptions(readonly bool, opts ...badgerdb.Option) []badgerdb.Option {
 
 func openBadgerDB(_ context.Context, cfg config.Prefix, readonly bool) (database.DB, error) {
 	opts := badgerdbOptions(readonly)
-	bopts := badger.DefaultOptions(cfg.Database)
-	bopts = bopts.WithLogger(&badgerLogger{})
-	bopts = bopts.WithLoggingLevel(badger.ERROR)
+	bopts := badger.DefaultOptions(cfg.Database).
+		WithLogger(&badgerLogger{}).
+		WithDetectConflicts(false).
+		WithMetricsEnabled(false).
+		WithIndexCacheSize(64 << 20)
+	if !readonly {
+		bopts = bopts.
+			WithCompactL0OnClose(true).
+			WithCompression(options.ZSTD).
+			WithBlockCacheSize(32 << 20)
+	}
 	opts = append(opts, badgerdb.WithBadgerOptions(bopts))
 	return badgerdb.Open(cfg.Database, opts...)
 }
@@ -149,9 +166,20 @@ func (sdb *scanDB) LogError(ctx context.Context, key string, when time.Time, det
 	return sdb.db.LogError(ctx, key, when, detail)
 }
 
+type valueLogGCRunner interface {
+	RunValueLogGC(discardRatio float64) error
+}
+
 func (sdb *scanDB) LogAndClose(ctx context.Context, start, stop time.Time, detail []byte) error {
 	if err := sdb.db.Log(ctx, start, stop, detail); err != nil {
 		return err
+	}
+	if ctx.Err() == nil {
+		if gc, ok := sdb.db.(valueLogGCRunner); ok {
+			if err := gc.RunValueLogGC(0.5); err != nil {
+				return err
+			}
+		}
 	}
 	if err := sdb.db.Close(ctx); err != nil {
 		return err

@@ -6,8 +6,10 @@ package badgerdb_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"cloudeng.io/cmd/idu/internal/database/badgerdb"
 	"github.com/dgraph-io/badger/v4"
@@ -49,4 +51,73 @@ func TestBatch(t *testing.T) {
 		i++
 		return true
 	})
+}
+
+func TestCancelAndDoubleClose(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	tmpdir := t.TempDir()
+	db, err := badgerdb.Open(tmpdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Set(ctx, "/a", []byte("val-a"), true); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	if err := db.Set(ctx, "/b", []byte("val-b"), true); !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want context.Canceled", err)
+	}
+	if err := db.Close(context.Background()); err != nil {
+		t.Fatalf("first Close failed: %v", err)
+	}
+	if err := db.Close(context.Background()); err != nil {
+		t.Fatalf("second Close failed: %v", err)
+	}
+
+	rdb, err := badgerdb.Open(tmpdir, badgerdb.ReadOnly())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rdb.Set(context.Background(), "/c", []byte("val-c"), true); !errors.Is(err, badger.ErrReadOnlyTxn) {
+		t.Fatalf("got %v, want ErrReadOnlyTxn", err)
+	}
+	if err := rdb.Close(context.Background()); err != nil {
+		t.Fatalf("readonly first Close failed: %v", err)
+	}
+	if err := rdb.Close(context.Background()); err != nil {
+		t.Fatalf("readonly second Close failed: %v", err)
+	}
+}
+
+func TestLastLogAcrossBuckets(t *testing.T) {
+	ctx := context.Background()
+	tmpdir := t.TempDir()
+	db, err := badgerdb.Open(tmpdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close(ctx)
+
+	if err := db.Set(ctx, "/prefix/a", []byte("1"), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.LogError(ctx, "/err/1", time.Now(), []byte("boom")); err != nil {
+		t.Fatal(err)
+	}
+	t1 := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2025, 1, 2, 10, 0, 0, 0, time.UTC)
+	if err := db.Log(ctx, t1, t1.Add(time.Minute), []byte("first")); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Log(ctx, t2, t2.Add(time.Minute), []byte("second")); err != nil {
+		t.Fatal(err)
+	}
+
+	start, stop, detail, err := db.LastLog(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !start.Equal(t2) || !stop.Equal(t2.Add(time.Minute)) || string(detail) != "second" {
+		t.Fatalf("got (%v, %v, %q), want (%v, %v, %q)", start, stop, detail, t2, t2.Add(time.Minute), "second")
+	}
 }
