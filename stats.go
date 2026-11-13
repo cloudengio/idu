@@ -70,6 +70,9 @@ func saveStats(dir, file string, stats statsFileFormat) error {
 	if err := gob.NewEncoder(buf).Encode(stats); err != nil {
 		return err
 	}
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return err
+	}
 	basename := stats.Date.Format(time.DateTime)
 	basename = strings.TrimSuffix(basename, ".idustats") + ".idustats"
 	filename := filepath.Join(dir, basename)
@@ -92,7 +95,7 @@ type StatsFlags struct {
 type computeFlags struct {
 	ComputeN  int             `subcmd:"n,2000,number of top entries to compute"`
 	Progress  bool            `subcmd:"progress,false,show progress"`
-	StatsDir  string          `subcmd:"stats-dir,stats,'directory that stats files are written to'"`
+	StatsDir  string          `subcmd:"stats-dir,,'directory that stats files are written to, defaults to stats_dir from the configuration or stats'"`
 	StatsFile string          `subcmd:"stats-file,,'write stats to the specified file, rather than a directory, use - for stdout'"`
 	Prefix    flags.Repeating `subcmd:"prefix,,'prefix match expression'"`
 }
@@ -114,7 +117,7 @@ func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *comput
 
 	parser := boolexpr.NewParser(ctx, fwfs)
 
-	ctx, cfg, rdb, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
+	ctx, cfg, target, rdb, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
 	if err != nil {
 		return err
 	}
@@ -128,7 +131,7 @@ func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *comput
 		return err
 	}
 
-	sdb, err := st.computeStats(ctx, rdb, match, args[0], cfg.Calculator(), cf.ComputeN, cf.Progress)
+	sdb, err := st.computeStats(ctx, rdb, match, target, cfg.Calculator(), cf.ComputeN, cf.Progress)
 	if err != nil {
 		rdb.Close(ctx)
 		return err
@@ -137,12 +140,19 @@ func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *comput
 
 	// Save stats.
 	stats := statsFileFormat{
-		Prefix:     args[0],
+		Prefix:     target,
 		Date:       time.Now(),
 		Expression: match.String(),
 		Stats:      sdb,
 	}
-	return saveStats(cf.StatsDir, cf.StatsFile, stats)
+	statsDir := cf.StatsDir
+	if len(statsDir) == 0 {
+		statsDir = cfg.StatsDir
+	}
+	if len(statsDir) == 0 {
+		statsDir = "stats"
+	}
+	return saveStats(statsDir, cf.StatsFile, stats)
 }
 
 func (st *statsCmds) computeStats(ctx context.Context, db database.DB, match boolexpr.Matcher, prefix string, calc diskusage.Calculator, topN int, progress bool) (*reports.AllStats, error) {

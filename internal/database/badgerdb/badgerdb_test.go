@@ -121,3 +121,45 @@ func TestLastLogAcrossBuckets(t *testing.T) {
 		t.Fatalf("got (%v, %v, %q), want (%v, %v, %q)", start, stop, detail, t2, t2.Add(time.Minute), "second")
 	}
 }
+
+func TestCompactAndEmptyLastLog(t *testing.T) {
+	ctx := context.Background()
+	tmpdir := t.TempDir()
+
+	db, err := badgerdb.Open(tmpdir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Empty log bucket returns zero times and nil error.
+	start, stop, detail, err := db.LastLog(ctx)
+	if err != nil || !start.IsZero() || !stop.IsZero() || len(detail) != 0 {
+		t.Fatalf("expected empty LastLog without error, got (%v, %v, %v, %v)", start, stop, detail, err)
+	}
+
+	for i := range 20 {
+		if err := db.Set(ctx, fmt.Sprintf("/k/%02d", i), []byte("val"), true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.(*badgerdb.Database).Compact(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Writes after Compact still succeed before Close.
+	if err := db.Set(ctx, "/k/after", []byte("after"), true); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Read-only Compact returns badger.ErrReadOnlyTxn.
+	rdb, err := badgerdb.Open(tmpdir, badgerdb.ReadOnly())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rdb.Close(ctx)
+	if err := rdb.(*badgerdb.Database).Compact(ctx); !errors.Is(err, badger.ErrReadOnlyTxn) {
+		t.Fatalf("expected badger.ErrReadOnlyTxn, got %v", err)
+	}
+}

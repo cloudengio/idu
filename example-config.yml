@@ -1,35 +1,70 @@
-- prefix: /Users/cnicolaou
-  database: ./local-database/cnicolaou
-  concurrent_scans: 5000
-  concurrent_stats: 2000
-  concurrent_stats_threshold: 10
-  scan_size: 2000
-  exclusions:
-    - '.DS_Store$'
-    - '^/Users/cnicolaou/Library/CloudStorage'
-  layout:
-    calculator: block
-    parameters:
-      size: 4096
+# Example idu configuration.
+#
+# By default idu searches ., os.UserConfigDir()/idu, and $HOME/.config/idu for
+# config.yaml. When config.yaml exists, it reads it along with any files listed
+# under filesystem_config_files: and merges their filesystems: entries. If no config.yaml
+# exists, idu discovers and merges all .yaml/.yml (and .env) files in
+# os.UserConfigDir()/idu and $HOME/.config/idu.
+#
+# You can also point idu directly at this file with:
+#   idu --config=example-config.yml config show
 
-- prefix: /Users/cnicolaou/Dropbox (Personal)
-  database: ./local-database/dropbox
-  layout:
-    calculator: bytes
+vars:
+  db_root: ./local-database
 
-- prefix: /usr/local
-  database: ./local-database/usr-local
-  count_hardlinks_as_files: false
+common_exclusions: &common_exclusions
+  - '.DS_Store$'
 
-- prefix: /tmp
-  database: ./local-database/tmp
+# Split per-filesystem configs across files by placing config.yaml and one file
+# per filesystem (e.g. home.yaml, asbhatt.yaml) in $HOME/.config/idu:
+# filesystem_config_files:
+#   - home.yaml
+#   - dropbox.yaml
+#   - asbhatt.yaml
 
-- prefix: /labs/asbhatt
-  database: ./local-database/asbhatt
-  concurrent_scans: 5000
-  concurrent_stats: 2000
-  layout:
-    calculator: raid0
-    parameters:
-      stripe_size: 65536
-      num_stripes: 4
+filesystems:
+  - name: home
+    prefix: /Users/cnicolaou
+    database: ${db_root}/cnicolaou
+    stats_dir: ./stats/home
+    concurrent_scans: 5000
+    concurrent_stats: 2000
+    concurrent_stats_threshold: 10
+    scan_size: 2000
+    exclusions:
+      - <<: *common_exclusions
+      - '^/Users/cnicolaou/Library/CloudStorage'
+    compact_interval_days: 7
+    compact_interval: 12h
+    layout:
+      calculator: block
+      parameters:
+        size: 4KiB
+
+  - name: dropbox
+    prefix: /Users/cnicolaou/Dropbox (Personal)
+    database: ${db_root}/dropbox
+    exclusions:
+      - <<: *common_exclusions
+    layout:
+      calculator: bytes
+
+  - name: usr-local
+    prefix: /usr/local
+    database: ${db_root}/usr-local
+    count_hardlinks_as_files: false
+
+  - name: tmp
+    prefix: /tmp
+    database: ${db_root}/tmp
+
+  - name: asbhatt
+    prefix: /labs/asbhatt
+    database: ${db_root}/asbhatt
+    concurrent_scans: 5000
+    concurrent_stats: 2000
+    layout:
+      calculator: raid0
+      parameters:
+        stripe_size: 64KiB
+        num_stripes: 4

@@ -23,6 +23,7 @@ import (
 	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/cmdutil"
+	"cloudeng.io/cmdutil/cmdconfig"
 	"cloudeng.io/cmdutil/flags"
 	"cloudeng.io/cmdutil/profiling"
 	"cloudeng.io/cmdutil/subcmd"
@@ -44,7 +45,7 @@ var (
 )
 
 var commands = `name: idu
-summary: analyze disk usage using a database for incremental updates. Many of the commands accept an expression that is used to restrict which prefixes/directories and files are processed.
+summary: analyze disk usage using a database for incremental updates. Commands that accept a <prefix> accept either a filesystem prefix path or a configured filesystem name. Many of the commands accept an expression that is used to restrict which prefixes/directories and files are processed.
 commands:
   - name: expression-syntax
     summary: display the syntax for the expression language supported by commands such as analyze, find etc.
@@ -101,8 +102,8 @@ commands:
         arguments:
           - <report-directory>
 
-  - name: config
-    summary: describe the current configuration.
+  {{range subcmdExtension "config"}}{{.}}
+  {{end}}
 
   - name: database
     summary: database management commands.
@@ -113,10 +114,24 @@ commands:
         - <prefix>
 `
 
+type units int
+
+const (
+	unitsDecimal units = iota
+	unitsBinary
+)
+
+func (u units) EnumValues() map[string]units {
+	return map[string]units{
+		"decimal": unitsDecimal,
+		"binary":  unitsBinary,
+	}
+}
+
 type GlobalFlags struct {
 	ExitProfile profiling.ProfileFlag `subcmd:"profile,,'write a profile on exit; the format is <profile-name>:<file> and the flag may be repeated to request multiple profile types, use cpu to request cpu profiling in addition to predefined profiles in runtime/pprof'"`
-	ConfigFile  string                `subcmd:"config,$HOME/.idu.yml,configuration file"`
-	Units       string                `subcmd:"units,decimal,display usage in decimal (KB) or binary (KiB) formats"`
+	Config      cmdconfig.FilesFlag   `subcmd:"config,,'configuration files (.yaml, .yml, .env) or comma-separated list; defaults to config.yaml (and its filesystem_config_files) in the idu search path or all .yaml/.yml files in $HOME/.config/idu'"`
+	Units       flags.Enum[units]     `subcmd:"units,decimal,display usage in decimal (KB) or binary (KiB) formats"`
 	Verbose     int                   `subcmd:"v,0,lower values show more debugging output"`
 	LogDir      string                `subcmd:"log-dir,,directory to write log files to"`
 	Stderr      bool                  `subcmd:"stderr,false,write log messages to stderr"`
@@ -131,21 +146,32 @@ func init() {
 	config.DefaultScanSize = filewalk.DefaultScanSize
 }
 
+func requireConfig(runner subcmd.Runner) subcmd.Runner {
+	return func(ctx context.Context, flagValues any, args []string) error {
+		if loadErr, ok := cmdutil.ContextValue[configLoadError](ctx); ok && loadErr.err != nil {
+			return loadErr.err
+		}
+		return runner(ctx, flagValues, args)
+	}
+}
+
 func cli() *subcmd.CommandSetYAML {
-	cmdSet := subcmd.MustFromYAML(commands)
+	cmdSet := subcmd.MustFromYAMLTemplate(commands, newConfigExtension())
+	cmdSet.MustAddExtensions()
+	cmdSet.Set("config", "show").MustRunner(configShow, &struct{}{})
 
 	expr := &exprCmd{}
 	cmdSet.Set("expression-syntax").MustRunner(expr.explain, &struct{}{})
 
 	analyzer := &analyzeCmd{}
-	cmdSet.Set("analyze").MustRunner(analyzer.analyze, &analyzeFlags{})
+	cmdSet.Set("analyze").MustRunner(requireConfig(analyzer.analyze), &analyzeFlags{})
 
 	ls := &lister{}
-	cmdSet.Set("errors").MustRunner(ls.errors, &errorFlags{})
-	cmdSet.Set("logs").MustRunner(ls.logs, &logFlags{})
+	cmdSet.Set("errors").MustRunner(requireConfig(ls.errors), &errorFlags{})
+	cmdSet.Set("logs").MustRunner(requireConfig(ls.logs), &logFlags{})
 
 	statsCmd := &statsCmds{}
-	cmdSet.Set("stats", "compute").MustRunner(statsCmd.compute, &computeFlags{})
+	cmdSet.Set("stats", "compute").MustRunner(requireConfig(statsCmd.compute), &computeFlags{})
 
 	cmdSet.Set("stats", "view").MustRunner(statsCmd.view, &viewFlags{})
 
@@ -154,12 +180,10 @@ func cli() *subcmd.CommandSetYAML {
 	cmdSet.Set("reports", "locate").MustRunner(reportsCmds.locate, &locateReportsFlags{})
 
 	findCmds := &findCmds{}
-	cmdSet.Set("find").MustRunner(findCmds.find, &findFlags{})
-
-	cmdSet.Set("config").MustRunner(configManager, &configFlags{})
+	cmdSet.Set("find").MustRunner(requireConfig(findCmds.find), &findFlags{})
 
 	db := &dbCmd{}
-	cmdSet.Set("database", "locate").MustRunner(db.locate, &locateFlags{})
+	cmdSet.Set("database", "locate").MustRunner(requireConfig(db.locate), &locateFlags{})
 
 	globals := subcmd.GlobalFlagSet()
 	globals.MustRegisterFlagStruct(&globalFlags, nil, nil)
@@ -172,16 +196,12 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 
 	debugpkg.SetGCPercent(globalFlags.GCPercent)
 
-	err := flags.OneOf(globalFlags.Units).Validate("decimal", "decimal", "binary")
-	if err != nil {
-		return err
-	}
-	switch globalFlags.Units {
-	case "decimal":
+	switch globalFlags.Units.Value {
+	case unitsDecimal:
 		bytesPrinter = func(size int64) (float64, string) {
 			return diskusage.Decimal(size).Standardize()
 		}
-	case "binary":
+	case unitsBinary:
 		bytesPrinter = func(size int64) (float64, string) {
 			return diskusage.Binary(size).Standardize()
 		}
@@ -205,11 +225,11 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 		}
 	}()
 
-	cfg, err := config.ReadConfig(globalFlags.ConfigFile)
-	if err != nil {
-		return err
-	}
+	cfg, loc, err := config.Load(ctx, &globalFlags.Config)
 	globalConfig = cfg
+	ctx = cmdutil.ContextWithValue(ctx, cfg)
+	ctx = cmdutil.ContextWithValue(ctx, loc)
+	ctx = cmdutil.ContextWithValue(ctx, configLoadError{err: err})
 
 	var ln net.Listener
 	if port := globalFlags.HTTP; len(port) > 0 {

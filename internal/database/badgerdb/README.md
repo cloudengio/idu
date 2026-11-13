@@ -60,6 +60,13 @@ Close closes the database.
 
 
 ```go
+func (db *Database) Compact(ctx context.Context) error
+```
+Compact flushes pending batched writes, flattens Badger's LSM tree, and runs
+value log garbage collection.
+
+
+```go
 func (db *Database) DeleteErrors(ctx context.Context, prefix string) error
 ```
 

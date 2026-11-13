@@ -6,27 +6,36 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"io"
 	"os"
 
 	"cloudeng.io/cmd/idu/internal/config"
+	"cloudeng.io/cmdutil"
+	"cloudeng.io/cmdutil/cmdconfig"
+	"cloudeng.io/cmdutil/subcmd"
 )
 
-type configFlags struct {
-	Documentation bool `subcmd:"document,false,documentation for the configuration file"`
+type configLoadError struct {
+	err error
 }
 
-func configManager(_ context.Context, values interface{}, _ []string) error {
-	flagValues := values.(*configFlags)
-	if flagValues.Documentation {
-		fmt.Println(config.Documentation())
-		return nil
+func configCommands() cmdconfig.ConfigCommands[config.T] {
+	return cmdconfig.ConfigCommands[config.T]{
+		Summary:    "YAML configuration file options\n",
+		Describers: []func(io.Writer) error{config.DescribeLayouts},
 	}
-	_, err := config.ReadConfig(globalFlags.ConfigFile)
-	if err != nil {
-		return fmt.Errorf("failed to parse file %v: %v", globalFlags.ConfigFile, err)
+}
+
+func newConfigExtension() subcmd.Extension {
+	return cmdconfig.ConfigExtension(configCommands())
+}
+
+func configShow(ctx context.Context, flagValues any, args []string) error {
+	if loadErr, ok := cmdutil.ContextValue[configLoadError](ctx); ok && loadErr.err != nil {
+		if loc, ok := cmdutil.ContextValue[*cmdconfig.Located](ctx); ok {
+			config.PrintLocated(os.Stdout, loc)
+		}
+		return loadErr.err
 	}
-	buf, _ := os.ReadFile(globalFlags.ConfigFile)
-	fmt.Println(string(buf))
-	return err
+	return configCommands().Show(ctx, flagValues, args)
 }

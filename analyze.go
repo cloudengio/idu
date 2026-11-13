@@ -60,7 +60,7 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *anal
 		return nil
 	}
 	start := time.Now()
-	ctx, cfg, err := internal.LookupPrefix(ctx, globalConfig, args[0])
+	ctx, cfg, target, err := internal.LookupPrefix(ctx, globalConfig, args[0])
 	if err != nil {
 		return err
 	}
@@ -73,7 +73,7 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *anal
 	if err != nil {
 		return fmt.Errorf("open/create database: %v: %v", cfg.Database, err)
 	}
-	if err := sdb.DeleteErrors(ctx, args[0]); err != nil {
+	if err := sdb.DeleteErrors(ctx, target); err != nil {
 		return fmt.Errorf("DeleteErrors: %v", err)
 	}
 	defer sdb.Close(ctx)
@@ -120,7 +120,7 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *anal
 	fmt.Printf("configuration: scan size %v, concurrent scans %v, concurrent stats %v, concurrent stats threshold %v\n", wc.ScanSize, wc.ConcurrentScans, ic.AsyncStats, ic.AsyncThreshold)
 
 	errs := errors.M{}
-	errs.Append(walker.Walk(ctx, args[0]))
+	errs.Append(walker.Walk(ctx, target))
 	pcancel() // cancel progress tracker.
 	wg.Wait()
 

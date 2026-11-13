@@ -20,7 +20,7 @@ type locateFlags struct {
 
 func (db *dbCmd) locate(ctx context.Context, values interface{}, args []string) error {
 	lf := values.(*locateFlags)
-	_, prefix, err := internal.LookupPrefix(ctx, globalConfig, args[0])
+	_, prefix, _, err := internal.LookupPrefix(ctx, globalConfig, args[0])
 	if err != nil {
 		return err
 	}
