@@ -42,17 +42,24 @@ func (tr *TimeRangeFlags) FromTo() (from, to time.Time, set bool, err error) {
 	return
 }
 
-func LookupPrefix(ctx context.Context, all config.T, prefix string) (context.Context, config.Prefix, error) {
-	if filepath.IsLocal(prefix) || len(prefix) == 0 {
+// LookupPrefix resolves target (either a configuration name or a filesystem
+// path) to the matching Prefix configuration and the filesystem path to operate
+// on (Prefix.Prefix when matched by name, or the resolved path when matched
+// by prefix).
+func LookupPrefix(ctx context.Context, all config.T, target string) (context.Context, config.Prefix, string, error) {
+	if cfg, ok := all.ForName(target); ok {
+		return ctx, cfg, cfg.Prefix, nil
+	}
+	if filepath.IsLocal(target) || len(target) == 0 {
 		if dir, err := os.Getwd(); err == nil {
-			prefix = filepath.Join(dir, prefix)
+			target = filepath.Join(dir, target)
 		}
 	}
-	cfg, ok := all.ForPrefix(prefix)
+	cfg, ok := all.ForPrefix(target)
 	if !ok {
-		return ctx, cfg, fmt.Errorf("no configuration for %v", prefix)
+		return ctx, cfg, "", fmt.Errorf("no configuration for %v", target)
 	}
-	return ctx, cfg, nil
+	return ctx, cfg, target, nil
 }
 
 type prefixInfo struct {

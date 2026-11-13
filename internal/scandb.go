@@ -126,16 +126,16 @@ func OpenDatabase(ctx context.Context, cfg config.Prefix, readonly bool) (databa
 	}
 }
 
-func OpenPrefixAndDatabase(ctx context.Context, all config.T, prefix string, readonly bool) (context.Context, config.Prefix, database.DB, error) {
-	ctx, cfg, err := LookupPrefix(ctx, all, prefix)
+func OpenPrefixAndDatabase(ctx context.Context, all config.T, prefix string, readonly bool) (context.Context, config.Prefix, string, database.DB, error) {
+	ctx, cfg, target, err := LookupPrefix(ctx, all, prefix)
 	if err != nil {
-		return ctx, config.Prefix{}, nil, err
+		return ctx, config.Prefix{}, "", nil, err
 	}
 	db, err := OpenDatabase(ctx, cfg, readonly)
 	if err != nil {
-		return ctx, config.Prefix{}, nil, fmt.Errorf("failed to open database for %v in %v: %v", cfg.Prefix, cfg.Database, err)
+		return ctx, config.Prefix{}, "", nil, fmt.Errorf("failed to open database for %v in %v: %v", cfg.Prefix, cfg.Database, err)
 	}
-	return ctx, cfg, db, nil
+	return ctx, cfg, target, db, nil
 }
 
 type ScanDB interface {
@@ -149,7 +149,9 @@ type ScanDB interface {
 }
 
 type scanDB struct {
-	db database.DB
+	db              database.DB
+	compactInterval time.Duration
+	lastWritten     time.Time
 }
 
 func NewScanDB(ctx context.Context, cfg config.Prefix) (ScanDB, error) {
@@ -157,8 +159,18 @@ func NewScanDB(ctx context.Context, cfg config.Prefix) (ScanDB, error) {
 	if err != nil {
 		return nil, err
 	}
+	var lastWritten time.Time
+	if start, stop, _, err := db.LastLog(ctx); err == nil {
+		if !stop.IsZero() {
+			lastWritten = stop
+		} else if !start.IsZero() {
+			lastWritten = start
+		}
+	}
 	return &scanDB{
-		db: db,
+		db:              db,
+		compactInterval: cfg.CompactionInterval(),
+		lastWritten:     lastWritten,
 	}, nil
 }
 
@@ -170,14 +182,30 @@ type valueLogGCRunner interface {
 	RunValueLogGC(discardRatio float64) error
 }
 
+type compactor interface {
+	Compact(ctx context.Context) error
+}
+
 func (sdb *scanDB) LogAndClose(ctx context.Context, start, stop time.Time, detail []byte) error {
 	if err := sdb.db.Log(ctx, start, stop, detail); err != nil {
 		return err
 	}
 	if ctx.Err() == nil {
-		if gc, ok := sdb.db.(valueLogGCRunner); ok {
-			if err := gc.RunValueLogGC(0.5); err != nil {
-				return err
+		compacted := false
+		if sdb.compactInterval != 0 && !sdb.lastWritten.IsZero() && time.Since(sdb.lastWritten) > sdb.compactInterval {
+			if c, ok := sdb.db.(compactor); ok {
+				Log(ctx, LogProgress, "compacting database", "interval", sdb.compactInterval, "last_written", sdb.lastWritten)
+				if err := c.Compact(ctx); err != nil {
+					return err
+				}
+				compacted = true
+			}
+		}
+		if !compacted {
+			if gc, ok := sdb.db.(valueLogGCRunner); ok {
+				if err := gc.RunValueLogGC(0.5); err != nil {
+					return err
+				}
 			}
 		}
 	}

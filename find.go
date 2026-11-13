@@ -64,7 +64,7 @@ func (fc *findCmds) findFS(ctx context.Context, fwfs filewalk.FS, ff *findFlags,
 		return err
 	}
 
-	ctx, cfg, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
+	ctx, cfg, target, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
 	if err != nil {
 		return err
 	}
@@ -72,8 +72,8 @@ func (fc *findCmds) findFS(ctx context.Context, fwfs filewalk.FS, ff *findFlags,
 	sep := cfg.Separator
 	errs := &errors.M{}
 
-	err = db.Scan(ctx, args[0], func(_ context.Context, k string, v []byte) bool {
-		if !strings.HasPrefix(k, args[0]) {
+	err = db.Scan(ctx, target, func(_ context.Context, k string, v []byte) bool {
+		if !strings.HasPrefix(k, target) {
 			return false
 		}
 		var pi prefixinfo.T

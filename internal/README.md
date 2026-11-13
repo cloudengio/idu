@@ -40,8 +40,12 @@ func Log(ctx context.Context, level slog.Level, msg string, args ...interface{})
 
 ### Func LookupPrefix
 ```go
-func LookupPrefix(ctx context.Context, all config.T, prefix string) (context.Context, config.Prefix, error)
+func LookupPrefix(ctx context.Context, all config.T, target string) (context.Context, config.Prefix, string, error)
 ```
+LookupPrefix resolves target (either a configuration name or a filesystem
+path) to the matching Prefix configuration and the filesystem path to
+operate on (Prefix.Prefix when matched by name, or the resolved path when
+matched by prefix).
 
 ### Func OpenDatabase
 ```go
@@ -50,7 +54,7 @@ func OpenDatabase(ctx context.Context, cfg config.Prefix, readonly bool) (databa
 
 ### Func OpenPrefixAndDatabase
 ```go
-func OpenPrefixAndDatabase(ctx context.Context, all config.T, prefix string, readonly bool) (context.Context, config.Prefix, database.DB, error)
+func OpenPrefixAndDatabase(ctx context.Context, all config.T, prefix string, readonly bool) (context.Context, config.Prefix, string, database.DB, error)
 ```
 
 ### Func PrefixInfoAsFSInfo

@@ -45,13 +45,15 @@ func setupAnalyze(t *testing.T) (tmpDir, config, prefix string, tt *testtree) {
 		t.Fatal(err)
 	}
 
-	cfg := fmt.Sprintf(`- prefix: %v
-  database: %v/db
-  concurrent_scans: 2
-  concurrent_stats: 4
-  items: 2
-  exclusions:
-    - 'd-testtree[/\\]d00-01'
+	cfg := fmt.Sprintf(`filesystems:
+  - name: testtree
+    prefix: %v
+    database: %v/db
+    concurrent_scans: 2
+    concurrent_stats: 4
+    scan_size: 2
+    exclusions:
+      - 'd-testtree[/\\]d00-01'
 `, testTree, dbDir)
 	err = os.WriteFile(filepath.Join(tmpDir, "config.yaml"), []byte(cfg), 0600)
 	if err != nil {
@@ -153,7 +155,7 @@ func getLastLog(ctx context.Context, t *testing.T, db database.DB) (start, stop 
 }
 
 func verifyDB(ctx context.Context, t *testing.T, cfg config.T, fs filewalk.FS, arg0 string, scannable []string) ([]string, anaylzeSummary) {
-	ctx, _, db, err := internal.OpenPrefixAndDatabase(ctx, cfg, arg0, true)
+	ctx, _, _, db, err := internal.OpenPrefixAndDatabase(ctx, cfg, arg0, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,4 +337,44 @@ func testAnalyze(ctx context.Context, t *testing.T) {
 		nDirs-nAddedDirs-1, // one of the subdirectories has changed.
 		nAddedDirs,
 		nDirs)
+}
+
+func TestAnalyzeByName(t *testing.T) {
+	ctx := context.Background()
+	tmpDir, cfgFile, arg0, tt := setupAnalyze(t)
+	defer os.RemoveAll(tmpDir)
+
+	scannable := slices.Clone(tt.base())
+	sort.Strings(scannable)
+	scannable = removeExclusions(scannable)
+
+	cfg, err := config.ReadConfig(cfgFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	internal.LogDir = filepath.Join(tmpDir, "logs")
+	if err := os.MkdirAll(internal.LogDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	globalConfig = cfg
+
+	fs := localfs.New()
+	alz := &analyzeCmd{}
+	af := analyzeFlags{}
+	if err := alz.analyzeFS(ctx, fs, &af, []string{"testtree"}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, resolvedCfg, target, db, err := internal.OpenPrefixAndDatabase(ctx, cfg, "testtree", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close(ctx)
+	if resolvedCfg.Name != "testtree" || target != arg0 {
+		t.Fatalf("got name=%q target=%q, want testtree, %q", resolvedCfg.Name, target, arg0)
+	}
+	scanned := scanDB(ctx, t, db, fs, target)
+	if got, want := scanned, scannable; !slices.Equal(got, want) {
+		t.Errorf("got %d entries, want %d", len(got), len(want))
+	}
 }

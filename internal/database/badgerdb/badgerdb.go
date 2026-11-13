@@ -153,6 +153,31 @@ func (db *Database) RunValueLogGC(discardRatio float64) error {
 	}
 }
 
+// Compact flushes pending batched writes, flattens Badger's LSM tree, and
+// runs value log garbage collection.
+func (db *Database) Compact(ctx context.Context) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
+	if db.ReadOnly {
+		return badger.ErrReadOnlyTxn
+	}
+	if db.batch != nil {
+		if err := db.batch.flush(); err != nil {
+			return err
+		}
+		db.batch = newWriteBatch(db.bdb)
+	}
+	workers := runtime.GOMAXPROCS(0)
+	if workers < 1 {
+		workers = 1
+	}
+	if err := db.bdb.Flatten(workers); err != nil {
+		return err
+	}
+	return db.RunValueLogGC(0.5)
+}
+
 func (db *Database) canceled(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
@@ -451,6 +476,9 @@ func (db *Database) LastLog(ctx context.Context) (start, stop time.Time, detail 
 	lk, err := db.lastKey(logBucket)
 	if err != nil {
 		return time.Time{}, time.Time{}, nil, err
+	}
+	if len(lk) == 0 {
+		return time.Time{}, time.Time{}, nil, nil
 	}
 	var buf bytes.Buffer
 	if err := db.get(ctx, lk, &buf); err != nil {
