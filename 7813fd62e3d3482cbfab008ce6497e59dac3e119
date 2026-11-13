@@ -1,0 +1,14 @@
+--- Overview
+The ls errors output now shows when each error was recorded, and the database opens writable when erasing errors. Also updates the copyright annotation config.
+
+--- Key Changes
+ls errors (ls.go)
+  * Each error line now ends with its timestamp in RFC3339 format: <key>: <detail> (<time>).
+  * The database opens read-only unless --erase is set (!ef.Erase). Before this change it always opened read-only, even when erasing.
+
+Annotations (copyright-annotation.yaml)
+  * Copyright year changed from 2024 to 2026.
+  * cmdusage.go files are now excluded from copyright/license annotation.
+
+--- Breaking Changes
+None to the API. The ls errors output now has a timestamp at the end of each line, so scripts that parse this output may need updating.
