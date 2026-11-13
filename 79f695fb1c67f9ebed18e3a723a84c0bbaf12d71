@@ -1,0 +1,39 @@
+--- Overview
+This PR modernizes how idu uses BadgerDB. It fixes iterator, close and read-only handling, makes scans and streams faster, and tunes Badger options and logging.
+
+--- Key Changes
+internal/database/badgerdb
+  * Open: releases the file lock if badger.Open fails, and no longer creates a write batch for read-only databases.
+  * Close: uses sync.Once, so calling it more than once is safe and always returns the first result. Nil checks guard the batch, the DB and the unlock function.
+  * Set: returns badger.ErrReadOnlyTxn on read-only databases.
+  * canceled: no longer flushes the pending batch when the context is canceled.
+  * Iterators:
+    * Iterators now use opts.Prefix so they stay within a bucket.
+    * deleteBatch turns off value prefetching.
+    * scanFrom always uses Seek.
+  * Scan: stops as soon as it reaches a key outside the bucket, instead of skipping it and continuing.
+  * lastKey: finds the last key with one reverse seek instead of walking the whole bucket.
+  * Stream:
+    * Decodes each pb.KV from the z.Buffer as it goes, instead of building a full KV list.
+    * Sets MaxSize to 16 MiB.
+    * Drops ChooseKey and KeyToList.
+  * Adds RunValueLogGC(discardRatio), which repeats GC until Badger returns ErrNoRewrite.
+  * writeBatch: removes unused fields.
+  * Tests: adds TestCancelAndDoubleClose and TestLastLogAcrossBuckets.
+
+internal/scandb.go
+  * badgerLogger:
+    * Checks Verbosity before formatting a message.
+    * Debugf now logs at Debug level (it previously logged at Warn).
+    * Removes the WithLoggingLevel(badger.ERROR) setting, so filtering now depends only on Verbosity.
+  * Badger options:
+    * All databases: conflict detection and metrics off, 64 MiB index cache.
+    * Writable databases also get ZSTD compression, a 32 MiB block cache and L0 compaction on close.
+  * LogAndClose: runs value log GC with a 0.5 discard ratio before closing, unless the context has been canceled.
+
+--- Breaking Changes
+None to the API. Behavior changes:
+  * Canceling the context no longer flushes pending batched writes; they are written when Close is called.
+  * Set on a read-only database now returns an error.
+  * LogAndClose now runs value log GC, so closing may take longer.
+  * New tables in writable databases use ZSTD compression.
