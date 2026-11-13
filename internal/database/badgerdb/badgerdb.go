@@ -99,17 +99,17 @@ func Open[T Options](location string, opts ...Option) (database.DB, error) {
 	db := &Database{
 		location: location,
 	}
-	db.Options.Sub.Options = badger.DefaultOptions(location)
+	db.Sub.Options = badger.DefaultOptions(location)
 	for _, fn := range opts {
 		fn(&db.Options)
 	}
-	db.Options.Sub.Options = db.Options.Sub.Options.WithReadOnly(db.Options.ReadOnly)
+	db.Sub.Options = db.Sub.WithReadOnly(db.ReadOnly)
 
 	lockfile := filepath.Join(location, "applock")
 	db.lock = lockedfile.MutexAt(lockfile)
 	var unlock func()
 	var err error
-	if db.Options.ReadOnly {
+	if db.ReadOnly {
 		unlock, err = db.lock.RLockCreate()
 	} else {
 		unlock, err = db.lock.Lock()
@@ -118,7 +118,7 @@ func Open[T Options](location string, opts ...Option) (database.DB, error) {
 		return nil, err
 	}
 	db.unlock = unlock
-	osopts := osOptions(db.Options.Sub.Options)
+	osopts := osOptions(db.Sub.Options)
 	bdb, err := badger.Open(osopts)
 	if err != nil {
 		return nil, err

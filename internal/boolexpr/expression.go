@@ -236,7 +236,7 @@ func (pi prefixWithName) Path() string {
 }
 
 func (pi prefixWithName) NumEntries() int64 {
-	return int64(len(pi.T.InfoList()))
+	return int64(len(pi.InfoList()))
 }
 
 func AlwaysMatch(p *boolexpr.Parser) Matcher {

@@ -135,7 +135,7 @@ func cl() string {
 	out := strings.Builder{}
 	for _, arg := range os.Args {
 		if strings.Contains(arg, " \t") {
-			out.WriteString(fmt.Sprintf("%q", arg))
+			fmt.Fprintf(&out, "%q", arg)
 		} else {
 			out.WriteString(arg)
 		}

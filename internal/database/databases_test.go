@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -18,7 +19,6 @@ import (
 	"cloudeng.io/cmd/idu/internal/database"
 	"cloudeng.io/cmd/idu/internal/database/badgerdb"
 	"github.com/dgraph-io/badger/v4"
-	"golang.org/x/exp/slices"
 )
 
 func badgerFactory(t *testing.T, dir, _ string, readonly bool) database.DB {

@@ -93,17 +93,76 @@ func cmpInfoList(t *testing.T, _ prefixinfo.T, got, want file.InfoList) {
 	}
 }
 
+type binaryEncodingTC struct {
+	fi           []file.Info
+	uids, gids   []string
+	uid1s, gid1s []string
+}
+
+func assertBinaryEncodingRoundTrip(t *testing.T, fn prefixinfo.RoundTripper, pi *prefixinfo.T, tc binaryEncodingTC, uid, gid int64, expectedDevice uint64) {
+	t.Helper()
+	npi := fn(t, pi)
+
+	if !pi.Unchanged(npi) {
+		t.Errorf("prefix info is changed")
+	}
+
+	nuid, ngid := npi.UserGroup()
+	if got, want := uid, nuid; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if got, want := gid, ngid; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
+	if got, want := npi.Blocks(), pi.Blocks(); got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
+	if got, want := npi.Mode(), pi.Mode(); got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
+	if got, want := npi.ModTime(), pi.ModTime(); !got.Equal(want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
+	cmpInfoList(t, npi, npi.InfoList(), pi.InfoList())
+
+	scanAndMatchUsers(t, pi, uid, tc.uids)
+	scanAndMatchUsers(t, pi, uid+1, tc.uid1s)
+	scanAndMatchGroups(t, pi, gid, tc.gids)
+	scanAndMatchGroups(t, pi, gid+1, tc.gid1s)
+
+	dev, ino := npi.DevIno()
+	if got, want := dev, expectedDevice; got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if got, want := ino, uint64(200); got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+
+	for j, fi := range npi.InfoList() {
+		xattr := pi.XAttrInfo(fi)
+		if got, want := xattr.Device, expectedDevice; got != want {
+			t.Errorf("got %v, want %v", got, want)
+		}
+		if got, want := xattr.FileID, uint64(100); got != want {
+			t.Errorf("got %v, want %v", got, want)
+		}
+		if got, want := xattr.Blocks, int64(j+1); got != want {
+			t.Errorf("got %v, want %v", got, want)
+		}
+	}
+}
+
 func TestBinaryEncoding(t *testing.T) {
 	modTime := time.Now().Truncate(0)
 	var uid, gid int64 = 100, 2
 
 	ug00, ug10, ug01, ug11, ugOther := testutil.TestdataIDCombinationsFiles(modTime, uid, gid, 100)
 
-	for _, tc := range []struct {
-		fi           []file.Info
-		uids, gids   []string
-		uid1s, gid1s []string
-	}{
+	for _, tc := range []binaryEncodingTC{
 		{ug00, []string{"0", "1"}, []string{"0", "1"}, nil, nil},
 		{ug10, []string{"0"}, []string{"0", "1"}, []string{"1"}, nil},
 		{ug01, []string{"0", "1"}, []string{"0"}, nil, []string{"1"}},
@@ -117,63 +176,7 @@ func TestBinaryEncoding(t *testing.T) {
 		for _, fn := range []prefixinfo.RoundTripper{
 			prefixinfo.GobRoundTrip, prefixinfo.BinaryRoundTrip,
 		} {
-			npi := fn(t, &pi)
-
-			if !pi.Unchanged(npi) {
-				t.Errorf("prefix info is changed")
-			}
-
-			nuid, ngid := npi.UserGroup()
-			if got, want := uid, nuid; got != want {
-				t.Errorf("got %v, want %v", got, want)
-			}
-			if got, want := gid, ngid; got != want {
-				t.Errorf("got %v, want %v", got, want)
-			}
-
-			if got, want := npi.Blocks(), pi.Blocks(); got != want {
-				t.Errorf("got %v, want %v", got, want)
-			}
-
-			if got, want := npi.Mode(), pi.Mode(); got != want {
-				t.Errorf("got %v, want %v", got, want)
-			}
-
-			if got, want := npi.ModTime(), pi.ModTime(); !got.Equal(want) {
-				t.Errorf("got %v, want %v", got, want)
-			}
-
-			cmpInfoList(t, npi, npi.InfoList(), pi.InfoList())
-
-			scanAndMatchUsers(t, &pi, uid, tc.uids)
-
-			scanAndMatchUsers(t, &pi, uid+1, tc.uid1s)
-
-			scanAndMatchGroups(t, &pi, gid, tc.gids)
-
-			scanAndMatchGroups(t, &pi, gid+1, tc.gid1s)
-
-			dev, ino := npi.DevIno()
-			if got, want := dev, expectedDevice; got != want {
-				t.Errorf("got %v, want %v", got, want)
-			}
-			if got, want := ino, uint64(200); got != want {
-				t.Errorf("got %v, want %v", got, want)
-			}
-
-			for j, fi := range npi.InfoList() {
-				xattr := pi.XAttrInfo(fi)
-				if got, want := xattr.Device, expectedDevice; got != want {
-					t.Errorf("got %v, want %v", got, want)
-				}
-				if got, want := xattr.FileID, uint64(100); got != want {
-					t.Errorf("got %v, want %v", got, want)
-				}
-				if got, want := xattr.Blocks, int64(j+1); got != want {
-					t.Errorf("got %v, want %v", got, want)
-				}
-
-			}
+			assertBinaryEncodingRoundTrip(t, fn, &pi, tc, uid, gid, expectedDevice)
 		}
 	}
 }
