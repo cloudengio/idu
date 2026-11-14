@@ -145,6 +145,11 @@ func (p *Prefix) Exclude(path string) bool
 ```
 Exclude returns true if path should be excluded/ignored.
 
+```go
+func (p *Prefix) SeparatorOrDefault() string
+```
+SeparatorOrDefault returns the configured separator or "/".
+
 
 ### Type RAID0
 ```go

@@ -7,11 +7,14 @@ package internal
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
 	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/cmd/idu/internal/database"
+	"cloudeng.io/cmd/idu/internal/prefixinfo"
+	"cloudeng.io/file"
 )
 
 type compactSpyDB struct {
@@ -107,4 +110,84 @@ func TestScanDBCompactionInterval(t *testing.T) {
 	}); got != 1 {
 		t.Fatalf("stale write (27h > 26h): compacted=%d, want 1", got)
 	}
+}
+
+func makeTestPrefixInfo(size int64) prefixinfo.T {
+	dirInfo := file.NewInfo("dir", 4096, 0o755|1<<31, time.Now(), file.XAttr{UID: 1, GID: 1, Blocks: 8})
+	pi := prefixinfo.New("dir", dirInfo)
+	pi.SetInfoList(file.InfoList{
+		file.NewInfo("f1", size, 0o644, time.Now(), file.XAttr{UID: 1, GID: 1, Blocks: size / 512}),
+	})
+	return pi
+}
+
+func TestScanDBDeletePrefixSiblings(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Prefix{Prefix: "/", Database: filepath.Join(t.TempDir(), "db"), Separator: "/"}
+	sdb, err := NewScanDB(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"/a", "/a/b", "/a-b", "/ab"} {
+		pi := makeTestPrefixInfo(10)
+		if err := sdb.SetPrefixInfo(ctx, key, false, &pi); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = sdb.Close(ctx)
+
+	sdb, err = NewScanDB(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"/a", "/a/b", "/a-b", "/ab"} {
+		if err := sdb.LogError(ctx, key, time.Now(), []byte("oops")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := sdb.DeletePrefix(ctx, "/a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sdb.DeleteErrors(ctx, "/a"); err != nil {
+		t.Fatal(err)
+	}
+	// A delete must not be undone by a batched write that is still
+	// pending when it is issued.
+	pi := makeTestPrefixInfo(10)
+	if err := sdb.SetPrefixInfo(ctx, "/c", false, &pi); err != nil {
+		t.Fatal(err)
+	}
+	if err := sdb.DeletePrefix(ctx, "/c"); err != nil {
+		t.Fatal(err)
+	}
+	_ = sdb.Close(ctx)
+
+	prefixes, errs := readAllKeys(ctx, t, cfg)
+	want := []string{"/a-b", "/ab"}
+	if !reflect.DeepEqual(prefixes, want) || !reflect.DeepEqual(errs, want) {
+		t.Errorf("got prefixes %v, errors %v, want %v", prefixes, errs, want)
+	}
+}
+
+// readAllKeys returns the keys in the prefix and error buckets.
+func readAllKeys(ctx context.Context, t *testing.T, cfg config.Prefix) (prefixes, errs []string) {
+	t.Helper()
+	rodb, err := OpenDatabase(ctx, cfg, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rodb.Close(ctx)
+	if err := rodb.Scan(ctx, "", func(_ context.Context, k string, _ []byte) bool {
+		prefixes = append(prefixes, k)
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rodb.VisitErrors(ctx, "", func(_ context.Context, k string, _ time.Time, _ []byte) bool {
+		errs = append(errs, k)
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return prefixes, errs
 }

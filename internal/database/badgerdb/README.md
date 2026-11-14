@@ -67,6 +67,18 @@ value log garbage collection.
 
 
 ```go
+func (db *Database) Delete(ctx context.Context, prefix string) error
+```
+Delete deletes the value stored for exactly prefix.
+
+
+```go
+func (db *Database) DeleteError(ctx context.Context, key string) error
+```
+DeleteError deletes the error logged for exactly key.
+
+
+```go
 func (db *Database) DeleteErrors(ctx context.Context, prefix string) error
 ```
 
