@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -45,8 +46,11 @@ type Options struct {
 // Database represents a badger database.
 type Database struct {
 	database.Options[Options]
-	location  string
-	bdb       *badger.DB
+	location string
+	bdb      *badger.DB
+	// batchMu guards replacing batch, which is safe for concurrent use
+	// in its own right, when it is flushed.
+	batchMu   sync.RWMutex
 	batch     *writeBatch
 	lock      *lockedfile.Mutex
 	unlock    func()
@@ -68,10 +72,12 @@ type Database struct {
 // to the key.
 
 const (
-	inodeBucket  = 0xf0
-	prefixBucket = 0xf1
-	logBucket    = 0xf2
-	errorBucket  = 0xf3
+	inodeBucket   = 0xf0
+	prefixBucket  = 0xf1
+	logBucket     = 0xf2
+	errorBucket   = 0xf3
+	summaryBucket = 0xf4
+	metaBucket    = 0xf5
 )
 
 var bufPool = sync.Pool{
@@ -162,11 +168,8 @@ func (db *Database) Compact(ctx context.Context) error {
 	if db.ReadOnly {
 		return badger.ErrReadOnlyTxn
 	}
-	if db.batch != nil {
-		if err := db.batch.flush(); err != nil {
-			return err
-		}
-		db.batch = newWriteBatch(db.bdb)
+	if err := db.Flush(ctx); err != nil {
+		return err
 	}
 	workers := runtime.GOMAXPROCS(0)
 	if workers < 1 {
@@ -227,7 +230,7 @@ func (db *Database) Set(ctx context.Context, prefix string, val []byte, batch bo
 	kb := keyForBucket(prefixBucket, []byte(prefix))
 	defer bufPool.Put(kb)
 	if batch {
-		return db.batch.set(kb.Bytes(), val)
+		return db.batchSet(kb.Bytes(), val)
 	}
 	return db.set(ctx, kb.Bytes(), val)
 }
@@ -239,6 +242,113 @@ func (db *Database) Get(ctx context.Context, prefix string, buf *bytes.Buffer) e
 	if err != nil {
 		return err
 	}
+	return nil
+}
+
+// SetSummary stores a precomputed summary value in the summary bucket.
+func (db *Database) SetSummary(ctx context.Context, key string, val []byte, batch bool) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
+	if db.ReadOnly {
+		return badger.ErrReadOnlyTxn
+	}
+	kb := keyForBucket(summaryBucket, []byte(key))
+	defer bufPool.Put(kb)
+	if batch {
+		return db.batchSet(kb.Bytes(), val)
+	}
+	return db.set(ctx, kb.Bytes(), val)
+}
+
+// DeleteSummary deletes exactKey and any descendant keys matching childPrefix
+// from the summary bucket without affecting sibling prefixes.
+func (db *Database) DeleteSummary(ctx context.Context, exactKey, childPrefix string) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
+	if db.ReadOnly {
+		return badger.ErrReadOnlyTxn
+	}
+	if exactKey != "" && (childPrefix == "" || !strings.HasPrefix(exactKey, childPrefix)) {
+		if err := db.deleteKey(summaryBucket, exactKey); err != nil {
+			return err
+		}
+	}
+	if childPrefix != "" {
+		cb := keyForBucket(summaryBucket, []byte(childPrefix))
+		defer bufPool.Put(cb)
+		return db.deletePrefix(ctx, cb.Bytes())
+	}
+	return nil
+}
+
+// SetMeta stores a metadata entry in the metadata bucket.
+func (db *Database) SetMeta(ctx context.Context, key string, val []byte) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
+	if db.ReadOnly {
+		return badger.ErrReadOnlyTxn
+	}
+	kb := keyForBucket(metaBucket, []byte(key))
+	defer bufPool.Put(kb)
+	return db.set(ctx, kb.Bytes(), val)
+}
+
+// GetMeta retrieves a metadata entry from the metadata bucket into buf.
+func (db *Database) GetMeta(ctx context.Context, key string, buf *bytes.Buffer) error {
+	kb := keyForBucket(metaBucket, []byte(key))
+	defer bufPool.Put(kb)
+	return db.get(ctx, kb.Bytes(), buf)
+}
+
+func (db *Database) deleteKey(bucket byte, key string) error {
+	kb := keyForBucket(bucket, []byte(key))
+	defer bufPool.Put(kb)
+	return db.bdb.Update(func(tx *badger.Txn) error {
+		if _, err := tx.Get(kb.Bytes()); err != nil {
+			if err == badger.ErrKeyNotFound {
+				return nil
+			}
+			return err
+		}
+		return tx.Delete(kb.Bytes())
+	})
+}
+
+// Delete deletes the value stored for exactly prefix.
+func (db *Database) Delete(ctx context.Context, prefix string) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
+	if db.ReadOnly {
+		return badger.ErrReadOnlyTxn
+	}
+	return db.deleteKey(prefixBucket, prefix)
+}
+
+func (db *Database) batchSet(key, val []byte) error {
+	db.batchMu.RLock()
+	defer db.batchMu.RUnlock()
+	return db.batch.set(key, val)
+}
+
+// Flush persists any pending batched writes. It is safe to call
+// concurrently with batched writes.
+func (db *Database) Flush(ctx context.Context) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
+	db.batchMu.Lock()
+	defer db.batchMu.Unlock()
+	if db.batch == nil {
+		return nil
+	}
+	if err := db.batch.flush(); err != nil {
+		return err
+	}
+	db.batch = newWriteBatch(db.bdb)
 	return nil
 }
 
@@ -278,6 +388,14 @@ func (db *Database) deletePrefix(ctx context.Context, prefix []byte) error {
 			return err
 		}
 	}
+}
+
+// DeleteError deletes the error logged for exactly key.
+func (db *Database) DeleteError(ctx context.Context, key string) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
+	return db.deleteKey(errorBucket, key)
 }
 
 func (db *Database) DeleteErrors(ctx context.Context, prefix string) error {
@@ -362,6 +480,26 @@ func (db *Database) Scan(ctx context.Context, path string, visitor func(ctx cont
 			return errScanDone
 		}
 		if !visitor(ctx, key[1:], val) {
+			return errScanDone
+		}
+		return nil
+	})
+}
+
+// ScanSummaries iterates over entries in the summary bucket starting at
+// exactKey and stopping once keys no longer match exactKey or childPrefix.
+func (db *Database) ScanSummaries(ctx context.Context, exactKey, childPrefix string, visitor func(ctx context.Context, key string, val []byte) bool) error {
+	return db.scanFrom(ctx, summaryBucket, []byte(exactKey), func(ctx context.Context, key string, val []byte) error {
+		if len(key) == 0 || key[0] != summaryBucket {
+			return errScanDone
+		}
+		k := key[1:]
+		if exactKey != "" || childPrefix != "" {
+			if k != exactKey && (childPrefix == "" || !strings.HasPrefix(k, childPrefix)) {
+				return errScanDone
+			}
+		}
+		if !visitor(ctx, k, val) {
 			return errScanDone
 		}
 		return nil
@@ -514,9 +652,11 @@ func (db *Database) VisitLogs(ctx context.Context, start, stop time.Time, visito
 func (db *Database) Close(_ context.Context) error {
 	db.closeOnce.Do(func() {
 		var errs errors.M
+		db.batchMu.Lock()
 		if db.batch != nil {
 			errs.Append(db.batch.flush())
 		}
+		db.batchMu.Unlock()
 		if db.bdb != nil {
 			errs.Append(db.bdb.Close())
 		}

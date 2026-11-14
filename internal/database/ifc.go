@@ -42,8 +42,18 @@ type DB interface {
 	// its contents in the supplied bytes.Buffer.
 	Get(ctx context.Context, prefix string, buf *bytes.Buffer) error
 
+	// Delete deletes the value associated with exactly prefix, if any.
+	Delete(ctx context.Context, prefix string) error
+
 	// DeletePrefix deletes all keys that have the specified prefix.
 	DeletePrefix(ctx context.Context, prefix string) error
+
+	// Flush persists any pending batched writes. It is safe to call
+	// concurrently with batched writes.
+	Flush(ctx context.Context) error
+
+	// DeleteError deletes the error logged for exactly key, if any.
+	DeleteError(ctx context.Context, key string) error
 
 	// DeleteErrors deletes all errors that have the specified prefix.
 	DeleteErrors(ctx context.Context, prefix string) error
@@ -79,6 +89,24 @@ type DB interface {
 
 	// Clear clears all of the log or error entries.
 	Clear(ctx context.Context, logs, errors bool) error
+
+	// SetSummary stores a precomputed summary record for key in the summary bucket.
+	SetSummary(ctx context.Context, key string, value []byte, batch bool) error
+
+	// DeleteSummary deletes the summary entry matching exactKey and any
+	// descendant summary entries matching childPrefix.
+	DeleteSummary(ctx context.Context, exactKey, childPrefix string) error
+
+	// ScanSummaries iterates over summary entries in lexicographical key order,
+	// starting at exactKey and stopping once keys no longer match exactKey or
+	// childPrefix (when either is non-empty).
+	ScanSummaries(ctx context.Context, exactKey, childPrefix string, visitor func(ctx context.Context, key string, val []byte) bool) error
+
+	// SetMeta stores a metadata value in the metadata bucket.
+	SetMeta(ctx context.Context, key string, value []byte) error
+
+	// GetMeta retrieves a metadata value from the metadata bucket into buf.
+	GetMeta(ctx context.Context, key string, buf *bytes.Buffer) error
 
 	// Close closes the database.
 	Close(context.Context) error
