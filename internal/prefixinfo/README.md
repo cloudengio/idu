@@ -102,7 +102,7 @@ type T struct {
 ### Functions
 
 ```go
-func New(pathname string, info file.Info) T
+func New(_ string, info file.Info) T
 ```
 New creates a new PrefixInfo for the supplied file.Info. It assumes that the
 supplied file.Info contains a file.XAttr in its Sys() value.

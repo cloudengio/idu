@@ -8,6 +8,7 @@ require (
 	cloudeng.io/errors v0.0.14-0.20260312171538-61fcde6ce278
 	cloudeng.io/file v0.0.0-20261112230521-bb2e0354f2e1
 	cloudeng.io/os v0.0.0-20261112230521-bb2e0354f2e1
+	cloudeng.io/sync v0.0.12-0.20260804222138-e9281ed260ba
 	cloudeng.io/sys v0.0.0-20261112230521-bb2e0354f2e1
 	cloudeng.io/text v0.0.16-0.20260624171915-da98fe9dec2b
 	github.com/dgraph-io/badger/v4 v4.9.6
@@ -23,7 +24,6 @@ require (
 	cloudeng.io/aws v0.0.0-20240212200506-2ec62caddad8 // indirect
 	cloudeng.io/logging v0.0.0-20261112230521-bb2e0354f2e1 // indirect
 	cloudeng.io/path v0.0.10-0.20260312171538-61fcde6ce278 // indirect
-	cloudeng.io/sync v0.0.12-0.20260804222138-e9281ed260ba // indirect
 	cloudeng.io/types v0.0.0-20261112230521-bb2e0354f2e1 // indirect
 	cloudeng.io/windows v0.0.0-20251203211350-c30caae1cc5e // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
