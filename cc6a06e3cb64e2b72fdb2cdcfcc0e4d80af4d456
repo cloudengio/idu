@@ -1,0 +1,16 @@
+--- Overview
+Fixes a race in the badger database where flushing the write batch could run at the same time as batched writes. Adds a Flush method to the DB interface so pending batched writes can be persisted explicitly.
+
+--- Key Changes
+  * internal/database
+    * Added Flush(ctx) error to the DB interface and its README.
+  * internal/database/badgerdb
+    * Added a batchMu sync.RWMutex. Batched Set calls hold a read lock through the new batchSet helper. Replacing the batch requires the write lock.
+    * Added Flush, which checks for context cancellation, flushes the current batch under the write lock and replaces it with a new one. It does nothing if there is no batch.
+    * Compact now calls Flush instead of handling the batch itself.
+    * Close now flushes the batch while holding batchMu.
+  * internal (scanDB)
+    * DeletePrefix now flushes pending batched writes before deleting. Otherwise writes still in the batch could land after the delete and undo it.
+
+--- Breaking Changes
+  * The database.DB interface now requires a Flush(ctx context.Context) error method. Any other implementations must add it.
