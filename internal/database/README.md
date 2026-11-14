@@ -37,6 +37,10 @@ type DB interface {
 	// DeletePrefix deletes all keys that have the specified prefix.
 	DeletePrefix(ctx context.Context, prefix string) error
 
+	// Flush persists any pending batched writes. It is safe to call
+	// concurrently with batched writes.
+	Flush(ctx context.Context) error
+
 	// DeleteErrors deletes all errors that have the specified prefix.
 	DeleteErrors(ctx context.Context, prefix string) error
 

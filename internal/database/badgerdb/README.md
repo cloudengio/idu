@@ -77,6 +77,13 @@ func (db *Database) DeletePrefix(ctx context.Context, prefix string) error
 
 
 ```go
+func (db *Database) Flush(ctx context.Context) error
+```
+Flush persists any pending batched writes. It is safe to call concurrently
+with batched writes.
+
+
+```go
 func (db *Database) Get(ctx context.Context, prefix string, buf *bytes.Buffer) error
 ```
 

@@ -216,6 +216,12 @@ func (sdb *scanDB) LogAndClose(ctx context.Context, start, stop time.Time, detai
 }
 
 func (sdb *scanDB) DeletePrefix(ctx context.Context, prefix string) error {
+	// Deletes are not batched, so flush any pending batched writes for
+	// prefix or its descendants to prevent them from being written after,
+	// and hence undoing, the delete.
+	if err := sdb.db.Flush(ctx); err != nil {
+		return err
+	}
 	return sdb.db.DeletePrefix(ctx, prefix)
 }
 
