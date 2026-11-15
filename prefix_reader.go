@@ -60,17 +60,16 @@ type prefixJob struct {
 // prefixReader implements readPrefixesInOrder: a single goroutine scans the
 // summary keys and creates batches of prefixes, which are read concurrently
 // by a pool of reader goroutines and then reordered by a syncsort.Sequencer.
+// The sequencer bounds the number of outstanding batches, including those
+// that have been read out of order and are waiting to be consumed.
 type prefixReader struct {
 	db                         database.DB
 	sep, exactKey, childPrefix string
-	// tokens bounds the number of outstanding batches, including those
-	// that have been read out of order and are held by the sequencer.
-	tokens  chan struct{}
-	jobs    chan prefixJob
-	results chan syncsort.Item[*prefixBatch]
-	seq     *syncsort.Sequencer[*prefixBatch]
-	scanErr chan error
-	wg      sync.WaitGroup
+	jobs                       chan prefixJob
+	results                    chan syncsort.Item[*prefixBatch]
+	seq                        *syncsort.Sequencer[*prefixBatch]
+	scanErr                    chan error
+	wg                         sync.WaitGroup
 }
 
 // readPrefixesInOrder calls visit with the metadata for every prefix whose
@@ -88,11 +87,11 @@ func readPrefixesInOrder(ctx context.Context, db database.DB, sep, exactKey, chi
 		sep:         sep,
 		exactKey:    exactKey,
 		childPrefix: childPrefix,
-		tokens:      make(chan struct{}, readers*prefixBatchesPerReader),
 		jobs:        make(chan prefixJob, readers),
 		results:     results,
-		seq:         syncsort.NewSequencer(ctx, results),
-		scanErr:     make(chan error, 1),
+		seq: syncsort.NewSequencer(ctx, results,
+			syncsort.WithMaxBuffered(readers*prefixBatchesPerReader)),
+		scanErr: make(chan error, 1),
 	}
 	go pr.scan(ctx)
 	for range readers {
@@ -111,15 +110,15 @@ func readPrefixesInOrder(ctx context.Context, db database.DB, sep, exactKey, chi
 func (pr *prefixReader) scan(ctx context.Context) {
 	defer close(pr.jobs)
 	pr.scanErr <- scanBatches(ctx, pr.db, pr.sep, pr.exactKey, pr.childPrefix, func(b *prefixBatch, prefixes []string) bool {
-		select {
-		case pr.tokens <- struct{}{}:
-		case <-ctx.Done():
+		// The order of calls to NextItem determines the order in which
+		// the batches are scanned. NextItem blocks whilst the maximum
+		// number of batches are outstanding.
+		item, err := pr.seq.NextItem(ctx, b)
+		if err != nil {
 			return false
 		}
-		// The order of calls to NextItem determines the order in which
-		// the batches are scanned.
 		select {
-		case pr.jobs <- prefixJob{item: pr.seq.NextItem(b), prefixes: prefixes}:
+		case pr.jobs <- prefixJob{item: item, prefixes: prefixes}:
 			return true
 		case <-ctx.Done():
 			return false
@@ -132,6 +131,8 @@ func (pr *prefixReader) read(ctx context.Context) {
 		j.item.V.read(ctx, pr.db, j.prefixes)
 		select {
 		case pr.results <- j.item:
+		case <-pr.seq.Done():
+			return
 		case <-ctx.Done():
 			return
 		}
@@ -140,12 +141,7 @@ func (pr *prefixReader) read(ctx context.Context) {
 
 func (pr *prefixReader) consume(visit func(*prefixEntry)) error {
 	for pr.seq.Scan() {
-		// Scan returns true, with a nil item, when the context is canceled.
-		if pr.seq.Err() != nil {
-			break
-		}
 		b := pr.seq.Item()
-		<-pr.tokens
 		if b.err != nil {
 			return b.err
 		}
@@ -158,9 +154,8 @@ func (pr *prefixReader) consume(visit func(*prefixEntry)) error {
 
 // wait must be called after the context passed to scan and read is canceled.
 func (pr *prefixReader) wait(err error) error {
-	// Drain the sequencer so that its goroutine exits.
-	for pr.seq.Scan() {
-	}
+	pr.seq.Stop()
+	<-pr.seq.Done()
 	pr.wg.Wait()
 	if serr := <-pr.scanErr; err == nil && serr != nil && !errors.Is(serr, context.Canceled) {
 		err = serr
