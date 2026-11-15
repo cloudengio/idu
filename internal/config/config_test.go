@@ -59,7 +59,12 @@ func TestSimple(t *testing.T) {
 	if got, want := cfg.Filesystems[0].Prefix, "/tmp"; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	if got, want := cfg.Filesystems[0].Calculator().Calculate(1, 1), int64(4096); got != want {
+	// The configured block size is ignored on POSIX systems since the
+	// number of 512 byte blocks allocated is reported for every file.
+	if got, want := cfg.Filesystems[0].Calculator().Calculate(1, 1), int64(512); got != want {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if got, want := cfg.Filesystems[1].Calculator().String(), "allocated"; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 	if got, want := cfg.Filesystems[2].Calculator().Calculate(1, 1), int64(65536*4); got != want {
@@ -228,7 +233,7 @@ filesystems:
 	if got, want := data.Database, "/var/db/idu/data"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
-	if got, want := data.Calculator().Calculate(1, 1), int64(8192); got != want {
+	if got, want := data.Calculator().Calculate(1, 1), int64(512); got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }
