@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  test-lint:
     uses: cloudengio/.github/.github/workflows/go-test-multimod.yml@main
     with:
       runner: |
