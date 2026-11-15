@@ -89,6 +89,13 @@ func (db *Database) DeletePrefix(ctx context.Context, prefix string) error
 
 
 ```go
+func (db *Database) DeleteSummary(ctx context.Context, exactKey, childPrefix string) error
+```
+DeleteSummary deletes exactKey and any descendant keys matching childPrefix
+from the summary bucket without affecting sibling prefixes.
+
+
+```go
 func (db *Database) Flush(ctx context.Context) error
 ```
 Flush persists any pending batched writes. It is safe to call concurrently
@@ -98,6 +105,12 @@ with batched writes.
 ```go
 func (db *Database) Get(ctx context.Context, prefix string, buf *bytes.Buffer) error
 ```
+
+
+```go
+func (db *Database) GetMeta(ctx context.Context, key string, buf *bytes.Buffer) error
+```
+GetMeta retrieves a metadata entry from the metadata bucket into buf.
 
 
 ```go
@@ -121,8 +134,27 @@ func (db *Database) Scan(ctx context.Context, path string, visitor func(ctx cont
 
 
 ```go
+func (db *Database) ScanSummaries(ctx context.Context, exactKey, childPrefix string, visitor func(ctx context.Context, key string, val []byte) bool) error
+```
+ScanSummaries iterates over entries in the summary bucket starting at
+exactKey and stopping once keys no longer match exactKey or childPrefix.
+
+
+```go
 func (db *Database) Set(ctx context.Context, prefix string, val []byte, batch bool) error
 ```
+
+
+```go
+func (db *Database) SetMeta(ctx context.Context, key string, val []byte) error
+```
+SetMeta stores a metadata entry in the metadata bucket.
+
+
+```go
+func (db *Database) SetSummary(ctx context.Context, key string, val []byte, batch bool) error
+```
+SetSummary stores a precomputed summary value in the summary bucket.
 
 
 ```go
