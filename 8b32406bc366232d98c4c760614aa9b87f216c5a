@@ -1,0 +1,17 @@
+--- Overview
+Adds two new buckets to the BadgerDB-backed database: one for precomputed per-prefix summaries and one for database metadata, such as how the summaries were computed. The database.DB interface gains matching methods.
+
+--- Key Changes
+  * internal/database (ifc.go, README)
+    * Extended the DB interface with SetSummary, DeleteSummary, ScanSummaries, SetMeta and GetMeta.
+  * internal/database/badgerdb
+    * Added the summaryBucket (0xf4) and metaBucket (0xf5) key prefixes and updated the bucket layout docs from 4 to 6 buckets.
+    * SetSummary: writes a summary entry and supports batched writes. It rejects writes on read-only databases.
+    * DeleteSummary: deletes exactKey and all descendants under childPrefix, leaving sibling prefixes alone (for example, \x00a-b survives deleting \x00a).
+    * ScanSummaries: walks keys in order starting at exactKey and stops at the first key outside exactKey/childPrefix. With both empty, it scans the whole bucket. The visitor can return false to stop early.
+    * SetMeta / GetMeta: store and read metadata entries. Reading a missing key returns an empty buffer, not an error.
+  * Tests
+    * Added TestSummariesAndMeta, which covers batched and unbatched writes, persistence after reopening, read-only meta reads, missing meta keys, subtree scans that exclude siblings, and subtree deletes.
+
+--- Breaking Changes
+Every implementation of database.DB must now provide the five new methods. The package is internal and BadgerDB is the only implementation in this diff, so external users are not affected.
