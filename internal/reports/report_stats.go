@@ -44,12 +44,14 @@ type PerIDStats struct {
 // - the top N values for/per each statistic by user/group
 // - the topN user/groups by each statistic
 type AllStats struct {
-	MaxN     int
-	Prefix   *Heaps[string]
-	PerUser  PerIDStats
-	PerGroup PerIDStats
-	ByUser   *Heaps[int64]
-	ByGroup  *Heaps[int64]
+	MaxN        int
+	Prefix      *Heaps[string]
+	Subtree     *Heaps[string]
+	Distributed *DistributedHeaps
+	PerUser     PerIDStats
+	PerGroup    PerIDStats
+	ByUser      *Heaps[int64]
+	ByGroup     *Heaps[int64]
 
 	userTotals  map[int64]stats.Totals
 	groupTotals map[int64]stats.Totals
@@ -68,12 +70,16 @@ func newHeaps[T comparable](prefix string, n int) *Heaps[T] {
 	return h
 }
 
-func (h *Heaps[T]) Push(item T, bytes, storageBytes, prefixBytes, files, prefixes, children int64) {
+func (h *Heaps[T]) pushMax(item T, bytes, storageBytes, prefixBytes, files, children int64) {
 	h.Bytes.PushMaxN(bytes, item, h.MaxN)
 	h.StorageBytes.PushMaxN(storageBytes, item, h.MaxN)
 	h.Files.PushMaxN(files, item, h.MaxN)
 	h.Prefixes.PushMaxN(children, item, h.MaxN)
 	h.PrefixBytes.PushMaxN(prefixBytes, item, h.MaxN)
+}
+
+func (h *Heaps[T]) Push(item T, bytes, storageBytes, prefixBytes, files, prefixes, children int64) {
+	h.pushMax(item, bytes, storageBytes, prefixBytes, files, children)
 	h.TotalBytes += bytes
 	h.TotalStorageBytes += storageBytes
 	h.TotalPrefixBytes += prefixBytes
@@ -185,6 +191,8 @@ func NewAllStats(prefix string, n int) *AllStats {
 	return &AllStats{
 		MaxN:        n,
 		Prefix:      newHeaps[string](prefix, n),
+		Subtree:     newHeaps[string](prefix, n),
+		Distributed: NewDistributedHeaps(n),
 		PerUser:     newPerIDStats(prefix, n),
 		PerGroup:    newPerIDStats(prefix, n),
 		ByUser:      newHeaps[int64](prefix, n),

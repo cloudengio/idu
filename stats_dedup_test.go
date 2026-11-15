@@ -67,7 +67,7 @@ func analyzeWithConfig(ctx context.Context, t *testing.T, cfg config.T, root str
 
 type statsTotals struct {
 	Files, Bytes, StorageBytes, Prefixes, Hardlinks, HardlinkDirs int64
-	UserBytes, UserFiles                                          int64
+	SubtreeFiles, SubtreeBytes, UserBytes, UserFiles              int64
 }
 
 func totalsFor(sdb *reports.AllStats) statsTotals {
@@ -78,6 +78,8 @@ func totalsFor(sdb *reports.AllStats) statsTotals {
 		Prefixes:     sdb.Prefix.TotalPrefixes,
 		Hardlinks:    sdb.Prefix.TotalHardlinks,
 		HardlinkDirs: sdb.Prefix.TotalHardlinkDirs,
+		SubtreeFiles: sdb.Subtree.TotalFiles,
+		SubtreeBytes: sdb.Subtree.TotalBytes,
 		UserBytes:    sdb.ByUser.TotalBytes,
 		UserFiles:    sdb.ByUser.TotalFiles,
 	}
@@ -151,6 +153,9 @@ func TestHardlinkDedupSummariesMatchRescan(t *testing.T) {
 			// hardlinks to the same prefixes.
 			if g, w := fromSummaries.Prefix.Merge(20), fromPrefixes.Prefix.Merge(20); !reflect.DeepEqual(g, w) {
 				t.Errorf("%v: per prefix: summaries: %+v, rescan: %+v", tc.target, g, w)
+			}
+			if g, w := fromSummaries.Subtree.Merge(20), fromPrefixes.Subtree.Merge(20); !reflect.DeepEqual(g, w) {
+				t.Errorf("%v: per subtree: summaries: %+v, rescan: %+v", tc.target, g, w)
 			}
 			if got.Files != tc.files || got.Hardlinks != tc.hardlinks || got.Prefixes != tc.prefixes {
 				t.Errorf("%v: got files=%v hardlinks=%v prefixes=%v, want %v %v %v",

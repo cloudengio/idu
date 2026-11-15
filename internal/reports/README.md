@@ -17,12 +17,14 @@ func PopN[T comparable](heap *heap.MinMax[int64, T], n int) (keys []int64, vals 
 ### Type AllStats
 ```go
 type AllStats struct {
-	MaxN     int
-	Prefix   *Heaps[string]
-	PerUser  PerIDStats
-	PerGroup PerIDStats
-	ByUser   *Heaps[int64]
-	ByGroup  *Heaps[int64]
+	MaxN        int
+	Prefix      *Heaps[string]
+	Subtree     *Heaps[string]
+	Distributed *DistributedHeaps
+	PerUser     PerIDStats
+	PerGroup    PerIDStats
+	ByUser      *Heaps[int64]
+	ByGroup     *Heaps[int64]
 	// contains filtered or unexported fields
 }
 ```
@@ -66,6 +68,89 @@ breakdowns into s.
 ```go
 func (s *AllStats) Update(prefix string, pi prefixinfo.T, calc diskusage.Calculator, matcher boolexpr.Matcher) error
 ```
+
+
+
+
+### Type DistributedHeaps
+```go
+type DistributedHeaps struct {
+	MaxN         int
+	Bytes        *heap.MinMax[int64, DistributedStats]
+	StorageBytes *heap.MinMax[int64, DistributedStats]
+	Files        *heap.MinMax[int64, DistributedStats]
+}
+```
+DistributedHeaps maintains bounded top-N min-max heaps of DistributedStats
+ordered by distributed bytes, distributed storage bytes, and distributed
+files.
+
+### Functions
+
+```go
+func NewDistributedHeaps(n int) *DistributedHeaps
+```
+NewDistributedHeaps creates a new DistributedHeaps bounded to n entries per
+heap.
+
+
+
+### Methods
+
+```go
+func (dh *DistributedHeaps) Push(ds DistributedStats)
+```
+Push records ds into whichever distributed metrics satisfy the amplification
+threshold (subtree total >= 2x single largest directory).
+
+
+
+
+### Type DistributedStats
+```go
+type DistributedStats struct {
+	Prefix               string  `json:"prefix"`
+	SubtreeBytes         int64   `json:"subtree_bytes"`
+	SubtreeStorage       int64   `json:"subtree_storage"`
+	SubtreeFiles         int64   `json:"subtree_files"`
+	SubtreeDirs          int64   `json:"subtree_dirs"`
+	SubtreePrefixBytes   int64   `json:"subtree_prefix_bytes"`
+	DirectBytes          int64   `json:"direct_bytes"`
+	DirectStorage        int64   `json:"direct_storage"`
+	DirectFiles          int64   `json:"direct_files"`
+	MaxLeafBytes         int64   `json:"max_leaf_bytes"`
+	MaxLeafStorage       int64   `json:"max_leaf_storage"`
+	MaxLeafFiles         int64   `json:"max_leaf_files"`
+	MaxChildShare        float64 `json:"max_child_share"`
+	BytesAmplification   float64 `json:"bytes_amplification"`
+	StorageAmplification float64 `json:"storage_amplification"`
+	FilesAmplification   float64 `json:"files_amplification"`
+	DistributedBytes     int64   `json:"distributed_bytes"`
+	DistributedStorage   int64   `json:"distributed_storage"`
+	DistributedFiles     int64   `json:"distributed_files"`
+}
+```
+DistributedStats describes a directory whose subtree accumulates
+substantial usage across multiple descendant directories where neither a
+single directory nor a single child dominates (for example, modest-fanout
+hierarchies whose leaves each hold modest data).
+
+### Functions
+
+```go
+func MergeDistributed(dh *DistributedHeaps, n int) []DistributedStats
+```
+MergeDistributed returns up to n unique DistributedStats entries across
+the storage, bytes, and files heaps, ordered by DistributedStorage,
+DistributedBytes, and DistributedFiles descending.
+
+
+```go
+func TopDistributed(h *heap.MinMax[int64, DistributedStats], n int) []DistributedStats
+```
+TopDistributed returns up to n entries from h in descending order.
+It leaves h unchanged on return by popping and then restoring its entries,
+and hence must not be called concurrently with any other use of h.
 
 
 
@@ -136,6 +221,45 @@ PerIDStats is a collection of statistics on a per user/group basis.
 ```go
 func (s *PerIDStats) Push(id int64, prefix string, size, storageBytes, prefixBytes, files, prefixCount, children int64)
 ```
+
+
+
+
+### Type SubtreeAggregator
+```go
+type SubtreeAggregator struct {
+	Subtree     *Heaps[string]
+	Distributed *DistributedHeaps
+	// contains filtered or unexported fields
+}
+```
+SubtreeAggregator computes recursive subtree totals and modest-fanout
+distributed hotspots. Directories must be supplied in DFS pre-order (sorted
+by normalized summary key), in which case it requires O(depth) memory.
+
+### Functions
+
+```go
+func NewSubtreeAggregator(prefix string, n int) *SubtreeAggregator
+```
+NewSubtreeAggregator creates a SubtreeAggregator rooted at prefix with top-N
+heap limit n.
+
+
+
+### Methods
+
+```go
+func (sa *SubtreeAggregator) Finish()
+```
+Finish finalizes any remaining directory frames on the stack.
+
+
+```go
+func (sa *SubtreeAggregator) Step(summaryKey, path string, direct stats.Totals)
+```
+Step feeds the next directory in DFS pre-order (summaryKey ordered) into the
+aggregator.
 
 
 

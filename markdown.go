@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"text/template"
 	"time"
@@ -21,6 +22,8 @@ func tpl(name string) *template.Template {
 		"fmtBytes":   fmtSize,
 		"fmtKiBytes": fmtKiBytes,
 		"fmtCount":   fmtCount,
+		"fmtAmp":     func(v float64) string { return fmt.Sprintf("%.1fx", v) },
+		"fmtPct":     func(v float64) string { return fmt.Sprintf("%.0f%%", v*100) },
 	})
 }
 
@@ -36,6 +39,8 @@ const mdTOC = `
 
 * [Totals](#totals)
 * [Top {{.TopN}} prefixes](#top-prefixes)
+* [Top {{.TopN}} subtrees](#top-subtrees)
+* [Distributed subtrees](#distributed-subtrees)
 * [Top {{.TopN}} users](#top-Users)
 * [Top {{.TopN}} groups](#top-Groups)
 
@@ -88,6 +93,47 @@ const mdPrefixes = `
 | Prefixes | Prefix |
 | ---: | :--- |
 {{range .PrefixBytes}}| {{fmtBytes .K}} |  {{.V}} |
+{{end}}
+
+`
+
+const mdSubtrees = `
+# <a id=top-subtrees></a> Top {{.TopN}} subtrees (recursive) for {{.Prefix}}
+
+### Top {{.TopN}} subtrees by bytes used
+| Bytes | Subtree |
+| ---: | :--- |
+{{range .Bytes}}| {{fmtBytes .K}} | {{.V}} |
+{{end}}
+
+{{if .StorageBytes}}
+### Top {{.TopN}} subtrees by storage bytes usage
+| Storage Bytes | Subtree |
+| ---: | :--- |
+{{range .StorageBytes}}| {{fmtBytes .K}} |  {{.V}} |
+{{end}}
+{{end}}
+
+### Top {{.TopN}} subtrees by file count
+| Files | Subtree |
+| ---: | :--- |
+{{range .Files}}| {{fmtCount .K}} |  {{.V}} |
+{{end}}
+
+### Top {{.TopN}} subtrees by directory count
+| Directories | Subtree |
+| ---: | :--- |
+{{range .Prefixes}}| {{fmtCount .K}} |  {{.V}} |
+{{end}}
+
+`
+
+const mdDistributed = `
+# <a id=distributed-subtrees></a> Distributed subtree hotspots (modest fanout) for {{.Prefix}}
+
+| Distributed Storage | Subtree Storage | Max Leaf Storage | Amp | Dirs | Max Child | Prefix |
+| ---: | ---: | ---: | ---: | ---: | ---: | :--- |
+{{range .Items}}| {{fmtBytes .DistributedStorage}} | {{fmtBytes .SubtreeStorage}} | {{fmtBytes .MaxLeafStorage}} | {{fmtAmp .StorageAmplification}} | {{fmtCount .SubtreeDirs}} | {{fmtPct .MaxChildShare}} | {{.Prefix}} |
 {{end}}
 
 `
@@ -197,15 +243,17 @@ type mdPerIDHeap struct {
 }
 
 type markdownReports struct {
-	created   bool
-	toc       *template.Template
-	lists     *template.Template
-	totals    *template.Template
-	prefixes  *template.Template
-	byUsers   *template.Template
-	byGroups  *template.Template
-	perUsers  *template.Template
-	perGroups *template.Template
+	created     bool
+	toc         *template.Template
+	lists       *template.Template
+	totals      *template.Template
+	prefixes    *template.Template
+	subtrees    *template.Template
+	distributed *template.Template
+	byUsers     *template.Template
+	byGroups    *template.Template
+	perUsers    *template.Template
+	perGroups   *template.Template
 }
 
 func (md *markdownReports) initTemplates() {
@@ -217,6 +265,8 @@ func (md *markdownReports) initTemplates() {
 	md.toc = template.Must(tpl("toc").Parse(mdTOC))
 	md.totals = template.Must(tpl("totals").Parse(mdTotals))
 	md.prefixes = template.Must(tpl("prefixes").Parse(mdPrefixes))
+	md.subtrees = template.Must(tpl("subtrees").Parse(mdSubtrees))
+	md.distributed = template.Must(tpl("distributed").Parse(mdDistributed))
 	md.lists = template.Must(tpl("userGroupLists").Funcs(
 		template.FuncMap{
 			"fmtUID": nameForUID,
@@ -304,6 +354,33 @@ func (md *markdownReports) generateReports(rf *generateReportsFlags, filenames *
 
 	if err := md.prefixes.Execute(out, byPrefix); err != nil {
 		return err
+	}
+
+	if sdb.Subtree != nil {
+		bySubtree := mdHeap[string]{
+			Prefix:       prefix,
+			TopN:         rf.Markdown,
+			Bytes:        reports.ZipN(sdb.Subtree.Bytes, rf.Markdown),
+			Files:        reports.ZipN(sdb.Subtree.Files, rf.Markdown),
+			Prefixes:     reports.ZipN(sdb.Subtree.Prefixes, rf.Markdown),
+			StorageBytes: reports.ZipN(sdb.Subtree.StorageBytes, rf.Markdown),
+			PrefixBytes:  reports.ZipN(sdb.Subtree.PrefixBytes, rf.Markdown),
+		}
+		if err := md.subtrees.Execute(out, bySubtree); err != nil {
+			return err
+		}
+	}
+
+	if dist := reports.MergeDistributed(sdb.Distributed, rf.Markdown); len(dist) > 0 {
+		if err := md.distributed.Execute(out, struct {
+			Prefix string
+			Items  []reports.DistributedStats
+		}{
+			Prefix: prefix,
+			Items:  dist,
+		}); err != nil {
+			return err
+		}
 	}
 
 	// Largest Users/Groups.

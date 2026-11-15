@@ -16,7 +16,40 @@ type tsvReports struct {
 }
 
 func (tr *tsvReports) generateReports(rf *generateReportsFlags, filenames *reportFilenames, stats statsFileFormat) error {
-	return writeReportFiles(stats.Stats, filenames, tr.formatMerged, tr.formatUserGroupMerged, rf.TSV)
+	return writeReportFiles(stats.Stats, filenames, tr.formatMerged, tr.formatUserGroupMerged, tr.formatDistributed, rf.TSV)
+}
+
+func (tr *tsvReports) formatDistributed(list []reports.DistributedStats) []byte {
+	out := &bytes.Buffer{}
+	wr := csv.NewWriter(out)
+	wr.Comma = '\t'
+	wr.Write([]string{ //nolint:errcheck
+		"prefix", "distributed bytes", "distributed storage", "distributed files",
+		"subtree bytes", "subtree storage", "subtree files", "subtree dirs",
+		"max leaf bytes", "max leaf storage", "max leaf files",
+		"bytes amplification", "storage amplification", "files amplification", "max child share",
+	})
+	for _, v := range list {
+		wr.Write([]string{ //nolint:errcheck
+			v.Prefix,
+			strconv.FormatInt(v.DistributedBytes, 10),
+			strconv.FormatInt(v.DistributedStorage, 10),
+			strconv.FormatInt(v.DistributedFiles, 10),
+			strconv.FormatInt(v.SubtreeBytes, 10),
+			strconv.FormatInt(v.SubtreeStorage, 10),
+			strconv.FormatInt(v.SubtreeFiles, 10),
+			strconv.FormatInt(v.SubtreeDirs, 10),
+			strconv.FormatInt(v.MaxLeafBytes, 10),
+			strconv.FormatInt(v.MaxLeafStorage, 10),
+			strconv.FormatInt(v.MaxLeafFiles, 10),
+			strconv.FormatFloat(v.BytesAmplification, 'f', 2, 64),
+			strconv.FormatFloat(v.StorageAmplification, 'f', 2, 64),
+			strconv.FormatFloat(v.FilesAmplification, 'f', 2, 64),
+			strconv.FormatFloat(v.MaxChildShare, 'f', 4, 64),
+		})
+	}
+	wr.Flush()
+	return out.Bytes()
 }
 
 func (tr *tsvReports) formatMerged(merged map[string]reports.MergedStats) []byte {
