@@ -247,6 +247,53 @@ func TestScanDBCalculatorChange(t *testing.T) {
 	}
 }
 
+func TestScanDBSummaryFormatChange(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Prefix{Prefix: "/a", Database: filepath.Join(t.TempDir(), "db-format"), Separator: "/"}
+	calcID := diskusage.NewIdentity().String()
+
+	sdb, err := NewScanDB(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pi := makeTestPrefixInfo(100)
+	if err := sdb.SetPrefixInfo(ctx, "/a", false, &pi); err != nil {
+		t.Fatal(err)
+	}
+	_ = sdb.Close(ctx)
+
+	// Simulate summaries written using the previous encoding, whose
+	// specification did not include the encoding's version.
+	rawDB, err := OpenDatabase(ctx, cfg, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rawDB.SetMeta(ctx, metaKeySummaries, []byte(calcID+hardlinksSpecSuffix)); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckSummaries(ctx, rawDB, calcID, true); !errors.Is(err, ErrStaleSummaries) {
+		t.Errorf("got %v, want %v", err, ErrStaleSummaries)
+	}
+	_ = rawDB.Close(ctx)
+
+	// The next analyze rewrites the summaries, including for unchanged
+	// prefixes, after which they are valid.
+	sdb, err = NewScanDB(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sdb.SetPrefixInfo(ctx, "/a", true, &pi); err != nil {
+		t.Fatal(err)
+	}
+	if err := sdb.MarkSummariesComplete(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_ = sdb.Close(ctx)
+	if valid, ids := readSummaryCalcIDs(ctx, t, cfg, calcID); !valid || !reflect.DeepEqual(ids, []string{calcID}) {
+		t.Errorf("got valid=%v calc ids=%v, want true [%v]", valid, ids, calcID)
+	}
+}
+
 func stampStaleSummary(ctx context.Context, t *testing.T, cfg config.Prefix, key, staleCalcID string) {
 	t.Helper()
 	rawDB, err := OpenDatabase(ctx, cfg, false)

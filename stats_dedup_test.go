@@ -17,6 +17,7 @@ import (
 	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/cmd/idu/internal/reports"
+	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/file/localfs"
 )
 
@@ -68,20 +69,25 @@ func analyzeWithConfig(ctx context.Context, t *testing.T, cfg config.T, root str
 type statsTotals struct {
 	Files, Bytes, StorageBytes, Prefixes, Hardlinks, HardlinkDirs int64
 	SubtreeFiles, SubtreeBytes, UserBytes, UserFiles              int64
+	SparseFiles, SparseBytes, SubtreeSparse, UserSparse           int64
 }
 
 func totalsFor(sdb *reports.AllStats) statsTotals {
 	return statsTotals{
-		Files:        sdb.Prefix.TotalFiles,
-		Bytes:        sdb.Prefix.TotalBytes,
-		StorageBytes: sdb.Prefix.TotalStorageBytes,
-		Prefixes:     sdb.Prefix.TotalPrefixes,
-		Hardlinks:    sdb.Prefix.TotalHardlinks,
-		HardlinkDirs: sdb.Prefix.TotalHardlinkDirs,
-		SubtreeFiles: sdb.Subtree.TotalFiles,
-		SubtreeBytes: sdb.Subtree.TotalBytes,
-		UserBytes:    sdb.ByUser.TotalBytes,
-		UserFiles:    sdb.ByUser.TotalFiles,
+		Files:         sdb.Prefix.TotalFiles,
+		Bytes:         sdb.Prefix.TotalBytes,
+		StorageBytes:  sdb.Prefix.TotalStorageBytes,
+		Prefixes:      sdb.Prefix.TotalPrefixes,
+		Hardlinks:     sdb.Prefix.TotalHardlinks,
+		HardlinkDirs:  sdb.Prefix.TotalHardlinkDirs,
+		SubtreeFiles:  sdb.Subtree.TotalFiles,
+		SubtreeBytes:  sdb.Subtree.TotalBytes,
+		UserBytes:     sdb.ByUser.TotalBytes,
+		UserFiles:     sdb.ByUser.TotalFiles,
+		SparseFiles:   sdb.Prefix.TotalSparseFiles,
+		SparseBytes:   sdb.Prefix.TotalSparseBytes,
+		SubtreeSparse: sdb.Subtree.TotalSparseBytes,
+		UserSparse:    sdb.ByUser.TotalSparseBytes,
 	}
 }
 
@@ -196,4 +202,88 @@ func TestHardlinkDedupSummariesMatchRescan(t *testing.T) {
 	// stored metadata, which lacks link counts, and must yield the same results.
 	analyzeWithConfig(ctx, t, summariesCfg, root)
 	verify(summariesCfg, 4, 4, 3)
+}
+
+// createSparseFile creates a file of size bytes with a hole after its
+// first byte and returns the number of its bytes that are expected to be
+// reported as sparse, which will be zero if the filesystem does not
+// support sparse files.
+func createSparseFile(ctx context.Context, t *testing.T, name string, size int64) int64 {
+	t.Helper()
+	f, err := os.Create(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write([]byte{1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(size); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	fs := localfs.New()
+	fi, err := fs.Lstat(ctx, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	xattr, err := fs.XAttr(ctx, name, fi)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stats.SparseBytes(fi.Size(), xattr.Blocks)
+}
+
+func TestSparseFilesSummariesMatchRescan(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	root, err := filepath.EvalSymlinks(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	internal.LogDir = filepath.Join(root, "logs")
+	if err := os.MkdirAll(internal.LogDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	root = filepath.Join(root, "tree")
+	for _, d := range []string{"s", "t"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sparse := createSparseFile(ctx, t, filepath.Join(root, "s", "sparse"), 64<<20)
+	if err := os.WriteFile(filepath.Join(root, "s", "dense"), make([]byte, 1<<20), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A hardlink to the sparse file must only be counted once.
+	if err := os.Link(filepath.Join(root, "s", "sparse"), filepath.Join(root, "t", "link")); err != nil {
+		t.Fatal(err)
+	}
+	wantFiles := int64(0)
+	if sparse > 0 {
+		wantFiles = 1
+	}
+
+	cfg := writeHardlinkConfig(t, tmpDir, root, config.HardlinkDedupSummaries)
+	analyzeWithConfig(ctx, t, cfg, root)
+	fromSummaries, fromPrefixes, err := computeBoth(ctx, t, cfg, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, want := totalsFor(fromSummaries), totalsFor(fromPrefixes)
+	if got != want {
+		t.Errorf("summaries: %+v, rescan: %+v", got, want)
+	}
+	if got.SparseFiles != wantFiles || got.SparseBytes != sparse || got.SubtreeSparse != sparse || got.UserSparse != sparse {
+		t.Errorf("got sparse files=%v bytes=%v subtree=%v user=%v, want %v %v",
+			got.SparseFiles, got.SparseBytes, got.SubtreeSparse, got.UserSparse, wantFiles, sparse)
+	}
+	merged := fromSummaries.Prefix.Merge(20)
+	if got := merged[filepath.Join(root, "s")].SparseBytes; got != sparse {
+		t.Errorf("got %v sparse bytes for s, want %v", got, sparse)
+	}
+	if got := merged[filepath.Join(root, "t")].SparseBytes; got != 0 {
+		t.Errorf("got %v sparse bytes for t, want 0", got)
+	}
 }

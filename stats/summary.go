@@ -83,6 +83,7 @@ type FileEntry struct {
 	UID, GID     int64
 	Bytes        int64
 	StorageBytes int64
+	SparseBytes  int64
 }
 
 // ComputeSummary computes a PrefixSummary for a single directory/prefix.
@@ -126,6 +127,7 @@ func computeFileEntries(prefix string, pi *prefixinfo.T, du diskusage.Calculator
 			GID:          xattr.GID,
 			Bytes:        fi.Size(),
 			StorageBytes: du.Calculate(fi.Size(), xattr.Blocks),
+			SparseBytes:  SparseBytes(fi.Size(), xattr.Blocks),
 		})
 	}
 	return files
@@ -160,6 +162,10 @@ func (t Totals) asHardlink(l FileEntry) Totals {
 	t.Files--
 	t.Bytes -= l.Bytes
 	t.StorageBytes -= l.StorageBytes
+	if l.SparseBytes > 0 {
+		t.SparseFiles--
+		t.SparseBytes -= l.SparseBytes
+	}
 	t.Hardlinks++
 	return t
 }
@@ -173,12 +179,14 @@ func (pid PerIDTotals) asHardlink(id int64, l FileEntry) {
 	}
 }
 
-const prefixSummaryVersion = 0x2
+// PrefixSummaryVersion is the version of the binary encoding of
+// PrefixSummary, which includes that of Totals.
+const PrefixSummaryVersion = 0x3
 
 // AppendBinary appends the binary encoding of ps to data and returns the
 // extended slice.
 func (ps *PrefixSummary) AppendBinary(data []byte) []byte {
-	data = binary.AppendVarint(data, prefixSummaryVersion)
+	data = binary.AppendVarint(data, PrefixSummaryVersion)
 	data = binary.AppendUvarint(data, uint64(len(ps.CalcID)))
 	data = append(data, ps.CalcID...)
 	data = ps.Direct.AppendBinary(data)
@@ -197,6 +205,7 @@ func (ps *PrefixSummary) AppendBinary(data []byte) []byte {
 		data = binary.AppendVarint(data, l.GID)
 		data = binary.AppendVarint(data, l.Bytes)
 		data = binary.AppendVarint(data, l.StorageBytes)
+		data = binary.AppendVarint(data, l.SparseBytes)
 	}
 	return data
 }
@@ -212,7 +221,7 @@ func (ps *PrefixSummary) UnmarshalBinary(data []byte) error {
 		return fmt.Errorf("PrefixSummary: empty buffer")
 	}
 	ver, n := binary.Varint(data)
-	if n <= 0 || ver != prefixSummaryVersion {
+	if n <= 0 || ver != PrefixSummaryVersion {
 		return fmt.Errorf("PrefixSummary: unsupported version %d", ver)
 	}
 	data = data[n:]
@@ -281,7 +290,7 @@ func (ps *PrefixSummary) decodeFiles(data []byte) error {
 		if l.FileID, data, err = readUvarint(data); err != nil {
 			return err
 		}
-		for _, f := range []*int64{&l.UID, &l.GID, &l.Bytes, &l.StorageBytes} {
+		for _, f := range []*int64{&l.UID, &l.GID, &l.Bytes, &l.StorageBytes, &l.SparseBytes} {
 			if *f, data, err = readVarint(data); err != nil {
 				return err
 			}
@@ -309,6 +318,7 @@ func decodeTotalsChecked(t *Totals, data []byte) ([]byte, error) {
 	fields := []*int64{
 		&t.ID, &t.Files, &t.Bytes, &t.StorageBytes, &t.PrefixBytes,
 		&t.Prefix, &t.SubPrefixes, &t.Hardlinks, &t.HardlinkDirs,
+		&t.SparseFiles, &t.SparseBytes,
 	}
 	for _, f := range fields {
 		var val int64

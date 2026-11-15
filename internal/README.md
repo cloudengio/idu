@@ -94,9 +94,9 @@ PrefixInfoAsFSInfo returns a fs.FileInfo for the supplied PrefixInfo.
 ```go
 func SummarySpec(cfg *config.Prefix) string
 ```
-SummarySpec returns the specification that the precomputed summaries must be
-created with for cfg: they depend on the disk usage calculator and whether
-hardlinks are recorded.
+SummarySpec returns the specification that the precomputed summaries must
+be created with for cfg: they depend on their encoding, the disk usage
+calculator and whether hardlinks are recorded.
 
 ### Func UseBadgerDB
 ```go

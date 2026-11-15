@@ -188,15 +188,26 @@ const (
 	invalidSummariesSpec = "invalid"
 )
 
-// SummarySpec returns the specification that the precomputed summaries must
-// be created with for cfg: they depend on the disk usage calculator and
-// whether hardlinks are recorded.
-func SummarySpec(cfg *config.Prefix) string {
-	spec := cfg.CalculatorOrDefault().String()
-	if cfg.RecordHardlinks() {
+// summaryFormatSuffix identifies the encoding of the summaries so that
+// changing it causes the existing summaries to be treated as stale and
+// to be rewritten by the next analyze.
+var summaryFormatSuffix = fmt.Sprintf(";v%d", stats.PrefixSummaryVersion)
+
+// summarySpec returns the specification for summaries computed with
+// calcID that record hardlinks if hardlinks is true.
+func summarySpec(calcID string, hardlinks bool) string {
+	spec := calcID + summaryFormatSuffix
+	if hardlinks {
 		spec += hardlinksSpecSuffix
 	}
 	return spec
+}
+
+// SummarySpec returns the specification that the precomputed summaries must
+// be created with for cfg: they depend on their encoding, the disk usage
+// calculator and whether hardlinks are recorded.
+func SummarySpec(cfg *config.Prefix) string {
+	return summarySpec(cfg.CalculatorOrDefault().String(), cfg.RecordHardlinks())
 }
 
 // ErrStaleSummaries is returned when the precomputed summaries are
@@ -255,9 +266,9 @@ func CheckSummaries(ctx context.Context, db database.DB, calcID string, needLink
 		return err
 	}
 	switch metaBuf.String() {
-	case calcID + hardlinksSpecSuffix:
+	case summarySpec(calcID, true):
 		return nil
-	case calcID:
+	case summarySpec(calcID, false):
 		if !needLinks {
 			return nil
 		}

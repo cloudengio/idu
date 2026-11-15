@@ -209,12 +209,7 @@ func (sa *SubtreeAggregator) popOne() {
 	f := sa.stack[n-1]
 	sa.stack = sa.stack[:n-1]
 
-	sa.Subtree.pushMax(f.path,
-		f.subtree.Bytes,
-		f.subtree.StorageBytes,
-		f.subtree.PrefixBytes,
-		f.subtree.Files,
-		f.subtreeDirs)
+	sa.Subtree.pushMax(f.path, f.subtree, f.subtreeDirs)
 
 	if f.subtreeDirs > 1 {
 		childShare := sa.maxChildDominance(&f)
@@ -245,11 +240,7 @@ func (sa *SubtreeAggregator) popOne() {
 	}
 
 	if len(sa.stack) == 0 {
-		sa.Subtree.TotalBytes += f.subtree.Bytes
-		sa.Subtree.TotalStorageBytes += f.subtree.StorageBytes
-		sa.Subtree.TotalPrefixBytes += f.subtree.PrefixBytes
-		sa.Subtree.TotalFiles += f.subtree.Files
-		sa.Subtree.TotalPrefixes += f.subtree.Prefix
+		sa.Subtree.addTotals(f.subtree)
 		sa.Subtree.TotalHardlinks += f.subtree.Hardlinks
 		sa.Subtree.TotalHardlinkDirs += f.subtree.HardlinkDirs
 		return

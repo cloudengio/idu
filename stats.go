@@ -375,6 +375,10 @@ func (hf heapFormatter[T]) formatHeaps(h *reports.Heaps[T], out io.Writer, value
 	hf.formatHeap(h.Files, out, fmtCount, valueFormatter, n)
 	banner(out, "-", "\nNumber of Prefixes/Directories\n")
 	hf.formatHeap(h.Prefixes, out, fmtCount, valueFormatter, n)
+	if h.SparseBytes != nil && h.SparseBytes.Len() > 0 {
+		banner(out, "-", "\nBytes in sparse files not allocated on the underlying filesystem\n")
+		hf.formatHeap(h.SparseBytes, out, fmtSize, valueFormatter, n)
+	}
 }
 
 func (hf heapFormatter[T]) formatTotals(h *reports.Heaps[T], out io.Writer) {
@@ -385,7 +389,8 @@ func (hf heapFormatter[T]) formatTotals(h *reports.Heaps[T], out io.Writer) {
 	fmt.Fprintf(out, "Prefixes:  %v\n", fmtCount(h.TotalPrefixes))
 	fmt.Fprintf(out, "Total:     %v\n", fmtCount(h.TotalFiles+h.TotalPrefixes))
 	fmt.Fprintf(out, "Links:     %v\n", fmtCount(h.TotalHardlinks))
-	fmt.Fprintf(out, "Link dirs: %v\n\n", fmtCount(h.TotalHardlinkDirs))
+	fmt.Fprintf(out, "Link dirs: %v\n", fmtCount(h.TotalHardlinkDirs))
+	fmt.Fprintf(out, "Sparse:    %v (%v not allocated)\n\n", fmtCount(h.TotalSparseFiles), strings.TrimSpace(fmtSize(h.TotalSparseBytes)))
 }
 
 func formatDistributedHeaps(dh *reports.DistributedHeaps, out io.Writer, n int) {

@@ -24,11 +24,16 @@ type Heaps[T comparable] struct {
 	TotalPrefixBytes              int64
 	TotalHardlinks                int64
 	TotalHardlinkDirs             int64
+	TotalSparseFiles              int64
+	TotalSparseBytes              int64
 	Bytes                         *heap.MinMax[int64, T]
 	StorageBytes                  *heap.MinMax[int64, T]
 	PrefixBytes                   *heap.MinMax[int64, T]
 	Files                         *heap.MinMax[int64, T]
 	Prefixes                      *heap.MinMax[int64, T]
+	// SparseBytes will be nil for stats computed before sparse files
+	// were tracked.
+	SparseBytes *heap.MinMax[int64, T]
 }
 
 // PerIDStats is a collection of statistics on a per user/group basis.
@@ -66,25 +71,40 @@ func newHeaps[T comparable](prefix string, n int) *Heaps[T] {
 		Files:        heap.NewMinMax[int64, T](),
 		Prefixes:     heap.NewMinMax[int64, T](),
 		StorageBytes: heap.NewMinMax[int64, T](),
+		SparseBytes:  heap.NewMinMax[int64, T](),
 	}
 	return h
 }
 
-func (h *Heaps[T]) pushMax(item T, bytes, storageBytes, prefixBytes, files, children int64) {
-	h.Bytes.PushMaxN(bytes, item, h.MaxN)
-	h.StorageBytes.PushMaxN(storageBytes, item, h.MaxN)
-	h.Files.PushMaxN(files, item, h.MaxN)
+// pushMax pushes item into the top N heaps using t and children as the
+// number of prefixes/directories it contains.
+func (h *Heaps[T]) pushMax(item T, t stats.Totals, children int64) {
+	h.Bytes.PushMaxN(t.Bytes, item, h.MaxN)
+	h.StorageBytes.PushMaxN(t.StorageBytes, item, h.MaxN)
+	h.Files.PushMaxN(t.Files, item, h.MaxN)
 	h.Prefixes.PushMaxN(children, item, h.MaxN)
-	h.PrefixBytes.PushMaxN(prefixBytes, item, h.MaxN)
+	h.PrefixBytes.PushMaxN(t.PrefixBytes, item, h.MaxN)
+	if t.SparseBytes > 0 {
+		h.SparseBytes.PushMaxN(t.SparseBytes, item, h.MaxN)
+	}
 }
 
-func (h *Heaps[T]) Push(item T, bytes, storageBytes, prefixBytes, files, prefixes, children int64) {
-	h.pushMax(item, bytes, storageBytes, prefixBytes, files, children)
-	h.TotalBytes += bytes
-	h.TotalStorageBytes += storageBytes
-	h.TotalPrefixBytes += prefixBytes
-	h.TotalFiles += files
-	h.TotalPrefixes += prefixes
+// addTotals adds t, other than its hardlink counts, to the totals for h.
+func (h *Heaps[T]) addTotals(t stats.Totals) {
+	h.TotalBytes += t.Bytes
+	h.TotalStorageBytes += t.StorageBytes
+	h.TotalPrefixBytes += t.PrefixBytes
+	h.TotalFiles += t.Files
+	h.TotalPrefixes += t.Prefix
+	h.TotalSparseFiles += t.SparseFiles
+	h.TotalSparseBytes += t.SparseBytes
+}
+
+// Push pushes item into the top N heaps and adds t, other than its
+// hardlink counts, to the totals for h.
+func (h *Heaps[T]) Push(item T, t stats.Totals) {
+	h.pushMax(item, t, t.SubPrefixes)
+	h.addTotals(t)
 }
 
 func PopN[T comparable](heap *heap.MinMax[int64, T], n int) (keys []int64, vals []T) {
@@ -129,6 +149,7 @@ type MergedStats struct {
 	Files       int64  `json:"files"`
 	Prefixes    int64  `json:"prefixes"`
 	PrefixBytes int64  `json:"prefix_bytes"`
+	SparseBytes int64  `json:"sparse_bytes,omitempty"`
 }
 
 func mergesStats[T comparable](n int, merged map[T]MergedStats, keys []int64, prefixes []T, setter func(MergedStats, int64) MergedStats) {
@@ -169,6 +190,13 @@ func (h *Heaps[T]) Merge(n int) map[T]MergedStats {
 		m.Prefixes = v
 		return m
 	})
+	if h.SparseBytes != nil {
+		spb, spp := PopN(h.SparseBytes, n)
+		mergesStats(n, merged, spb, spp, func(m MergedStats, v int64) MergedStats {
+			m.SparseBytes = v
+			return m
+		})
+	}
 	return merged
 }
 
@@ -180,11 +208,11 @@ func newPerIDStats(prefix string, n int) PerIDStats {
 	}
 }
 
-func (s *PerIDStats) Push(id int64, prefix string, size, storageBytes, prefixBytes, files, prefixCount, children int64) {
+func (s *PerIDStats) Push(id int64, prefix string, t stats.Totals) {
 	if _, ok := s.ByPrefix[id]; !ok {
 		s.ByPrefix[id] = newHeaps[string](s.Prefix, s.MaxN)
 	}
-	s.ByPrefix[id].Push(prefix, size, storageBytes, prefixBytes, files, prefixCount, children)
+	s.ByPrefix[id].Push(prefix, t)
 }
 
 func NewAllStats(prefix string, n int) *AllStats {
@@ -202,50 +230,39 @@ func NewAllStats(prefix string, n int) *AllStats {
 	}
 }
 
-func addToMap(stats map[int64]stats.Totals, id int64, size, storageBytes, prefixBytes, files, prefix, children int64) {
+func addToMap(stats map[int64]stats.Totals, id int64, t stats.Totals) {
 	s := stats[id]
-	s.Bytes += size
-	s.StorageBytes += storageBytes
-	s.Files += files
-	s.SubPrefixes += children
-	s.PrefixBytes += prefixBytes
-	s.Prefix += prefix
+	s.Add(t)
 	stats[id] = s
 }
 
 func (s *AllStats) PushPerUserStats(prefix string, us stats.PerIDTotals) {
 	for _, u := range us {
-		s.PerUser.Push(u.ID, prefix, u.Bytes, u.StorageBytes, u.PrefixBytes, u.Files, u.Prefix, u.SubPrefixes)
-		addToMap(s.userTotals, u.ID, u.Bytes, u.StorageBytes, u.PrefixBytes, u.Files, u.Prefix, u.SubPrefixes)
+		s.PerUser.Push(u.ID, prefix, u)
+		addToMap(s.userTotals, u.ID, u)
 	}
 }
 
 func (s *AllStats) PushPerGroupStats(prefix string, ug stats.PerIDTotals) {
 	for _, g := range ug {
-		s.PerGroup.Push(g.ID, prefix, g.Bytes, g.StorageBytes, g.PrefixBytes, g.Files, g.Prefix, g.SubPrefixes)
-		addToMap(s.groupTotals, g.ID, g.Bytes, g.StorageBytes, g.PrefixBytes, g.Files, g.Prefix, g.SubPrefixes)
+		s.PerGroup.Push(g.ID, prefix, g)
+		addToMap(s.groupTotals, g.ID, g)
 	}
 }
 
 func (s *AllStats) Finalize() {
 	for id, stats := range s.userTotals {
-		s.ByUser.Push(id, stats.Bytes, stats.StorageBytes, stats.PrefixBytes, stats.Files, stats.Prefix, stats.SubPrefixes)
+		s.ByUser.Push(id, stats)
 	}
 	for id, stats := range s.groupTotals {
-		s.ByGroup.Push(id, stats.Bytes, stats.StorageBytes, stats.PrefixBytes, stats.Files, stats.Prefix, stats.SubPrefixes)
+		s.ByGroup.Push(id, stats)
 	}
 }
 
 // RecordDirect pushes precomputed direct directory totals and per-ID
 // breakdowns into s.
 func (s *AllStats) RecordDirect(prefix string, totals stats.Totals, users, groups stats.PerIDTotals) {
-	s.Prefix.Push(prefix,
-		totals.Bytes,
-		totals.StorageBytes,
-		totals.PrefixBytes,
-		totals.Files,
-		totals.Prefix,
-		totals.SubPrefixes)
+	s.Prefix.Push(prefix, totals)
 	s.Prefix.TotalHardlinks += totals.Hardlinks
 	s.Prefix.TotalHardlinkDirs += totals.HardlinkDirs
 	s.PushPerUserStats(prefix, users)
