@@ -187,7 +187,7 @@ func (h *Heaps[T]) Merge(n int) map[T]MergedStats {
 	})
 	pbb, pbp := PopN(h.PrefixBytes, n)
 	mergesStats(n, merged, pbb, pbp, func(m MergedStats, v int64) MergedStats {
-		m.Prefixes = v
+		m.PrefixBytes = v
 		return m
 	})
 	if h.SparseBytes != nil {
