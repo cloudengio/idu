@@ -1,0 +1,41 @@
+--- Overview
+analyze now precomputes a summary for each prefix, including optional hardlink deduplication data, and stores it in the database. Each summary is tagged with the configuration it was computed under, so stats can tell when summaries are stale, incomplete or from a legacy database.
+
+--- Key Changes
+analyze
+  * Calls MarkSummariesComplete only after a full scan of the configured prefix that had no errors and was not cancelled.
+  * Removed the unneeded nil check on sdb in summarizeAndLog.
+
+internal/config
+  * New hardlink_dedup option per filesystem: summaries (the default) or rescan. Any other value fails validation.
+  * Added Prefix.RecordHardlinks() and Prefix.CalculatorOrDefault().
+  * Added DescribeHardlinkDedup, which is included in Documentation() and in the config command describers.
+  * Updated example-config.yml and the regenerated README.
+
+internal (scandb)
+  * OpenDatabase rejects databases that have prefix data but no summary metadata, returning ErrLegacyDatabase.
+  * The summaries/v1 meta key stores the summary spec: the calculator ID, plus ;hardlinks when hardlinks are recorded.
+    * If the stored spec differs from the current config, summaries for unchanged prefixes are rewritten during the scan.
+    * The spec is only updated after a flush, via MarkSummariesComplete.
+  * SetPrefixInfo writes a summary for each prefix. If a write fails, the meta key is set to invalid (best effort) so that the next analyze rewrites all summaries.
+  * DeletePrefix also deletes the summaries for that prefix.
+  * New exported helpers: SummarySpec, CheckSummaries, CheckSummaryKeys and ErrStaleSummaries.
+  * ScanDB interface: added MarkSummariesComplete.
+
+stats
+  * New PrefixSummary type with versioned binary encoding. It holds the calculator ID, direct totals, per-user and per-group totals, and optionally the prefix's own device/inode plus a list of FileEntry records.
+  * ComputeSummary builds a summary for one prefix. ApplyHardlinks deduplicates hardlinks from the summaries alone, giving the same result as ComputeTotals with hardlink handling.
+  * SummaryKeys and DecodeSummaryKey encode paths with NUL separators, so key order matches depth-first pre-order and sibling paths sort correctly. Windows drive roots are handled.
+  * Added Totals.Add and a totalsVersion constant.
+
+Tests
+  * Config: hardlink_dedup defaults and validation.
+  * scandb: summary write and delete, calculator-change rewrite, and rejection of legacy databases.
+  * stats: summary key ordering, binary round-trip and truncation errors, and hardlink deduplication matching ComputeTotals.
+
+--- Breaking Changes
+  * Existing databases that lack summary metadata can no longer be opened (ErrLegacyDatabase). They must be deleted and rebuilt by rerunning analyze.
+  * Implementations of the ScanDB interface must now provide MarkSummariesComplete.
+  * If the layout or hardlink settings change, analyze must be rerun for the entire prefix before the summaries are valid again.
+
+ Generated with Claude Code (https://claude.com/claude-code)
