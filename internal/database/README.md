@@ -34,12 +34,18 @@ type DB interface {
 	// its contents in the supplied bytes.Buffer.
 	Get(ctx context.Context, prefix string, buf *bytes.Buffer) error
 
+	// Delete deletes the value associated with exactly prefix, if any.
+	Delete(ctx context.Context, prefix string) error
+
 	// DeletePrefix deletes all keys that have the specified prefix.
 	DeletePrefix(ctx context.Context, prefix string) error
 
 	// Flush persists any pending batched writes. It is safe to call
 	// concurrently with batched writes.
 	Flush(ctx context.Context) error
+
+	// DeleteError deletes the error logged for exactly key, if any.
+	DeleteError(ctx context.Context, key string) error
 
 	// DeleteErrors deletes all errors that have the specified prefix.
 	DeleteErrors(ctx context.Context, prefix string) error

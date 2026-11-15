@@ -67,6 +67,14 @@ type Prefix struct {
 	calculator diskusage.Calculator
 }
 
+// SeparatorOrDefault returns the configured separator or "/".
+func (p *Prefix) SeparatorOrDefault() string {
+	if p.Separator == "" {
+		return "/"
+	}
+	return p.Separator
+}
+
 // CompactionInterval returns the combined compaction interval computed by
 // converting CompactIntervalDays to a time.Duration and adding CompactInterval.
 func (p *Prefix) CompactionInterval() time.Duration {

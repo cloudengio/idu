@@ -242,6 +242,31 @@ func (db *Database) Get(ctx context.Context, prefix string, buf *bytes.Buffer) e
 	return nil
 }
 
+func (db *Database) deleteKey(bucket byte, key string) error {
+	kb := keyForBucket(bucket, []byte(key))
+	defer bufPool.Put(kb)
+	return db.bdb.Update(func(tx *badger.Txn) error {
+		if _, err := tx.Get(kb.Bytes()); err != nil {
+			if err == badger.ErrKeyNotFound {
+				return nil
+			}
+			return err
+		}
+		return tx.Delete(kb.Bytes())
+	})
+}
+
+// Delete deletes the value stored for exactly prefix.
+func (db *Database) Delete(ctx context.Context, prefix string) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
+	if db.ReadOnly {
+		return badger.ErrReadOnlyTxn
+	}
+	return db.deleteKey(prefixBucket, prefix)
+}
+
 func (db *Database) batchSet(key, val []byte) error {
 	db.batchMu.RLock()
 	defer db.batchMu.RUnlock()
@@ -302,6 +327,14 @@ func (db *Database) deletePrefix(ctx context.Context, prefix []byte) error {
 			return err
 		}
 	}
+}
+
+// DeleteError deletes the error logged for exactly key.
+func (db *Database) DeleteError(ctx context.Context, key string) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
+	return db.deleteKey(errorBucket, key)
 }
 
 func (db *Database) DeleteErrors(ctx context.Context, prefix string) error {

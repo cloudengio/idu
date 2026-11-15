@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -152,6 +153,7 @@ type scanDB struct {
 	db              database.DB
 	compactInterval time.Duration
 	lastWritten     time.Time
+	sep             string
 }
 
 func NewScanDB(ctx context.Context, cfg config.Prefix) (ScanDB, error) {
@@ -171,6 +173,7 @@ func NewScanDB(ctx context.Context, cfg config.Prefix) (ScanDB, error) {
 		db:              db,
 		compactInterval: cfg.CompactionInterval(),
 		lastWritten:     lastWritten,
+		sep:             cfg.SeparatorOrDefault(),
 	}, nil
 }
 
@@ -215,6 +218,15 @@ func (sdb *scanDB) LogAndClose(ctx context.Context, start, stop time.Time, detai
 	return nil
 }
 
+// childPrefix returns the key prefix shared by all of the descendants
+// of prefix, but not by its siblings (e.g. /a/ rather than /a which
+// would also match /a-b).
+func (sdb *scanDB) childPrefix(prefix string) string {
+	return strings.TrimRight(prefix, sdb.sep) + sdb.sep
+}
+
+// DeletePrefix deletes prefix and all of the prefixes beneath it, but not
+// siblings that share it as a string prefix (e.g. /a-b for /a).
 func (sdb *scanDB) DeletePrefix(ctx context.Context, prefix string) error {
 	// Deletes are not batched, so flush any pending batched writes for
 	// prefix or its descendants to prevent them from being written after,
@@ -222,11 +234,19 @@ func (sdb *scanDB) DeletePrefix(ctx context.Context, prefix string) error {
 	if err := sdb.db.Flush(ctx); err != nil {
 		return err
 	}
-	return sdb.db.DeletePrefix(ctx, prefix)
+	if err := sdb.db.Delete(ctx, prefix); err != nil {
+		return err
+	}
+	return sdb.db.DeletePrefix(ctx, sdb.childPrefix(prefix))
 }
 
+// DeleteErrors deletes the errors logged for prefix and all of the prefixes
+// beneath it, but not for siblings that share it as a string prefix.
 func (sdb *scanDB) DeleteErrors(ctx context.Context, prefix string) error {
-	return sdb.db.DeleteErrors(ctx, prefix)
+	if err := sdb.db.DeleteError(ctx, prefix); err != nil {
+		return err
+	}
+	return sdb.db.DeleteErrors(ctx, sdb.childPrefix(prefix))
 }
 
 func (sdb *scanDB) GetPrefixInfo(ctx context.Context, key string, pi *prefixinfo.T) (bool, error) {
