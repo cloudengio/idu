@@ -235,10 +235,13 @@ func createSparseFile(ctx context.Context, t *testing.T, name string, size int64
 	return stats.SparseBytes(fi.Size(), xattr.Blocks)
 }
 
-func TestSparseFilesSummariesMatchRescan(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	root, err := filepath.EvalSymlinks(tmpDir)
+// createSparseTree creates a tree containing a sparse file, a dense file
+// and a hardlink to the sparse file in a sibling directory, and returns
+// its root and the number of the sparse file's bytes that are expected to
+// be reported as sparse.
+func createSparseTree(ctx context.Context, t *testing.T, dir string) (string, int64) {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,6 +263,13 @@ func TestSparseFilesSummariesMatchRescan(t *testing.T) {
 	if err := os.Link(filepath.Join(root, "s", "sparse"), filepath.Join(root, "t", "link")); err != nil {
 		t.Fatal(err)
 	}
+	return root, sparse
+}
+
+func TestSparseFilesSummariesMatchRescan(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	root, sparse := createSparseTree(ctx, t, tmpDir)
 	wantFiles := int64(0)
 	if sparse > 0 {
 		wantFiles = 1
