@@ -403,3 +403,79 @@ func testExists(t *testing.T, factory databaseFactory) {
 		t.Errorf("got %v, want nil", k)
 	}
 }
+
+func TestSummariesAndMeta(t *testing.T) {
+	ctx := context.Background()
+	tmpdir := t.TempDir()
+	db := badgerFactory(t, tmpdir, "/root", false)
+
+	entries := []struct {
+		key string
+		val string
+	}{
+		{"\x00a", "a"},
+		{"\x00a-b", "a-b"},
+		{"\x00a\x00b", "ab"},
+		{"\x00a\x00b\x00c", "abc"},
+		{"\x00b", "b"},
+	}
+	for i, e := range entries {
+		if err := db.SetSummary(ctx, e.key, []byte(e.val), i%2 == 1); err != nil {
+			t.Fatalf("SetSummary(%q): %v", e.key, err)
+		}
+	}
+	if err := db.SetMeta(ctx, "summaries/v1", []byte("block(4096)")); err != nil {
+		t.Fatalf("SetMeta: %v", err)
+	}
+	if err := db.Close(ctx); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	rdb := badgerFactory(t, tmpdir, "/root", true)
+	var metaBuf bytes.Buffer
+	if err := rdb.GetMeta(ctx, "summaries/v1", &metaBuf); err != nil {
+		t.Fatalf("GetMeta: %v", err)
+	}
+	if got := metaBuf.String(); got != "block(4096)" {
+		t.Errorf("GetMeta = %q, want %q", got, "block(4096)")
+	}
+	var missingBuf bytes.Buffer
+	if err := rdb.GetMeta(ctx, "does-not-exist", &missingBuf); err != nil {
+		t.Fatalf("GetMeta missing: %v", err)
+	}
+	if missingBuf.Len() != 0 {
+		t.Errorf("missing GetMeta len = %d, want 0", missingBuf.Len())
+	}
+
+	// Scan only subtree "\x00a" + "\x00a\x00": must return \x00a, \x00a\x00b, \x00a\x00b\x00c and NOT \x00a-b or \x00b.
+	var gotSub []string
+	if err := rdb.ScanSummaries(ctx, "\x00a", "\x00a\x00", func(_ context.Context, k string, v []byte) bool {
+		gotSub = append(gotSub, k+"="+string(v))
+		return true
+	}); err != nil {
+		t.Fatalf("ScanSummaries: %v", err)
+	}
+	wantSub := []string{"\x00a=a", "\x00a\x00b=ab", "\x00a\x00b\x00c=abc"}
+	if !reflect.DeepEqual(gotSub, wantSub) {
+		t.Errorf("ScanSummaries subtree = %v, want %v", gotSub, wantSub)
+	}
+	_ = rdb.Close(ctx)
+
+	// DeleteSummary on \x00a removes \x00a and \x00a\x00* while keeping \x00a-b and \x00b intact.
+	wdb := badgerFactory(t, tmpdir, "/root", false)
+	if err := wdb.DeleteSummary(ctx, "\x00a", "\x00a\x00"); err != nil {
+		t.Fatalf("DeleteSummary: %v", err)
+	}
+	var remaining []string
+	if err := wdb.ScanSummaries(ctx, "", "", func(_ context.Context, k string, _ []byte) bool {
+		remaining = append(remaining, k)
+		return true
+	}); err != nil {
+		t.Fatalf("ScanSummaries all: %v", err)
+	}
+	wantRem := []string{"\x00a-b", "\x00b"}
+	if !reflect.DeepEqual(remaining, wantRem) {
+		t.Errorf("remaining summaries = %v, want %v", remaining, wantRem)
+	}
+	_ = wdb.Close(ctx)
+}
