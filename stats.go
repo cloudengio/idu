@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -21,7 +22,6 @@ import (
 	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/cmd/idu/internal/database"
 	"cloudeng.io/cmd/idu/internal/hardlinks"
-	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/cmd/idu/internal/usernames"
 	"cloudeng.io/cmd/idu/stats"
@@ -87,7 +87,16 @@ func saveStats(dir, file string, stats statsFileFormat) error {
 }
 
 type statsCmds struct {
+	// readers is the number of goroutines used to read prefix metadata
+	// concurrently, defaultPrefixReaders if zero.
+	readers int
 }
+
+// defaultPrefixReaders is the default number of goroutines used to read
+// prefix metadata concurrently. Stats computation is generally limited by
+// the single goroutine that must process the metadata in order, so there is
+// little benefit to more readers unless the database is not cached in memory.
+const defaultPrefixReaders = 4
 
 type StatsFlags struct {
 	DisplayN int  `subcmd:"display,10,number of top entries to display"`
@@ -227,7 +236,8 @@ func (st *statsCmds) computeFromSummaries(ctx context.Context, db database.DB, c
 // each prefix. The prefixes are visited in DFS pre-order using the summary
 // keys, which exist for every prefix, so that memory usage is proportional to
 // the depth of the tree and hardlinks are attributed to the same prefixes as
-// when using the summaries.
+// when using the summaries. The metadata is read and decoded concurrently,
+// but the stats, including hardlink deduplication, are computed in order.
 func (st *statsCmds) computeFromPrefixes(ctx context.Context, db database.DB, cfg *config.Prefix, match boolexpr.Matcher, prefix string, topN int, progress bool) (*reports.AllStats, error) {
 	if err := internal.CheckSummaryKeys(ctx, db); err != nil {
 		return nil, err
@@ -236,39 +246,31 @@ func (st *statsCmds) computeFromPrefixes(ctx context.Context, db database.DB, cf
 	sdb := reports.NewAllStats(prefix, topN)
 	agg := reports.NewSubtreeAggregator(prefix, topN)
 	exactKey, childPrefix := stats.SummaryKeys(sep, prefix)
+	readers := st.readers
+	if readers == 0 {
+		readers = min(defaultPrefixReaders, runtime.GOMAXPROCS(0))
+	}
 	n := 0
-	var buf bytes.Buffer
-	var getErr error
-	err := db.ScanSummaries(ctx, exactKey, childPrefix, func(ctx context.Context, sk string, _ []byte) bool {
+	err := readPrefixesInOrder(ctx, db, sep, exactKey, childPrefix, readers, func(e *prefixEntry) {
 		if progress && (n != 0 && n%1000 == 0) {
 			fmt.Printf("processed % 10v entries\n", fmtCount(int64(n)))
 		}
 		n++
-		k := stats.DecodeSummaryKey(sep, sk)
-		buf.Reset()
-		if getErr = db.Get(ctx, k, &buf); getErr != nil {
-			return false
+		switch {
+		case e.missing:
+			fmt.Fprintf(os.Stderr, "missing metadata for %v\n", e.prefix)
+			return
+		case e.decodeErr != nil:
+			fmt.Fprintf(os.Stderr, "failed to unmarshal value for %v: %v\n", e.prefix, e.decodeErr)
+			return
 		}
-		if buf.Len() == 0 {
-			fmt.Fprintf(os.Stderr, "missing metadata for %v\n", k)
-			return true
+		if !match.Prefix(e.prefix, &e.pi) {
+			return
 		}
-		var pi prefixinfo.T
-		if err := pi.UnmarshalBinary(buf.Bytes()); err != nil {
-			fmt.Fprintf(os.Stderr, "failed to unmarshal value for %v: %v\n", k, err)
-			return true
-		}
-		if !match.Prefix(k, &pi) {
-			return true
-		}
-		totals, users, groups := stats.ComputeTotals(k, &pi, calc, match)
-		sdb.RecordDirect(k, totals, users, groups)
-		agg.Step(sk, k, totals)
-		return true
+		totals, users, groups := stats.ComputeTotals(e.prefix, &e.pi, calc, match)
+		sdb.RecordDirect(e.prefix, totals, users, groups)
+		agg.Step(e.summaryKey, e.prefix, totals)
 	})
-	if err == nil {
-		err = getErr
-	}
 	if err != nil {
 		return nil, err
 	}

@@ -1,5 +1,4 @@
 # Package [cloudeng.io/cmd/idu/internal/database/badgerdb](https://pkg.go.dev/cloudeng.io/cmd/idu/internal/database/badgerdb?tab=doc)
-[![CircleCI](https://circleci.com/gh/cloudengio/go.gotools.svg?style=svg)](https://circleci.com/gh/cloudengio/go.gotools) [![Go Report Card](https://goreportcard.com/badge/cloudeng.io/cmd/idu/internal/database/badgerdb)](https://goreportcard.com/report/cloudeng.io/cmd/idu/internal/database/badgerdb)
 
 ```go
 import cloudeng.io/cmd/idu/internal/database/badgerdb
@@ -54,7 +53,7 @@ func (db *Database) Clear(_ context.Context, logs, errors bool) error
 
 
 ```go
-func (db *Database) Close(ctx context.Context) error
+func (db *Database) Close(_ context.Context) error
 ```
 Close closes the database.
 
@@ -108,6 +107,14 @@ func (db *Database) Get(ctx context.Context, prefix string, buf *bytes.Buffer) e
 
 
 ```go
+func (db *Database) GetBatch(ctx context.Context, keys []string, fn func(i int, val []byte) error) error
+```
+GetBatch calls fn with the value stored for each of keys, or nil if there is
+none, reading all of them within a single read transaction since creating a
+transaction per value is expensive.
+
+
+```go
 func (db *Database) GetMeta(ctx context.Context, key string, buf *bytes.Buffer) error
 ```
 GetMeta retrieves a metadata entry from the metadata bucket into buf.
@@ -126,6 +133,13 @@ func (db *Database) Log(ctx context.Context, start, stop time.Time, detail []byt
 ```go
 func (db *Database) LogError(ctx context.Context, key string, when time.Time, detail []byte) error
 ```
+
+
+```go
+func (db *Database) RunValueLogGC(discardRatio float64) error
+```
+RunValueLogGC runs Badger's value log garbage collection repeatedly until no
+more files meet discardRatio.
 
 
 ```go

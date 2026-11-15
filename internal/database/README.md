@@ -1,5 +1,4 @@
 # Package [cloudeng.io/cmd/idu/internal/database](https://pkg.go.dev/cloudeng.io/cmd/idu/internal/database?tab=doc)
-[![CircleCI](https://circleci.com/gh/cloudengio/go.gotools.svg?style=svg)](https://circleci.com/gh/cloudengio/go.gotools) [![Go Report Card](https://goreportcard.com/badge/cloudeng.io/cmd/idu/internal/database)](https://goreportcard.com/report/cloudeng.io/cmd/idu/internal/database)
 
 ```go
 import cloudeng.io/cmd/idu/internal/database
@@ -33,6 +32,12 @@ type DB interface {
 	// Get retrieves the value associated with prefix storing
 	// its contents in the supplied bytes.Buffer.
 	Get(ctx context.Context, prefix string, buf *bytes.Buffer) error
+
+	// GetBatch calls fn with the value associated with each of prefixes,
+	// or nil if there is none, in order. val is only valid for the duration
+	// of the call to fn. It is more efficient than calling Get for each
+	// prefix.
+	GetBatch(ctx context.Context, prefixes []string, fn func(i int, val []byte) error) error
 
 	// Delete deletes the value associated with exactly prefix, if any.
 	Delete(ctx context.Context, prefix string) error

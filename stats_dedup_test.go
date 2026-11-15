@@ -85,7 +85,7 @@ func totalsFor(sdb *reports.AllStats) statsTotals {
 	}
 }
 
-func hardlinkMatcher(ctx context.Context, t *testing.T) boolexpr.Matcher {
+func hardlinkMatcher(ctx context.Context, t testing.TB) boolexpr.Matcher {
 	t.Helper()
 	fs := localfs.New()
 	m, err := boolexpr.CreateMatcher(boolexpr.NewParser(ctx, fs),
