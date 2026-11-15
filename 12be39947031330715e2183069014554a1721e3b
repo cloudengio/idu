@@ -1,0 +1,23 @@
+--- Overview
+idu stats now builds its stats from the per-prefix summaries recorded during analysis instead of decoding every prefix's file metadata. It falls back to a full rescan when a filter expression is given or the summaries can't support hardlink deduplication.
+
+--- Key Changes
+  * stats command (stats.go)
+    * computeStats now picks one of two paths:
+      * computeFromSummaries: reads PrefixSummary records through ScanSummaries in DFS pre-order. If count_hardlinks_as_files is false, it deduplicates hardlinks through hardlinks.Incremental.
+      * computeFromPrefixes: used when a boolean filter expression is set, or when hardlinks are neither counted as files nor recorded. It walks the summary keys in the same DFS pre-order, so memory grows only with tree depth and hardlinks are attributed to the same prefixes as on the summaries path.
+    * The summaries path validates them with internal.CheckSummaries. It returns ErrStaleSummaries if the calculator ID doesn't match, or if hardlink info is missing when deduplication is required.
+    * The rescan path calls internal.CheckSummaryKeys. Database Get and scan errors are now returned instead of being ignored.
+    * computeStats now takes a config.Prefix instead of a diskusage.Calculator.
+  * internal/boolexpr
+    * Added Matcher.HasExpression(), which reports whether an explicit filter expression was configured.
+  * internal/reports
+    * Added AllStats.RecordDirect, which pushes precomputed direct totals and per-user/per-group breakdowns. Update now delegates to it.
+  * Tests (stats_dedup_test.go)
+    * Checks that the summaries and rescan paths give the same totals and per-prefix results for a tree with hardlinks across sibling directories whose names share a prefix (a, a-b, ab).
+    * Covers incremental re-analysis, switching between the summaries and rescan dedup modes, and the ErrStaleSummaries cases.
+  * Docs
+    * Regenerated the package READMEs and removed the CircleCI/Go Report Card badges.
+
+--- Breaking Changes
+  * idu stats now needs summary data in the database, which only exists for databases analyzed after summaries were introduced. Older databases, and summaries that don't match the current calculator or hardlink-dedup settings, must be re-analyzed first.
