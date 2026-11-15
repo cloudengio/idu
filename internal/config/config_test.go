@@ -9,12 +9,14 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/cmdutil/cmdconfig"
+	"cloudeng.io/file/diskusage"
 )
 
 const simple = `
@@ -59,14 +61,8 @@ func TestSimple(t *testing.T) {
 	if got, want := cfg.Filesystems[0].Prefix, "/tmp"; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	// The configured block size is ignored on POSIX systems since the
-	// number of 512 byte blocks allocated is reported for every file.
-	if got, want := cfg.Filesystems[0].Calculator().Calculate(1, 1), int64(512); got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-	if got, want := cfg.Filesystems[1].Calculator().String(), "allocated"; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
+	checkAllocated(t, cfg.Filesystems[0].Calculator())
+	checkAllocated(t, cfg.Filesystems[1].Calculator())
 	if got, want := cfg.Filesystems[2].Calculator().Calculate(1, 1), int64(65536*4); got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
@@ -233,8 +229,24 @@ filesystems:
 	if got, want := data.Database, "/var/db/idu/data"; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
-	if got, want := data.Calculator().Calculate(1, 1), int64(512); got != want {
-		t.Errorf("got %v, want %v", got, want)
+	checkAllocated(t, data.Calculator())
+}
+
+// checkAllocated checks that calc uses the space allocated to files: on
+// POSIX systems the configured block size, if any, is ignored since the
+// number of 512 byte blocks allocated is reported for every file, whereas
+// on Windows file sizes are rounded up to the filesystem's cluster size.
+func checkAllocated(t *testing.T, calc diskusage.Calculator) {
+	t.Helper()
+	got := calc.Calculate(1, 1)
+	if runtime.GOOS == "windows" {
+		if got <= 0 || got%512 != 0 || !strings.HasPrefix(calc.String(), "allocated: ") {
+			t.Errorf("got %v (%v), want a multiple of 512 using the allocated calculator", got, calc)
+		}
+		return
+	}
+	if got != 512 || calc.String() != "allocated" {
+		t.Errorf("got %v (%v), want 512 using the allocated calculator", got, calc)
 	}
 }
 
@@ -310,6 +322,9 @@ func TestLoadConfigYAML(t *testing.T) {
 	workDir := t.TempDir()
 	t.Chdir(workDir)
 	t.Setenv("HOME", home)
+	// On Windows the configuration search path uses os.UserConfigDir,
+	// i.e. %APPDATA%, rather than $HOME/.config.
+	t.Setenv("APPDATA", filepath.Join(home, ".config"))
 	t.Setenv(config.EnvConfig, "")
 	t.Setenv(config.EnvVars, "")
 
@@ -408,6 +423,9 @@ func TestLoadConfigOverrides(t *testing.T) {
 	workDir := t.TempDir()
 	t.Chdir(workDir)
 	t.Setenv("HOME", home)
+	// On Windows the configuration search path uses os.UserConfigDir,
+	// i.e. %APPDATA%, rather than $HOME/.config.
+	t.Setenv("APPDATA", filepath.Join(home, ".config"))
 	t.Setenv(config.EnvConfig, "")
 	t.Setenv(config.EnvVars, "")
 
@@ -455,6 +473,9 @@ func TestLoadSearchPathFallback(t *testing.T) {
 	workDir := t.TempDir()
 	t.Chdir(workDir)
 	t.Setenv("HOME", home)
+	// On Windows the configuration search path uses os.UserConfigDir,
+	// i.e. %APPDATA%, rather than $HOME/.config.
+	t.Setenv("APPDATA", filepath.Join(home, ".config"))
 	t.Setenv(config.EnvConfig, "")
 	t.Setenv(config.EnvVars, "")
 
@@ -577,6 +598,9 @@ func TestLoadAndReadConfigErrorsShowFilesRead(t *testing.T) {
 	workDir := t.TempDir()
 	t.Chdir(workDir)
 	t.Setenv("HOME", home)
+	// On Windows the configuration search path uses os.UserConfigDir,
+	// i.e. %APPDATA%, rather than $HOME/.config.
+	t.Setenv("APPDATA", filepath.Join(home, ".config"))
 	t.Setenv(config.EnvConfig, "")
 	t.Setenv(config.EnvVars, "")
 

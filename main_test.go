@@ -21,7 +21,11 @@ var iduCommand string
 
 func TestMain(m *testing.M) {
 	tmpDir, _ := os.MkdirTemp("", "idu")
-	bin, err := executil.GoBuild(context.Background(), filepath.Join(tmpDir, "idu"), "cloudeng.io/cmd/idu")
+	name := "idu"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	bin, err := executil.GoBuild(context.Background(), filepath.Join(tmpDir, name), "cloudeng.io/cmd/idu")
 	if err != nil {
 		os.RemoveAll(tmpDir)
 		os.Exit(1)
@@ -100,7 +104,7 @@ func TestConfigSubcommandsAndUnits(t *testing.T) {
 	write("fs-a.yaml", "- name: fs-alpha\n  prefix: /fs/a\n  database: ${db_root}/a\n")
 	write("fs-b.yml", "- name: fs-beta\n  prefix: /fs/b\n  database: ${db_root}/b\n  layout:\n    calculator: block\n    parameters:\n      size: 4KiB\n")
 
-	env := append(os.Environ(), "HOME="+home, "IDU_CONFIG=", "IDU_ENV=")
+	env := append(os.Environ(), "HOME="+home, "APPDATA="+filepath.Join(home, ".config"), "IDU_CONFIG=", "IDU_ENV=")
 
 	out, err := runIDUEnv(env, "--units=binary", "config", "show")
 	if err != nil {
@@ -186,7 +190,7 @@ func TestConfigFallbackAndCLIFlowByName(t *testing.T) {
 	write("a.yaml", fmt.Sprintf("filesystems:\n  - name: mytree\n    prefix: %s\n    database: %s\n    stats_dir: %s\n", treeDir, dbPath, statsDir))
 	write("b.yml", "filesystems:\n  - name: other\n    prefix: /other\n    database: /tmp/db-other\n")
 
-	env := append(os.Environ(), "HOME="+home, "IDU_CONFIG=", "IDU_ENV=")
+	env := append(os.Environ(), "HOME="+home, "APPDATA="+filepath.Join(home, ".config"), "IDU_CONFIG=", "IDU_ENV=")
 
 	out, err := runIDUEnv(env, "config", "show")
 	if err != nil {
@@ -243,7 +247,7 @@ func TestConfigShowAndCommandsOnLoadError(t *testing.T) {
 	fsBad := write("fs-bad.yaml", "- name: bad\n  unknown_field: true\n")
 	envFile := write("vars.env", "TEST_VAR=1\n")
 
-	env := append(os.Environ(), "HOME="+home, "IDU_CONFIG=", "IDU_ENV=")
+	env := append(os.Environ(), "HOME="+home, "APPDATA="+filepath.Join(home, ".config"), "IDU_CONFIG=", "IDU_ENV=")
 
 	out, err := runIDUEnv(env, "config", "show")
 	if err == nil {
@@ -318,7 +322,7 @@ func verifyDistributedMode(t *testing.T, home, confDir, treeDir, fanoutRoot, nam
 	if err := os.WriteFile(cfgPath, []byte(cfgYAML), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env := append(os.Environ(), "HOME="+home, "IDU_CONFIG="+cfgPath, "IDU_ENV=")
+	env := append(os.Environ(), "HOME="+home, "APPDATA="+filepath.Join(home, ".config"), "IDU_CONFIG="+cfgPath, "IDU_ENV=")
 
 	if out, err := runIDUEnv(env, "analyze", name); err != nil {
 		t.Fatalf("%s analyze failed: %v\n%s", name, err, out)
