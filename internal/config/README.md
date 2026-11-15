@@ -76,7 +76,7 @@ in loc to w in the same format used by cmdconfig.ConfigCommands.Show.
 ### Type Block
 ```go
 type Block struct {
-	BlockSize cmdtypes.ByteSize `yaml:"size" doc:"block size used by this filesystem (e.g. 4KiB or 4096)"`
+	BlockSize cmdtypes.ByteSize `yaml:"size" doc:"block size used by this filesystem (e.g. 4KiB or 4096), it is only used if the space allocated to files cannot be determined automatically"`
 }
 ```
 
@@ -145,7 +145,7 @@ const (
 ### Type Layout
 ```go
 type Layout struct {
-	Calculator string    `yaml:"calculator" doc:"the type of disk usage calculator to use (bytes, block, raid0)"`
+	Calculator string    `yaml:"calculator" doc:"the type of disk usage calculator to use (allocated, bytes, block, raid0), defaults to allocated"`
 	Parameters yaml.Node `yaml:"parameters,omitempty" doc:"the layout parameters to use for this calculator"`
 }
 ```
