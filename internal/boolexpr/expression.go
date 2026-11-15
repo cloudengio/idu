@@ -158,6 +158,11 @@ type Matcher struct {
 	hl      *hardlinks.Incremental
 }
 
+// HasExpression reports whether an explicit boolean filter expression was configured.
+func (m Matcher) HasExpression() bool {
+	return m.exprSet
+}
+
 func (m Matcher) IsHardlink(xattr file.XAttr) bool {
 	if m.hl == nil {
 		return false

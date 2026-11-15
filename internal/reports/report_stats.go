@@ -228,8 +228,9 @@ func (s *AllStats) Finalize() {
 	}
 }
 
-func (s *AllStats) Update(prefix string, pi prefixinfo.T, calc diskusage.Calculator, matcher boolexpr.Matcher) error {
-	totals, users, groups := stats.ComputeTotals(prefix, &pi, calc, matcher)
+// RecordDirect pushes precomputed direct directory totals and per-ID
+// breakdowns into s.
+func (s *AllStats) RecordDirect(prefix string, totals stats.Totals, users, groups stats.PerIDTotals) {
 	s.Prefix.Push(prefix,
 		totals.Bytes,
 		totals.StorageBytes,
@@ -241,5 +242,10 @@ func (s *AllStats) Update(prefix string, pi prefixinfo.T, calc diskusage.Calcula
 	s.Prefix.TotalHardlinkDirs += totals.HardlinkDirs
 	s.PushPerUserStats(prefix, users)
 	s.PushPerGroupStats(prefix, groups)
+}
+
+func (s *AllStats) Update(prefix string, pi prefixinfo.T, calc diskusage.Calculator, matcher boolexpr.Matcher) error {
+	totals, users, groups := stats.ComputeTotals(prefix, &pi, calc, matcher)
+	s.RecordDirect(prefix, totals, users, groups)
 	return nil
 }
