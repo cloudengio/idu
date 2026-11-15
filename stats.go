@@ -18,12 +18,14 @@ import (
 	"cloudeng.io/algo/container/heap"
 	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/boolexpr"
+	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/cmd/idu/internal/database"
+	"cloudeng.io/cmd/idu/internal/hardlinks"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/cmd/idu/internal/usernames"
+	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/cmdutil/flags"
-	"cloudeng.io/file/diskusage"
 	"cloudeng.io/file/filewalk"
 	"cloudeng.io/file/localfs"
 )
@@ -131,7 +133,7 @@ func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *comput
 		return err
 	}
 
-	sdb, err := st.computeStats(ctx, rdb, match, target, cfg.Calculator(), cf.ComputeN, cf.Progress)
+	sdb, err := st.computeStats(ctx, rdb, cfg, match, target, cf.ComputeN, cf.Progress)
 	if err != nil {
 		rdb.Close(ctx)
 		return err
@@ -155,34 +157,119 @@ func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *comput
 	return saveStats(statsDir, cf.StatsFile, stats)
 }
 
-func (st *statsCmds) computeStats(ctx context.Context, db database.DB, match boolexpr.Matcher, prefix string, calc diskusage.Calculator, topN int, progress bool) (*reports.AllStats, error) {
+// computeStats computes stats for prefix using the precomputed summaries
+// unless they cannot be used, in which case all of the file metadata is
+// rescanned: summaries are computed without any filter expression and only
+// record what's needed to deduplicate hardlinks if configured to do so.
+func (st *statsCmds) computeStats(ctx context.Context, db database.DB, cfg config.Prefix, match boolexpr.Matcher, prefix string, topN int, progress bool) (*reports.AllStats, error) {
+	if match.HasExpression() || !cfg.CountHardlinkAsFiles && !cfg.RecordHardlinks() {
+		return st.computeFromPrefixes(ctx, db, &cfg, match, prefix, topN, progress)
+	}
+	return st.computeFromSummaries(ctx, db, &cfg, prefix, topN, progress)
+}
+
+func (st *statsCmds) computeFromSummaries(ctx context.Context, db database.DB, cfg *config.Prefix, prefix string, topN int, progress bool) (*reports.AllStats, error) {
+	calcID, sep := cfg.CalculatorOrDefault().String(), cfg.SeparatorOrDefault()
+	dedup := !cfg.CountHardlinkAsFiles
+	if err := internal.CheckSummaries(ctx, db, calcID, dedup); err != nil {
+		return nil, err
+	}
+	var hl *hardlinks.Incremental
+	if dedup {
+		hl = &hardlinks.Incremental{}
+	}
 	sdb := reports.NewAllStats(prefix, topN)
+	exactKey, childPrefix := stats.SummaryKeys(sep, prefix)
 	n := 0
-	err := db.Stream(ctx, prefix, func(_ context.Context, k string, v []byte) {
+	var summaryErr error
+	err := db.ScanSummaries(ctx, exactKey, childPrefix, func(_ context.Context, k string, v []byte) bool {
+		if progress && (n != 0 && n%1000 == 0) {
+			fmt.Printf("processed % 10v summary entries\n", fmtCount(int64(n)))
+		}
+		n++
+		path := stats.DecodeSummaryKey(sep, k)
+		var ps stats.PrefixSummary
+		if err := ps.UnmarshalBinary(v); err != nil {
+			summaryErr = fmt.Errorf("%v: %w", path, err)
+			return false
+		}
+		if ps.CalcID != calcID || dedup && !ps.HardlinkInfo {
+			summaryErr = fmt.Errorf("%v: %w", path, internal.ErrStaleSummaries)
+			return false
+		}
+		if dedup {
+			// Summaries are visited in DFS pre-order, hence the
+			// first of a set of hardlinks encountered is the one counted.
+			ps.ApplyHardlinks(hl)
+		}
+		sdb.RecordDirect(path, ps.Direct, ps.PerUser, ps.PerGroup)
+		return true
+	})
+	if err == nil {
+		err = summaryErr
+	}
+	if err != nil {
+		return nil, err
+	}
+	if progress {
+		fmt.Printf("processed % 10v summary entries\n", fmtCount(int64(n)))
+	}
+	sdb.Finalize()
+	return sdb, nil
+}
+
+// computeFromPrefixes computes stats from all of the file metadata stored for
+// each prefix. The prefixes are visited in DFS pre-order using the summary
+// keys, which exist for every prefix, so that memory usage is proportional to
+// the depth of the tree and hardlinks are attributed to the same prefixes as
+// when using the summaries.
+func (st *statsCmds) computeFromPrefixes(ctx context.Context, db database.DB, cfg *config.Prefix, match boolexpr.Matcher, prefix string, topN int, progress bool) (*reports.AllStats, error) {
+	if err := internal.CheckSummaryKeys(ctx, db); err != nil {
+		return nil, err
+	}
+	calc, sep := cfg.CalculatorOrDefault(), cfg.SeparatorOrDefault()
+	sdb := reports.NewAllStats(prefix, topN)
+	exactKey, childPrefix := stats.SummaryKeys(sep, prefix)
+	n := 0
+	var buf bytes.Buffer
+	var getErr error
+	err := db.ScanSummaries(ctx, exactKey, childPrefix, func(ctx context.Context, sk string, _ []byte) bool {
 		if progress && (n != 0 && n%1000 == 0) {
 			fmt.Printf("processed % 10v entries\n", fmtCount(int64(n)))
 		}
 		n++
+		k := stats.DecodeSummaryKey(sep, sk)
+		buf.Reset()
+		if getErr = db.Get(ctx, k, &buf); getErr != nil {
+			return false
+		}
+		if buf.Len() == 0 {
+			fmt.Fprintf(os.Stderr, "missing metadata for %v\n", k)
+			return true
+		}
 		var pi prefixinfo.T
-		if err := pi.UnmarshalBinary(v); err != nil {
+		if err := pi.UnmarshalBinary(buf.Bytes()); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to unmarshal value for %v: %v\n", k, err)
-			return
+			return true
 		}
 		if !match.Prefix(k, &pi) {
-			return
+			return true
 		}
-		if err := sdb.Update(k, pi, calc, match); err != nil {
-			fmt.Fprintf(os.Stderr, "failed to compute stats for %v: %v\n", k, err)
-			return
-		}
+		totals, users, groups := stats.ComputeTotals(k, &pi, calc, match)
+		sdb.RecordDirect(k, totals, users, groups)
+		return true
 	})
-
+	if err == nil {
+		err = getErr
+	}
+	if err != nil {
+		return nil, err
+	}
 	if progress {
 		fmt.Printf("processed % 10v entries\n", fmtCount(int64(n)))
 	}
-
 	sdb.Finalize()
-	return sdb, err
+	return sdb, nil
 }
 
 func (st *statsCmds) view(_ context.Context, values interface{}, args []string) error {

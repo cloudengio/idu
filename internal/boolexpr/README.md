@@ -1,5 +1,4 @@
 # Package [cloudeng.io/cmd/idu/internal/boolexpr](https://pkg.go.dev/cloudeng.io/cmd/idu/internal/boolexpr?tab=doc)
-[![CircleCI](https://circleci.com/gh/cloudengio/go.gotools.svg?style=svg)](https://circleci.com/gh/cloudengio/go.gotools) [![Go Report Card](https://goreportcard.com/badge/cloudeng.io/cmd/idu/internal/boolexpr)](https://goreportcard.com/report/cloudeng.io/cmd/idu/internal/boolexpr)
 
 ```go
 import cloudeng.io/cmd/idu/internal/boolexpr
@@ -56,6 +55,13 @@ func CreateMatcher(parser *boolexpr.Parser, opts ...Option) (Matcher, error)
 ```go
 func (m Matcher) Entry(prefix string, pi *prefixinfo.T, fi file.Info) bool
 ```
+
+
+```go
+func (m Matcher) HasExpression() bool
+```
+HasExpression reports whether an explicit boolean filter expression was
+configured.
 
 
 ```go

@@ -1,5 +1,4 @@
 # Package [cloudeng.io/cmd/idu/internal/reports](https://pkg.go.dev/cloudeng.io/cmd/idu/internal/reports?tab=doc)
-[![CircleCI](https://circleci.com/gh/cloudengio/go.gotools.svg?style=svg)](https://circleci.com/gh/cloudengio/go.gotools) [![Go Report Card](https://goreportcard.com/badge/cloudeng.io/cmd/idu/internal/reports)](https://goreportcard.com/report/cloudeng.io/cmd/idu/internal/reports)
 
 ```go
 import cloudeng.io/cmd/idu/internal/reports
@@ -55,6 +54,13 @@ func (s *AllStats) PushPerGroupStats(prefix string, ug stats.PerIDTotals)
 ```go
 func (s *AllStats) PushPerUserStats(prefix string, us stats.PerIDTotals)
 ```
+
+
+```go
+func (s *AllStats) RecordDirect(prefix string, totals stats.Totals, users, groups stats.PerIDTotals)
+```
+RecordDirect pushes precomputed direct directory totals and per-ID
+breakdowns into s.
 
 
 ```go
