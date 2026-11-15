@@ -15,7 +15,8 @@
 # vendor/
 
 .vscode
-reports/
+# Generated reports, but not the internal/reports package.
+/reports/
 .*.swp
 
 .gograph/
