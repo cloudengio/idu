@@ -13,12 +13,7 @@ jobs:
   test:
     uses: cloudengio/.github/.github/workflows/go-test-multimod.yml@main
     with:
-      os-version: windows-latest
+      runner:
+        [ "windows-latest" ]
       go-versions: |
         [ "1.27.x" ]
-
-  lint:
-    uses: cloudengio/.github/.github/workflows/go-lint-multimod.yml@main
-    with:
-      os-version: windows-latest
-      go-version: "1.27.x"
