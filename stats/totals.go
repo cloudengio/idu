@@ -15,7 +15,7 @@ import (
 
 // totalsVersion is the version of the binary encoding of Totals.
 // TODO: add a new version for windows since IDs will be strings there.
-const totalsVersion = 0x1
+const totalsVersion = 0x2
 
 // TODO: parametize the ID type to be int64 or string for non-posix system.
 type Totals struct {
@@ -28,6 +28,30 @@ type Totals struct {
 	PrefixBytes  int64 // total size of prefixes
 	Hardlinks    int64 // number of hardlinks
 	HardlinkDirs int64 // number of hardlinks to directories
+	SparseFiles  int64 // number of sparse files, see SparseBytes
+	SparseBytes  int64 // total size of sparse files not allocated on disk
+}
+
+// SparseThreshold is the minimum number of bytes of a file's size that
+// must not be allocated on disk for it to be considered sparse. It
+// excludes small files whose data is stored inline in their inode or
+// directory entry and hence have no allocated blocks, as well as
+// platforms, such as Windows, that derive the number of blocks from the
+// file's size.
+const SparseThreshold = 64 * 1024
+
+// blockSize is the unit of file.XAttr.Blocks, i.e. of st_blocks.
+const blockSize = 512
+
+// SparseBytes returns the number of bytes of a file of size bytes that
+// occupies blocks blocks that are not allocated on disk, or zero if
+// that is less than SparseThreshold. Note that compressed files will
+// also appear sparse.
+func SparseBytes(size, blocks int64) int64 {
+	if unallocated := size - blocks*blockSize; unallocated >= SparseThreshold {
+		return unallocated
+	}
+	return 0
 }
 
 type PerIDTotals []Totals
@@ -43,6 +67,8 @@ func (t *Totals) AppendBinary(data []byte) []byte {
 	data = binary.AppendVarint(data, t.SubPrefixes)
 	data = binary.AppendVarint(data, t.Hardlinks)
 	data = binary.AppendVarint(data, t.HardlinkDirs)
+	data = binary.AppendVarint(data, t.SparseFiles)
+	data = binary.AppendVarint(data, t.SparseBytes)
 	return data
 }
 
@@ -75,6 +101,10 @@ func (t *Totals) DecodeBinary(data []byte) []byte {
 	t.Hardlinks, n = binary.Varint(data)
 	data = data[n:]
 	t.HardlinkDirs, n = binary.Varint(data)
+	data = data[n:]
+	t.SparseFiles, n = binary.Varint(data)
+	data = data[n:]
+	t.SparseBytes, n = binary.Varint(data)
 	return data[n:]
 }
 
@@ -111,10 +141,14 @@ func (pid *PerIDTotals) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-func (t Totals) update(bytes, storageBytes int64) Totals {
+func (t Totals) update(bytes, storageBytes, sparseBytes int64) Totals {
 	t.Files++
 	t.Bytes += bytes
 	t.StorageBytes += storageBytes
+	if sparseBytes > 0 {
+		t.SparseFiles++
+		t.SparseBytes += sparseBytes
+	}
 	return t
 }
 
@@ -138,6 +172,8 @@ func (t *Totals) Add(other Totals) {
 	t.PrefixBytes += other.PrefixBytes
 	t.Hardlinks += other.Hardlinks
 	t.HardlinkDirs += other.HardlinkDirs
+	t.SparseFiles += other.SparseFiles
+	t.SparseBytes += other.SparseBytes
 }
 
 type perID map[int64]Totals
@@ -205,9 +241,10 @@ func ComputeTotals(prefix string, pi *prefixinfo.T, du diskusage.Calculator, mat
 
 		bytes := fi.Size()
 		storageBytes := du.Calculate(bytes, xattr.Blocks)
-		totals = totals.update(bytes, storageBytes)
-		user[xattr.UID] = user[xattr.UID].update(bytes, storageBytes)
-		group[xattr.GID] = group[xattr.GID].update(bytes, storageBytes)
+		sparseBytes := SparseBytes(bytes, xattr.Blocks)
+		totals = totals.update(bytes, storageBytes, sparseBytes)
+		user[xattr.UID] = user[xattr.UID].update(bytes, storageBytes, sparseBytes)
+		group[xattr.GID] = group[xattr.GID].update(bytes, storageBytes, sparseBytes)
 
 		if verbose {
 			fmt.Printf("%v\t%v/%v\n", (xattr.Blocks*512)/1024, prefix, fi.Name())

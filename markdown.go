@@ -57,6 +57,8 @@ const mdTotals = `
 | Prefixes | {{fmtCount .Heaps.TotalPrefixes}} |
 | Prefixes + Files | {{fmtCount .TotalPrefixesAndFiles}} |
 | Prefix Bytes | {{fmtBytes .Heaps.TotalPrefixBytes}} |
+| Sparse Files | {{fmtCount .Heaps.TotalSparseFiles}} |
+| Sparse Bytes (not allocated) | {{fmtBytes .Heaps.TotalSparseBytes}} |
 
 `
 
@@ -95,6 +97,14 @@ const mdPrefixes = `
 {{range .PrefixBytes}}| {{fmtBytes .K}} |  {{.V}} |
 {{end}}
 
+{{if .SparseBytes}}
+### Top {{.TopN}} prefixes by sparse bytes not allocated on disk
+| Sparse Bytes | Prefix |
+| ---: | :--- |
+{{range .SparseBytes}}| {{fmtBytes .K}} |  {{.V}} |
+{{end}}
+{{end}}
+
 `
 
 const mdSubtrees = `
@@ -124,6 +134,14 @@ const mdSubtrees = `
 | Directories | Subtree |
 | ---: | :--- |
 {{range .Prefixes}}| {{fmtCount .K}} |  {{.V}} |
+{{end}}
+
+{{if .SparseBytes}}
+### Top {{.TopN}} subtrees by sparse bytes not allocated on disk
+| Sparse Bytes | Subtree |
+| ---: | :--- |
+{{range .SparseBytes}}| {{fmtBytes .K}} |  {{.V}} |
+{{end}}
 {{end}}
 
 `
@@ -233,6 +251,7 @@ type mdHeap[T comparable] struct {
 	Files        []reports.Zipped[T]
 	Prefixes     []reports.Zipped[T]
 	PrefixBytes  []reports.Zipped[T]
+	SparseBytes  []reports.Zipped[T]
 }
 
 type mdPerIDHeap struct {
@@ -350,6 +369,7 @@ func (md *markdownReports) generateReports(rf *generateReportsFlags, filenames *
 		Prefixes:     reports.ZipN(sdb.Prefix.Prefixes, rf.Markdown),
 		StorageBytes: reports.ZipN(sdb.Prefix.StorageBytes, rf.Markdown),
 		PrefixBytes:  reports.ZipN(sdb.Prefix.PrefixBytes, rf.Markdown),
+		SparseBytes:  reports.ZipN(sdb.Prefix.SparseBytes, rf.Markdown),
 	}
 
 	if err := md.prefixes.Execute(out, byPrefix); err != nil {
@@ -365,6 +385,7 @@ func (md *markdownReports) generateReports(rf *generateReportsFlags, filenames *
 			Prefixes:     reports.ZipN(sdb.Subtree.Prefixes, rf.Markdown),
 			StorageBytes: reports.ZipN(sdb.Subtree.StorageBytes, rf.Markdown),
 			PrefixBytes:  reports.ZipN(sdb.Subtree.PrefixBytes, rf.Markdown),
+			SparseBytes:  reports.ZipN(sdb.Subtree.SparseBytes, rf.Markdown),
 		}
 		if err := md.subtrees.Execute(out, bySubtree); err != nil {
 			return err

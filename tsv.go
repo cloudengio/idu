@@ -56,14 +56,15 @@ func (tr *tsvReports) formatMerged(merged map[string]reports.MergedStats) []byte
 	out := &bytes.Buffer{}
 	wr := csv.NewWriter(out)
 	wr.Comma = '\t'
-	wr.Write([]string{"prefix", "bytes", "storage bytes", "files", "directories", "directory bytes"}) //nolint:errcheck
+	wr.Write([]string{"prefix", "bytes", "storage bytes", "files", "directories", "directory bytes", "sparse bytes"}) //nolint:errcheck
 	for k, v := range merged {
 		wr.Write([]string{k, //nolint:errcheck
 			strconv.FormatInt(v.Bytes, 10),
 			strconv.FormatInt(v.Storage, 10),
 			strconv.FormatInt(v.Files, 10),
 			strconv.FormatInt(v.Prefixes, 10),
-			strconv.FormatInt(v.PrefixBytes, 10)})
+			strconv.FormatInt(v.PrefixBytes, 10),
+			strconv.FormatInt(v.SparseBytes, 10)})
 	}
 	wr.Flush()
 	return out.Bytes()
@@ -73,7 +74,7 @@ func (tr *tsvReports) formatUserGroupMerged(merged map[int64]reports.MergedStats
 	out := &bytes.Buffer{}
 	wr := csv.NewWriter(out)
 	wr.Comma = '\t'
-	wr.Write([]string{"id", "idname", "bytes", "storage bytes", "files", "directories", "directory bytes"}) //nolint:errcheck
+	wr.Write([]string{"id", "idname", "bytes", "storage bytes", "files", "directories", "directory bytes", "sparse bytes"}) //nolint:errcheck
 	for k, v := range merged {
 		wr.Write([]string{ //nolint:errcheck
 			strconv.FormatInt(k, 10),
@@ -83,6 +84,7 @@ func (tr *tsvReports) formatUserGroupMerged(merged map[int64]reports.MergedStats
 			strconv.FormatInt(v.Files, 10),
 			strconv.FormatInt(v.Prefixes, 10),
 			strconv.FormatInt(v.PrefixBytes, 10),
+			strconv.FormatInt(v.SparseBytes, 10),
 		})
 	}
 	wr.Flush()

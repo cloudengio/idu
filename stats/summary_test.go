@@ -79,9 +79,11 @@ func TestPrefixSummaryBinaryRoundTrip(t *testing.T) {
 			PrefixBytes:  4096,
 			Hardlinks:    2,
 			HardlinkDirs: 0,
+			SparseFiles:  1,
+			SparseBytes:  1 << 20,
 		},
 		PerUser: stats.PerIDTotals{
-			{ID: 501, Files: 10, Prefix: 1, SubPrefixes: 3, Bytes: 8192, StorageBytes: 8192, PrefixBytes: 4096},
+			{ID: 501, Files: 10, Prefix: 1, SubPrefixes: 3, Bytes: 8192, StorageBytes: 8192, PrefixBytes: 4096, SparseFiles: 1, SparseBytes: 1 << 20},
 			{ID: 502, Files: 2, Bytes: 2048, StorageBytes: 4096},
 		},
 		PerGroup: stats.PerIDTotals{
@@ -126,10 +128,10 @@ func TestPrefixSummaryBinaryRoundTrip(t *testing.T) {
 }
 
 func TestTotalsAdd(t *testing.T) {
-	a := stats.Totals{Files: 1, Prefix: 1, SubPrefixes: 2, Bytes: 100, StorageBytes: 4096, PrefixBytes: 4096, Hardlinks: 1}
-	b := stats.Totals{Files: 3, Prefix: 1, SubPrefixes: 0, Bytes: 250, StorageBytes: 8192, PrefixBytes: 4096, HardlinkDirs: 1}
+	a := stats.Totals{Files: 1, Prefix: 1, SubPrefixes: 2, Bytes: 100, StorageBytes: 4096, PrefixBytes: 4096, Hardlinks: 1, SparseFiles: 1, SparseBytes: 1000}
+	b := stats.Totals{Files: 3, Prefix: 1, SubPrefixes: 0, Bytes: 250, StorageBytes: 8192, PrefixBytes: 4096, HardlinkDirs: 1, SparseFiles: 2, SparseBytes: 500}
 	a.Add(b)
-	want := stats.Totals{Files: 4, Prefix: 2, SubPrefixes: 2, Bytes: 350, StorageBytes: 12288, PrefixBytes: 8192, Hardlinks: 1, HardlinkDirs: 1}
+	want := stats.Totals{Files: 4, Prefix: 2, SubPrefixes: 2, Bytes: 350, StorageBytes: 12288, PrefixBytes: 8192, Hardlinks: 1, HardlinkDirs: 1, SparseFiles: 3, SparseBytes: 1500}
 	if a != want {
 		t.Errorf("Add = %+v, want %+v", a, want)
 	}
@@ -144,6 +146,59 @@ func newLinkTestPrefix(dev, ino uint64, files ...file.Info) prefixinfo.T {
 
 func newLinkTestFile(name string, size int64, ino, nlink uint64) file.Info {
 	return file.NewInfo(name, size, 0o644, time.Now(), file.XAttr{UID: 1, GID: 2, FileID: ino, Hardlinks: nlink})
+}
+
+func newSparseTestFile(name string, size, blocks int64, ino, nlink uint64) file.Info {
+	return file.NewInfo(name, size, 0o644, time.Now(), file.XAttr{UID: 1, GID: 2, FileID: ino, Hardlinks: nlink, Blocks: blocks})
+}
+
+func TestSparseBytes(t *testing.T) {
+	for _, tc := range []struct {
+		size, blocks, want int64
+	}{
+		{0, 0, 0},
+		// Small files stored inline have no blocks.
+		{100, 0, 0},
+		// Allocated space is rounded up to a whole number of blocks.
+		{100, 8, 0},
+		{1 << 20, (1 << 20) / 512, 0},
+		{stats.SparseThreshold - 1, 0, 0},
+		{stats.SparseThreshold, 0, stats.SparseThreshold},
+		{1 << 30, 8, 1<<30 - 8*512},
+		// Windows derives blocks from the size.
+		{1<<30 + 511, (1<<30 + 511) / 512, 0},
+	} {
+		if got := stats.SparseBytes(tc.size, tc.blocks); got != tc.want {
+			t.Errorf("SparseBytes(%v, %v) = %v, want %v", tc.size, tc.blocks, got, tc.want)
+		}
+	}
+}
+
+func TestComputeTotalsSparse(t *testing.T) {
+	calc := diskusage.NewBlock(512)
+	match := boolexpr.AlwaysMatch(nil)
+	pi := newLinkTestPrefix(7, 1,
+		newSparseTestFile("dense", 1<<20, (1<<20)/512, 2, 1),
+		newSparseTestFile("sparse", 1<<30, 8, 3, 1),
+		newSparseTestFile("inline", 100, 0, 4, 1),
+	)
+	totals, users, groups := stats.ComputeTotals("/dir", &pi, calc, match)
+	sparse := int64(1<<30 - 8*512)
+	if got, want := totals.SparseFiles, int64(1); got != want {
+		t.Errorf("got %v sparse files, want %v", got, want)
+	}
+	if got, want := totals.SparseBytes, sparse; got != want {
+		t.Errorf("got %v sparse bytes, want %v", got, want)
+	}
+	// Bytes is the size of the files whereas StorageBytes is what's allocated.
+	if got, want := totals.Bytes-totals.StorageBytes, sparse+100+100; got != want {
+		t.Errorf("got bytes-storage %v, want %v", got, want)
+	}
+	for _, pid := range []stats.PerIDTotals{users, groups} {
+		if len(pid) != 1 || pid[0].SparseFiles != 1 || pid[0].SparseBytes != sparse {
+			t.Errorf("per id: got %+v", pid)
+		}
+	}
 }
 
 func TestComputeSummaryRecordsFiles(t *testing.T) {
@@ -175,8 +230,10 @@ func TestComputeSummaryRecordsFiles(t *testing.T) {
 func TestApplyHardlinks(t *testing.T) {
 	calc := diskusage.NewIdentity()
 	match := boolexpr.AlwaysMatch(nil)
-	first := newLinkTestPrefix(7, 1, newLinkTestFile("f", 20, 3, 2), newLinkTestFile("g", 5, 4, 1))
-	second := newLinkTestPrefix(7, 2, newLinkTestFile("l", 20, 3, 2), newLinkTestFile("h", 7, 5, 1))
+	first := newLinkTestPrefix(7, 1, newLinkTestFile("f", 20, 3, 2), newLinkTestFile("g", 5, 4, 1),
+		newSparseTestFile("s", 1<<30, 8, 7, 2))
+	second := newLinkTestPrefix(7, 2, newLinkTestFile("l", 20, 3, 2), newLinkTestFile("h", 7, 5, 1),
+		newSparseTestFile("sl", 1<<30, 8, 7, 2))
 	dupDir := newLinkTestPrefix(7, 1, newLinkTestFile("x", 9, 6, 2))
 
 	hl := &hardlinks.Incremental{}
@@ -214,6 +271,7 @@ func TestPrefixSummaryFilesRoundTrip(t *testing.T) {
 		Files: []stats.FileEntry{
 			{FileID: 3, UID: 1, GID: 2, Bytes: 20, StorageBytes: 4096},
 			{FileID: 4, UID: -1, GID: -1, Bytes: 10, StorageBytes: 512},
+			{FileID: 5, UID: 1, GID: 2, Bytes: 1 << 30, StorageBytes: 4096, SparseBytes: 1<<30 - 4096},
 		},
 	}
 	data := in.AppendBinary(nil)

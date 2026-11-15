@@ -165,11 +165,16 @@ type Heaps[T comparable] struct {
 	TotalPrefixBytes              int64
 	TotalHardlinks                int64
 	TotalHardlinkDirs             int64
+	TotalSparseFiles              int64
+	TotalSparseBytes              int64
 	Bytes                         *heap.MinMax[int64, T]
 	StorageBytes                  *heap.MinMax[int64, T]
 	PrefixBytes                   *heap.MinMax[int64, T]
 	Files                         *heap.MinMax[int64, T]
 	Prefixes                      *heap.MinMax[int64, T]
+	// SparseBytes will be nil for stats computed before sparse files
+	// were tracked.
+	SparseBytes *heap.MinMax[int64, T]
 }
 ```
 Heaps is a collection of heap data structures for determining the top N
@@ -185,8 +190,10 @@ func (h *Heaps[T]) Merge(n int) map[T]MergedStats
 
 
 ```go
-func (h *Heaps[T]) Push(item T, bytes, storageBytes, prefixBytes, files, prefixes, children int64)
+func (h *Heaps[T]) Push(item T, t stats.Totals)
 ```
+Push pushes item into the top N heaps and adds t, other than its hardlink
+counts, to the totals for h.
 
 
 
@@ -202,6 +209,7 @@ type MergedStats struct {
 	Files       int64  `json:"files"`
 	Prefixes    int64  `json:"prefixes"`
 	PrefixBytes int64  `json:"prefix_bytes"`
+	SparseBytes int64  `json:"sparse_bytes,omitempty"`
 }
 ```
 
@@ -219,7 +227,7 @@ PerIDStats is a collection of statistics on a per user/group basis.
 ### Methods
 
 ```go
-func (s *PerIDStats) Push(id int64, prefix string, size, storageBytes, prefixBytes, files, prefixCount, children int64)
+func (s *PerIDStats) Push(id int64, prefix string, t stats.Totals)
 ```
 
 

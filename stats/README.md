@@ -5,6 +5,26 @@ import cloudeng.io/cmd/idu/stats
 ```
 
 
+## Constants
+### PrefixSummaryVersion
+```go
+const PrefixSummaryVersion = 0x3
+```
+PrefixSummaryVersion is the version of the binary encoding of PrefixSummary,
+which includes that of Totals.
+
+### SparseThreshold
+```go
+const SparseThreshold = 64 * 1024
+```
+SparseThreshold is the minimum number of bytes of a file's size that must
+not be allocated on disk for it to be considered sparse. It excludes small
+files whose data is stored inline in their inode or directory entry and
+hence have no allocated blocks, as well as platforms, such as Windows,
+that derive the number of blocks from the file's size.
+
+
+
 ## Functions
 ### Func ComputeTotals
 ```go
@@ -23,6 +43,15 @@ Note that:
 func DecodeSummaryKey(sep, key string) string
 ```
 DecodeSummaryKey reverses SummaryKeys back to a filesystem path.
+
+### Func SparseBytes
+```go
+func SparseBytes(size, blocks int64) int64
+```
+SparseBytes returns the number of bytes of a file of size bytes that
+occupies blocks blocks that are not allocated on disk, or zero if that
+is less than SparseThreshold. Note that compressed files will also appear
+sparse.
 
 ### Func SummaryKeys
 ```go
@@ -44,6 +73,7 @@ type FileEntry struct {
 	UID, GID     int64
 	Bytes        int64
 	StorageBytes int64
+	SparseBytes  int64
 }
 ```
 FileEntry records the contribution of a file to the totals of the prefix
@@ -160,6 +190,8 @@ type Totals struct {
 	PrefixBytes  int64 // total size of prefixes
 	Hardlinks    int64 // number of hardlinks
 	HardlinkDirs int64 // number of hardlinks to directories
+	SparseFiles  int64 // number of sparse files, see SparseBytes
+	SparseBytes  int64 // total size of sparse files not allocated on disk
 }
 ```
 TODO: parametize the ID type to be int64 or string for non-posix system.
