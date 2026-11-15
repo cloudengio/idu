@@ -281,3 +281,91 @@ func TestConfigShowAndCommandsOnLoadError(t *testing.T) {
 		t.Fatalf("missing --config output mismatch: %v", err)
 	}
 }
+
+func createFanoutFixtureTree(t *testing.T, treeDir string) (fanoutRoot string) {
+	t.Helper()
+	fanoutRoot = filepath.Join(treeDir, "wrapper", "fanout")
+	payload := make([]byte, 2048)
+	for b := 0; b < 3; b++ {
+		for c := 0; c < 3; c++ {
+			leaf := filepath.Join(fanoutRoot, fmt.Sprintf("b%d", b), fmt.Sprintf("c%d", c))
+			if err := os.MkdirAll(leaf, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(leaf, "data.bin"), payload, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	singleDir := filepath.Join(treeDir, "single")
+	if err := os.MkdirAll(singleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(singleDir, "big.bin"), make([]byte, 4096), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return fanoutRoot
+}
+
+func verifyDistributedMode(t *testing.T, home, confDir, treeDir, fanoutRoot, name string, countHardlinks bool, hardlinkDedup string) {
+	t.Helper()
+	dbPath := filepath.Join(home, "db-"+name)
+	statsDir := filepath.Join(home, "stats-"+name)
+	reportsDir := filepath.Join(home, "reports-"+name)
+	cfgPath := filepath.Join(confDir, name+".yaml")
+	cfgYAML := fmt.Sprintf("filesystems:\n  - name: %s\n    prefix: %s\n    database: %s\n    stats_dir: %s\n    count_hardlinks_as_files: %v\n    hardlink_dedup: %s\n",
+		name, treeDir, dbPath, statsDir, countHardlinks, hardlinkDedup)
+	if err := os.WriteFile(cfgPath, []byte(cfgYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := append(os.Environ(), "HOME="+home, "IDU_CONFIG="+cfgPath, "IDU_ENV=")
+
+	if out, err := runIDUEnv(env, "analyze", name); err != nil {
+		t.Fatalf("%s analyze failed: %v\n%s", name, err, out)
+	}
+	if out, err := runIDUEnv(env, "stats", "compute", name); err != nil {
+		t.Fatalf("%s stats compute failed: %v\n%s", name, err, out)
+	}
+
+	latestStats := filepath.Join(statsDir, "latest.idustats")
+	viewOut, err := runIDUEnv(env, "stats", "view", latestStats)
+	if err != nil {
+		t.Fatalf("%s stats view failed: %v\n%s", name, err, viewOut)
+	}
+	if err := containsAnyOf(viewOut, "Usage by top 10 Subtrees", "Distributed Subtree Hotspots", fanoutRoot); err != nil {
+		t.Fatalf("%s stats view missing expected subtree/distributed output: %v\n%s", name, err, viewOut)
+	}
+
+	if out, err := runIDUEnv(env, "reports", "generate", "--report-dir="+reportsDir, "--tsv=10", "--json=10", "--markdown=10", latestStats); err != nil {
+		t.Fatalf("%s reports generate failed: %v\n%s", name, err, out)
+	}
+
+	latestReport := filepath.Join(reportsDir, "latest")
+	for _, rel := range []string{"subtrees.tsv", "subtrees.json", "distributed.tsv", "distributed.json", "usage-summary.md"} {
+		data, err := os.ReadFile(filepath.Join(latestReport, rel))
+		if err != nil {
+			t.Fatalf("%s missing report %s: %v", name, rel, err)
+		}
+		if !strings.Contains(string(data), fanoutRoot) {
+			t.Errorf("%s report %s does not mention fanout root %s:\n%s", name, rel, fanoutRoot, string(data))
+		}
+	}
+}
+
+func TestDistributedSubtreeDetection(t *testing.T) {
+	home := t.TempDir()
+	confDir := filepath.Join(home, ".config", "idu")
+	if err := os.MkdirAll(confDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	treeDir := filepath.Join(home, "tree")
+	fanoutRoot := createFanoutFixtureTree(t, treeDir)
+
+	// Summaries without hardlink deduplication (count_hardlinks_as_files: true)
+	verifyDistributedMode(t, home, confDir, treeDir, fanoutRoot, "fast", true, "summaries")
+	// Summaries with hardlink deduplication (hardlink_dedup: summaries)
+	verifyDistributedMode(t, home, confDir, treeDir, fanoutRoot, "dedup", false, "summaries")
+	// Rescan of all file metadata to deduplicate hardlinks (hardlink_dedup: rescan)
+	verifyDistributedMode(t, home, confDir, treeDir, fanoutRoot, "rescan", false, "rescan")
+}

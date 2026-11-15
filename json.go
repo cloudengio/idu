@@ -14,7 +14,16 @@ import (
 type jsonReports struct{}
 
 func (jr *jsonReports) generateReports(rf *generateReportsFlags, filenames *reportFilenames, stats statsFileFormat) error {
-	return writeReportFiles(stats.Stats, filenames, jr.formatMerged, jr.formatUserGroupMerged, rf.JSON)
+	return writeReportFiles(stats.Stats, filenames, jr.formatMerged, jr.formatUserGroupMerged, jr.formatDistributed, rf.JSON)
+}
+
+func (jr *jsonReports) formatDistributed(list []reports.DistributedStats) []byte {
+	out := &bytes.Buffer{}
+	wr := json.NewEncoder(out)
+	for _, v := range list {
+		_ = wr.Encode(v)
+	}
+	return out.Bytes()
 }
 
 func (jr *jsonReports) formatMerged(merged map[string]reports.MergedStats) []byte {

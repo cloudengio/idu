@@ -179,6 +179,7 @@ func (st *statsCmds) computeFromSummaries(ctx context.Context, db database.DB, c
 		hl = &hardlinks.Incremental{}
 	}
 	sdb := reports.NewAllStats(prefix, topN)
+	agg := reports.NewSubtreeAggregator(prefix, topN)
 	exactKey, childPrefix := stats.SummaryKeys(sep, prefix)
 	n := 0
 	var summaryErr error
@@ -203,6 +204,7 @@ func (st *statsCmds) computeFromSummaries(ctx context.Context, db database.DB, c
 			ps.ApplyHardlinks(hl)
 		}
 		sdb.RecordDirect(path, ps.Direct, ps.PerUser, ps.PerGroup)
+		agg.Step(k, path, ps.Direct)
 		return true
 	})
 	if err == nil {
@@ -214,6 +216,9 @@ func (st *statsCmds) computeFromSummaries(ctx context.Context, db database.DB, c
 	if progress {
 		fmt.Printf("processed % 10v summary entries\n", fmtCount(int64(n)))
 	}
+	agg.Finish()
+	sdb.Subtree = agg.Subtree
+	sdb.Distributed = agg.Distributed
 	sdb.Finalize()
 	return sdb, nil
 }
@@ -229,6 +234,7 @@ func (st *statsCmds) computeFromPrefixes(ctx context.Context, db database.DB, cf
 	}
 	calc, sep := cfg.CalculatorOrDefault(), cfg.SeparatorOrDefault()
 	sdb := reports.NewAllStats(prefix, topN)
+	agg := reports.NewSubtreeAggregator(prefix, topN)
 	exactKey, childPrefix := stats.SummaryKeys(sep, prefix)
 	n := 0
 	var buf bytes.Buffer
@@ -257,6 +263,7 @@ func (st *statsCmds) computeFromPrefixes(ctx context.Context, db database.DB, cf
 		}
 		totals, users, groups := stats.ComputeTotals(k, &pi, calc, match)
 		sdb.RecordDirect(k, totals, users, groups)
+		agg.Step(sk, k, totals)
 		return true
 	})
 	if err == nil {
@@ -268,6 +275,9 @@ func (st *statsCmds) computeFromPrefixes(ctx context.Context, db database.DB, cf
 	if progress {
 		fmt.Printf("processed % 10v entries\n", fmtCount(int64(n)))
 	}
+	agg.Finish()
+	sdb.Subtree = agg.Subtree
+	sdb.Distributed = agg.Distributed
 	sdb.Finalize()
 	return sdb, nil
 }
@@ -305,6 +315,16 @@ func (st *statsCmds) view(_ context.Context, values interface{}, args []string) 
 
 	banner(os.Stdout, "=", "Usage by top %v Prefixes as of: %v\n", af.DisplayN, when)
 	heapFormatter[string]{}.formatHeaps(sdb.Prefix, os.Stdout, func(v string) string { return v }, af.DisplayN)
+
+	if sdb.Subtree != nil {
+		banner(os.Stdout, "=", "\nUsage by top %v Subtrees as of: %v\n", af.DisplayN, when)
+		heapFormatter[string]{}.formatHeaps(sdb.Subtree, os.Stdout, func(v string) string { return v }, af.DisplayN)
+	}
+
+	if sdb.Distributed != nil {
+		banner(os.Stdout, "=", "\nDistributed Subtree Hotspots (top %v, modest fanout) as of: %v\n", af.DisplayN, when)
+		formatDistributedHeaps(sdb.Distributed, os.Stdout, af.DisplayN)
+	}
 
 	banner(os.Stdout, "=", "\nUsage by top %v users as of: %v\n", af.DisplayN, when)
 	heapFormatter[int64]{}.formatHeaps(sdb.ByUser, os.Stdout,
@@ -364,6 +384,29 @@ func (hf heapFormatter[T]) formatTotals(h *reports.Heaps[T], out io.Writer) {
 	fmt.Fprintf(out, "Total:     %v\n", fmtCount(h.TotalFiles+h.TotalPrefixes))
 	fmt.Fprintf(out, "Links:     %v\n", fmtCount(h.TotalHardlinks))
 	fmt.Fprintf(out, "Link dirs: %v\n\n", fmtCount(h.TotalHardlinkDirs))
+}
+
+func formatDistributedHeaps(dh *reports.DistributedHeaps, out io.Writer, n int) {
+	printSection := func(title string, list []reports.DistributedStats, metric func(reports.DistributedStats) (string, string, float64)) {
+		if len(list) == 0 {
+			return
+		}
+		banner(out, "-", "%s\n", title)
+		for _, ds := range list {
+			distVal, maxLeafVal, amp := metric(ds)
+			fmt.Fprintf(out, "%s (distributed; max-leaf: %s, %.1fx across %s dirs, max-child: %.0f%%): %s\n",
+				distVal, maxLeafVal, amp, fmtCount(ds.SubtreeDirs), ds.MaxChildShare*100, ds.Prefix)
+		}
+	}
+	printSection("Distributed Bytes used", reports.TopDistributed(dh.Bytes, n), func(ds reports.DistributedStats) (string, string, float64) {
+		return fmtSize(ds.DistributedBytes), fmtSize(ds.MaxLeafBytes), ds.BytesAmplification
+	})
+	printSection("\nDistributed Storage Bytes used", reports.TopDistributed(dh.StorageBytes, n), func(ds reports.DistributedStats) (string, string, float64) {
+		return fmtSize(ds.DistributedStorage), fmtSize(ds.MaxLeafStorage), ds.StorageAmplification
+	})
+	printSection("\nDistributed Files", reports.TopDistributed(dh.Files, n), func(ds reports.DistributedStats) (string, string, float64) {
+		return fmtCount(ds.DistributedFiles), fmtCount(ds.MaxLeafFiles), ds.FilesAmplification
+	})
 }
 
 func (st *statsCmds) formatPerIDStats(s reports.PerIDStats, out io.Writer, nameForID func(int64) string, ids map[int64]bool, n int) {

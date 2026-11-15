@@ -178,12 +178,24 @@ func writeReportFiles(sdb *reports.AllStats,
 	filenames *reportFilenames,
 	prefixFormatter func(m map[string]reports.MergedStats) []byte,
 	idFormatter func(m map[int64]reports.MergedStats, nameForID func(int64) string) []byte,
+	distributedFormatter func(list []reports.DistributedStats) []byte,
 	topN int,
 ) error {
 
 	merged := sdb.Prefix.Merge(topN)
 	if err := os.WriteFile(filenames.summary("prefixes"), prefixFormatter(merged), 0600); err != nil {
 		return err
+	}
+	if sdb.Subtree != nil {
+		subMerged := sdb.Subtree.Merge(topN)
+		if err := os.WriteFile(filenames.summary("subtrees"), prefixFormatter(subMerged), 0600); err != nil {
+			return err
+		}
+	}
+	if dist := reports.MergeDistributed(sdb.Distributed, topN); len(dist) > 0 && distributedFormatter != nil {
+		if err := os.WriteFile(filenames.summary("distributed"), distributedFormatter(dist), 0600); err != nil {
+			return err
+		}
 	}
 	clear(merged)
 	merged[sdb.Prefix.Prefix] = reports.MergedStats{
