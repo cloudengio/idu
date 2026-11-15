@@ -36,6 +36,8 @@ cloudeng.io/file v0.0.0-20250109190841-16f2cfe4fde2 h1:jceBrj0huy84tsTZbdKwK4qf6
 cloudeng.io/file v0.0.0-20250109190841-16f2cfe4fde2/go.mod h1:cpn65256dvwrs7+iULJk+DSTiCtzVdb9ojENSHNQUkE=
 cloudeng.io/file v0.0.0-20261112230521-bb2e0354f2e1 h1:QmW1683FWnGyhrig7PnjoN8QoPid5tj3xUsGtt1IMyM=
 cloudeng.io/file v0.0.0-20261112230521-bb2e0354f2e1/go.mod h1:/F2iA969qz006paYJo+7QnMpD+jKHVuHLg+PuC7zkGM=
+cloudeng.io/file v0.0.0-20261114215353-ffbc45206c1d h1:6lef/N0O30w1WW13VEDlXaVIazCYQYtWGNtHlKM6kD4=
+cloudeng.io/file v0.0.0-20261114215353-ffbc45206c1d/go.mod h1:/F2iA969qz006paYJo+7QnMpD+jKHVuHLg+PuC7zkGM=
 cloudeng.io/logging v0.0.0-20261112230521-bb2e0354f2e1 h1:ohz/EjPupJlKhS1F9/vVR16UprRzrXpIcv1qc9OhEqI=
 cloudeng.io/logging v0.0.0-20261112230521-bb2e0354f2e1/go.mod h1:jMLEVhrVlzxya9df5e1q14kPxxOMnBxEejhV8QpMMKU=
 cloudeng.io/os v0.0.0-20240117000235-f25d4d69956f h1:apM7duDDyU2stgksEXms2qvOyavHWT97a2cCrD24cnQ=
@@ -55,6 +57,8 @@ cloudeng.io/sync v0.0.8 h1:N8o5Qo5sjxwDktWIW/7rfK14O74jGS3pprefjF3EFKA=
 cloudeng.io/sync v0.0.8/go.mod h1:76qdZzMQSN+iPeQxY9MSbnSELKQmcd9E6pnfRgWgN8s=
 cloudeng.io/sync v0.0.12-0.20260804222138-e9281ed260ba h1:2+U9tNRu/+O1rHgv2mxRTU80lgUCJSxDFDswbKumBx8=
 cloudeng.io/sync v0.0.12-0.20260804222138-e9281ed260ba/go.mod h1:35kcugrX/RVGQjSfyLMciOCloX34nFfnkQsdks75Ao0=
+cloudeng.io/sync v0.0.12-0.20261114222247-b205f2b1f0fa h1:0aLYh+cJwHdZ5Lj/jOELig7aL0ABa6xcjBqBoMnUCNo=
+cloudeng.io/sync v0.0.12-0.20261114222247-b205f2b1f0fa/go.mod h1:OPhljfJZEGTRX5NpmWfijW/VBwzaqy4Wpt2ILV2NrPM=
 cloudeng.io/sys v0.0.0-20240116222358-1fdc93635095 h1:4rJsW8WMKN3PEalD+nzIg9Z9BrxUn03ftHwuso/rvLk=
 cloudeng.io/sys v0.0.0-20240116222358-1fdc93635095/go.mod h1:ss1F/goB75czXadUWpagfam7BQGglfi+9JvY6QjmOfo=
 cloudeng.io/sys v0.0.0-20240204011218-453d510d0c93/go.mod h1:ss1F/goB75czXadUWpagfam7BQGglfi+9JvY6QjmOfo=

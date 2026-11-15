@@ -6,9 +6,9 @@ require (
 	cloudeng.io/algo v0.0.0-20261112230521-bb2e0354f2e1
 	cloudeng.io/cmdutil v0.0.0-20261112230521-bb2e0354f2e1
 	cloudeng.io/errors v0.0.14-0.20260312171538-61fcde6ce278
-	cloudeng.io/file v0.0.0-20261112230521-bb2e0354f2e1
+	cloudeng.io/file v0.0.0-20261114215353-ffbc45206c1d
 	cloudeng.io/os v0.0.0-20261112230521-bb2e0354f2e1
-	cloudeng.io/sync v0.0.12-0.20260804222138-e9281ed260ba
+	cloudeng.io/sync v0.0.12-0.20261114222247-b205f2b1f0fa
 	cloudeng.io/sys v0.0.0-20261112230521-bb2e0354f2e1
 	cloudeng.io/text v0.0.16-0.20260624171915-da98fe9dec2b
 	github.com/dgraph-io/badger/v4 v4.9.6
