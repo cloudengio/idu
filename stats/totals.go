@@ -13,6 +13,10 @@ import (
 	"cloudeng.io/file/diskusage"
 )
 
+// totalsVersion is the version of the binary encoding of Totals.
+// TODO: add a new version for windows since IDs will be strings there.
+const totalsVersion = 0x1
+
 // TODO: parametize the ID type to be int64 or string for non-posix system.
 type Totals struct {
 	ID           int64
@@ -29,8 +33,7 @@ type Totals struct {
 type PerIDTotals []Totals
 
 func (t *Totals) AppendBinary(data []byte) []byte {
-	// Add a version etc for windows since IDs will be strings there.
-	data = binary.AppendVarint(data, 0x1) // Version
+	data = binary.AppendVarint(data, totalsVersion)
 	data = binary.AppendVarint(data, t.ID)
 	data = binary.AppendVarint(data, t.Files)
 	data = binary.AppendVarint(data, t.Bytes)
@@ -50,7 +53,7 @@ func (t *Totals) MarshalBinary() (data []byte, err error) {
 func (t *Totals) DecodeBinary(data []byte) []byte {
 	var n int
 	ver, n := binary.Varint(data)
-	if ver != 0x1 {
+	if ver != totalsVersion {
 		panic(fmt.Sprintf("unsupported version: %v", ver))
 	}
 	data = data[n:]
@@ -123,6 +126,18 @@ func (t Totals) incHardlinks() Totals {
 func (t Totals) incSubPrefixes() Totals {
 	t.SubPrefixes++
 	return t
+}
+
+// Add accumulates the counts and byte totals from other into t.
+func (t *Totals) Add(other Totals) {
+	t.Files += other.Files
+	t.Prefix += other.Prefix
+	t.SubPrefixes += other.SubPrefixes
+	t.Bytes += other.Bytes
+	t.StorageBytes += other.StorageBytes
+	t.PrefixBytes += other.PrefixBytes
+	t.Hardlinks += other.Hardlinks
+	t.HardlinkDirs += other.HardlinkDirs
 }
 
 type perID map[int64]Totals

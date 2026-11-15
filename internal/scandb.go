@@ -7,6 +7,7 @@ package internal
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"runtime"
@@ -14,10 +15,13 @@ import (
 	"sync"
 	"time"
 
+	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/cmd/idu/internal/database"
 	"cloudeng.io/cmd/idu/internal/database/badgerdb"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
+	"cloudeng.io/cmd/idu/stats"
+	"cloudeng.io/file/diskusage"
 	"github.com/dgraph-io/badger/v4"
 	"github.com/dgraph-io/badger/v4/options"
 )
@@ -119,7 +123,14 @@ func OpenDatabase(ctx context.Context, cfg config.Prefix, readonly bool) (databa
 			if delayed {
 				fmt.Println()
 			}
-			return res.db, res.err
+			if res.err != nil {
+				return nil, res.err
+			}
+			if err := checkDatabaseFormat(ctx, res.db); err != nil {
+				_ = res.db.Close(ctx)
+				return nil, fmt.Errorf("%v: %w", cfg.Database, err)
+			}
+			return res.db, nil
 		case <-time.After(time.Second):
 			fmt.Printf("waiting for database to open: %v: %s\t\t\r", cfg.Database, time.Since(start).Truncate(time.Second))
 			delayed = true
@@ -146,19 +157,136 @@ type ScanDB interface {
 	LogAndClose(ctx context.Context, start, stop time.Time, detail []byte) error
 	DeletePrefix(ctx context.Context, prefix string) error
 	DeleteErrors(ctx context.Context, prefix string) error
+	// MarkSummariesComplete records that every summary in the database
+	// was computed with the current configuration. It must only be called
+	// after a complete, uninterrupted scan of the entire configured prefix.
+	MarkSummariesComplete(ctx context.Context) error
 	Close(ctx context.Context) error
 }
+
+const metaKeySummaries = "summaries/v1"
 
 type scanDB struct {
 	db              database.DB
 	compactInterval time.Duration
 	lastWritten     time.Time
+	calc            diskusage.Calculator
 	sep             string
+	match           boolexpr.Matcher
+	spec            string
+	hardlinkInfo    bool
+	// rewriteSummaries is set when the stored summaries were computed with
+	// a different specification and must be recomputed for unchanged prefixes.
+	rewriteSummaries bool
+	invalidateOnce   sync.Once
+}
+
+const (
+	hardlinksSpecSuffix = ";hardlinks"
+	// invalidSummariesSpec is stored when a summary could not be written
+	// so that the next analyze rewrites them all.
+	invalidSummariesSpec = "invalid"
+)
+
+// SummarySpec returns the specification that the precomputed summaries must
+// be created with for cfg: they depend on the disk usage calculator and
+// whether hardlinks are recorded.
+func SummarySpec(cfg *config.Prefix) string {
+	spec := cfg.CalculatorOrDefault().String()
+	if cfg.RecordHardlinks() {
+		spec += hardlinksSpecSuffix
+	}
+	return spec
+}
+
+// ErrStaleSummaries is returned when the precomputed summaries are
+// incomplete or were computed using a different configuration.
+var ErrStaleSummaries = errors.New("summaries are incomplete or were computed with a different configuration (layout or hardlink settings): rerun analyze for the entire prefix")
+
+// ErrLegacyDatabase is returned when opening a database that was created
+// before precomputed summaries were introduced. Such databases are not
+// supported and must be deleted and recreated by rerunning analyze.
+var ErrLegacyDatabase = errors.New("legacy database format without summaries: delete it and rerun analyze")
+
+// checkDatabaseFormat returns ErrLegacyDatabase if db contains prefix data
+// but no summary metadata.
+func checkDatabaseFormat(ctx context.Context, db database.DB) error {
+	var metaBuf bytes.Buffer
+	if err := db.GetMeta(ctx, metaKeySummaries, &metaBuf); err != nil {
+		return err
+	}
+	if metaBuf.Len() > 0 {
+		return nil
+	}
+	hasData := false
+	if err := db.Scan(ctx, "", func(_ context.Context, _ string, _ []byte) bool {
+		hasData = true
+		return false
+	}); err != nil {
+		return err
+	}
+	if hasData {
+		return ErrLegacyDatabase
+	}
+	return nil
+}
+
+// initSummaryMeta returns true if the existing summaries were computed
+// with a specification other than spec and hence need to be rewritten.
+// OpenDatabase rejects legacy databases, so a missing metadata entry
+// denotes a new, empty, database.
+func initSummaryMeta(ctx context.Context, db database.DB, spec string) (bool, error) {
+	var metaBuf bytes.Buffer
+	if err := db.GetMeta(ctx, metaKeySummaries, &metaBuf); err != nil {
+		return false, err
+	}
+	if metaBuf.Len() == 0 {
+		return false, db.SetMeta(ctx, metaKeySummaries, []byte(spec))
+	}
+	return metaBuf.String() != spec, nil
+}
+
+// CheckSummaries returns ErrStaleSummaries unless db contains complete
+// precomputed summaries computed with calcID that also record hardlinks
+// if needLinks is true.
+func CheckSummaries(ctx context.Context, db database.DB, calcID string, needLinks bool) error {
+	var metaBuf bytes.Buffer
+	if err := db.GetMeta(ctx, metaKeySummaries, &metaBuf); err != nil {
+		return err
+	}
+	switch metaBuf.String() {
+	case calcID + hardlinksSpecSuffix:
+		return nil
+	case calcID:
+		if !needLinks {
+			return nil
+		}
+	}
+	return ErrStaleSummaries
+}
+
+// CheckSummaryKeys returns ErrStaleSummaries if a summary could not be
+// written and hence the summary keys may not include every prefix.
+func CheckSummaryKeys(ctx context.Context, db database.DB) error {
+	var metaBuf bytes.Buffer
+	if err := db.GetMeta(ctx, metaKeySummaries, &metaBuf); err != nil {
+		return err
+	}
+	if metaBuf.String() == invalidSummariesSpec {
+		return ErrStaleSummaries
+	}
+	return nil
 }
 
 func NewScanDB(ctx context.Context, cfg config.Prefix) (ScanDB, error) {
 	db, err := OpenDatabase(ctx, cfg, false)
 	if err != nil {
+		return nil, err
+	}
+	spec := SummarySpec(&cfg)
+	rewrite, err := initSummaryMeta(ctx, db, spec)
+	if err != nil {
+		_ = db.Close(ctx)
 		return nil, err
 	}
 	var lastWritten time.Time
@@ -170,11 +298,32 @@ func NewScanDB(ctx context.Context, cfg config.Prefix) (ScanDB, error) {
 		}
 	}
 	return &scanDB{
-		db:              db,
-		compactInterval: cfg.CompactionInterval(),
-		lastWritten:     lastWritten,
-		sep:             cfg.SeparatorOrDefault(),
+		db:               db,
+		compactInterval:  cfg.CompactionInterval(),
+		lastWritten:      lastWritten,
+		calc:             cfg.CalculatorOrDefault(),
+		sep:              cfg.SeparatorOrDefault(),
+		match:            boolexpr.AlwaysMatch(nil),
+		spec:             spec,
+		hardlinkInfo:     cfg.RecordHardlinks(),
+		rewriteSummaries: rewrite,
 	}, nil
+}
+
+func (sdb *scanDB) MarkSummariesComplete(ctx context.Context) error {
+	if !sdb.rewriteSummaries {
+		return nil
+	}
+	// Ensure that all of the rewritten summaries are persisted before
+	// recording that they are complete.
+	if err := sdb.db.Flush(ctx); err != nil {
+		return err
+	}
+	if err := sdb.db.SetMeta(ctx, metaKeySummaries, []byte(sdb.spec)); err != nil {
+		return err
+	}
+	sdb.rewriteSummaries = false
+	return nil
 }
 
 func (sdb *scanDB) LogError(ctx context.Context, key string, when time.Time, detail []byte) error {
@@ -237,7 +386,11 @@ func (sdb *scanDB) DeletePrefix(ctx context.Context, prefix string) error {
 	if err := sdb.db.Delete(ctx, prefix); err != nil {
 		return err
 	}
-	return sdb.db.DeletePrefix(ctx, sdb.childPrefix(prefix))
+	if err := sdb.db.DeletePrefix(ctx, sdb.childPrefix(prefix)); err != nil {
+		return err
+	}
+	exactKey, childPrefix := stats.SummaryKeys(sdb.sep, prefix)
+	return sdb.db.DeleteSummary(ctx, exactKey, childPrefix)
 }
 
 // DeleteErrors deletes the errors logged for prefix and all of the prefixes
@@ -270,7 +423,12 @@ func (sdb *scanDB) GetPrefixInfo(ctx context.Context, key string, pi *prefixinfo
 
 func (sdb *scanDB) SetPrefixInfo(ctx context.Context, key string, unchanged bool, pi *prefixinfo.T) error {
 	if unchanged {
-		return nil
+		if !sdb.rewriteSummaries {
+			return nil
+		}
+		// pi contains the previously stored files and the current
+		// sub-directories, which is all that's needed for the summary.
+		return sdb.setSummary(ctx, key, pi)
 	}
 	select {
 	case <-ctx.Done():
@@ -283,7 +441,28 @@ func (sdb *scanDB) SetPrefixInfo(ctx context.Context, key string, unchanged bool
 	if err := pi.AppendBinary(buf); err != nil {
 		return err
 	}
-	return sdb.db.Set(ctx, key, buf.Bytes(), true)
+	if err := sdb.db.Set(ctx, key, buf.Bytes(), true); err != nil {
+		return err
+	}
+	return sdb.setSummary(ctx, key, pi)
+}
+
+func (sdb *scanDB) setSummary(ctx context.Context, key string, pi *prefixinfo.T) error {
+	summary := stats.ComputeSummary(key, pi, sdb.calc, sdb.match, sdb.hardlinkInfo)
+	exactKey, _ := stats.SummaryKeys(sdb.sep, key)
+	err := sdb.db.SetSummary(ctx, exactKey, summary.AppendBinary(nil), true)
+	if err != nil {
+		// Ensure that stats will not use the now incomplete summaries
+		// and that the next analyze will rewrite them.
+		// The failure may be due to cancelation, so don't let that prevent
+		// recording that the summaries are no longer valid.
+		sdb.invalidateOnce.Do(func() {
+			if ierr := sdb.db.SetMeta(context.WithoutCancel(ctx), metaKeySummaries, []byte(invalidSummariesSpec)); ierr != nil {
+				Log(ctx, LogError, "failed to invalidate summaries", "error", ierr)
+			}
+		})
+	}
+	return err
 }
 
 func (sdb *scanDB) Close(ctx context.Context) error {

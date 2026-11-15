@@ -53,6 +53,8 @@ filesystems:
     prefix: /usr/local
     database: ${db_root}/usr-local
     count_hardlinks_as_files: false
+    # summaries (default) or rescan, see hardlink_dedup in internal/config.
+    hardlink_dedup: summaries
 
   - name: tmp
     prefix: /tmp

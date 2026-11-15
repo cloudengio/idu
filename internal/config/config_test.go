@@ -544,6 +544,10 @@ func TestDocumentation(t *testing.T) {
 		"compact_interval:",
 		"when building",
 		"stripe_size:",
+		"hardlink_dedup:",
+		"Hardlink deduplication strategies",
+		"summaries:",
+		"rescan:",
 	} {
 		if !strings.Contains(got, expected) {
 			t.Errorf("documentation does not contain: %q\n%s", expected, got)
@@ -663,5 +667,44 @@ filesystems:
 		if got := p.CompactionInterval(); got != want {
 			t.Errorf("%s: CompactionInterval() = %v, want %v", name, got, want)
 		}
+	}
+}
+
+func TestHardlinkDedup(t *testing.T) {
+	cfg, err := config.ParseConfig([]byte(`
+filesystems:
+  - name: default
+    prefix: /default
+  - name: rescan
+    prefix: /rescan
+    hardlink_dedup: rescan
+  - name: counted
+    prefix: /counted
+    count_hardlinks_as_files: true
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]struct {
+		dedup  config.HardlinkDedup
+		record bool
+	}{
+		"default": {config.HardlinkDedupSummaries, true},
+		"rescan":  {config.HardlinkDedupRescan, false},
+		"counted": {config.HardlinkDedupSummaries, false},
+	} {
+		p, _ := cfg.ForName(name)
+		if p.HardlinkDedup != want.dedup || p.RecordHardlinks() != want.record {
+			t.Errorf("%s: got %q, %v, want %q, %v", name, p.HardlinkDedup, p.RecordHardlinks(), want.dedup, want.record)
+		}
+	}
+
+	_, err = config.ParseConfig([]byte(`
+filesystems:
+  - prefix: /bad
+    hardlink_dedup: sometimes
+`))
+	if err == nil || !strings.Contains(err.Error(), "hardlink_dedup") {
+		t.Errorf("expected hardlink_dedup validation error, got %v", err)
 	}
 }

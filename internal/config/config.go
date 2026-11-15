@@ -59,12 +59,43 @@ type Prefix struct {
 	ScanSize                 int                `yaml:"scan_size" doc:"maximum number of items to fetch from the filesystem in a single operation"`
 	Exclusions               cmdyaml.RegexpList `yaml:"exclusions" doc:"prefixes and files matching these regular expressions will be ignored when building a database"`
 	CountHardlinkAsFiles     bool               `yaml:"count_hardlinks_as_files" doc:"if true, hardlinks will be counted as separate files"`
+	HardlinkDedup            HardlinkDedup      `yaml:"hardlink_dedup" doc:"the strategy used to deduplicate hardlinks when count_hardlinks_as_files is false (summaries, rescan), defaults to summaries, see Hardlink deduplication strategies below"`
 	CompactIntervalDays      int                `yaml:"compact_interval_days" doc:"number of days after the last database write before running compaction, added to compact_interval"`
 	CompactInterval          time.Duration      `yaml:"compact_interval" doc:"duration after the last database write before running compaction, added to compact_interval_days"`
 
 	Layout Layout `yaml:"layout" doc:"the filesystem layout to use for calculating raw bytes used"`
 
 	calculator diskusage.Calculator
+}
+
+// HardlinkDedup determines how hardlinks are deduplicated when computing
+// statistics.
+type HardlinkDedup string
+
+const (
+	// HardlinkDedupSummaries records potential hardlinks in the precomputed
+	// per-prefix summaries when analyzing so that stats can deduplicate them
+	// without rescanning all of the file metadata. This is the default.
+	HardlinkDedupSummaries HardlinkDedup = "summaries"
+	// HardlinkDedupRescan computes stats from all of the file metadata
+	// stored for each prefix, which requires no additional storage but is
+	// considerably slower.
+	HardlinkDedupRescan HardlinkDedup = "rescan"
+)
+
+// RecordHardlinks returns true if analyze should record potential hardlinks
+// in the precomputed summaries.
+func (p *Prefix) RecordHardlinks() bool {
+	return !p.CountHardlinkAsFiles && p.HardlinkDedup != HardlinkDedupRescan
+}
+
+// CalculatorOrDefault returns the configured disk usage calculator or the
+// identity calculator if none is configured.
+func (p *Prefix) CalculatorOrDefault() diskusage.Calculator {
+	if p.calculator == nil {
+		return diskusage.NewIdentity()
+	}
+	return p.calculator
 }
 
 // SeparatorOrDefault returns the configured separator or "/".
@@ -345,6 +376,13 @@ func (t *T) Validate() error {
 		}
 		if err := validateCompactIntervals(p); err != nil {
 			return fmt.Errorf("filesystem %q: %w", prefixLabel(p), err)
+		}
+		switch p.HardlinkDedup {
+		case "":
+			p.HardlinkDedup = HardlinkDedupSummaries
+		case HardlinkDedupSummaries, HardlinkDedupRescan:
+		default:
+			return fmt.Errorf("filesystem %q: hardlink_dedup must be %q or %q, not %q", prefixLabel(p), HardlinkDedupSummaries, HardlinkDedupRescan, p.HardlinkDedup)
 		}
 		calc, err := parseLayout(&p.Layout)
 		if err != nil {
@@ -813,6 +851,38 @@ func DescribeLayouts(w io.Writer) error {
 	return nil
 }
 
+var hardlinkDedupStrategies = []struct {
+	name HardlinkDedup
+	desc string
+}{
+	{HardlinkDedupSummaries, `(default) analyze records the inode, owner, group, size and storage
+  used by every file in the precomputed per-directory summaries so that
+  stats can deduplicate hardlinks using the summaries alone. This is
+  considerably faster than rescan but adds roughly 12-16 bytes per file to
+  the database.`},
+	{HardlinkDedupRescan, `stats recomputes all statistics from the complete file metadata stored
+  for each directory, deduplicating hardlinks as it does so. This requires
+  no additional storage but is considerably slower for large filesystems.
+  The results are identical to those obtained using summaries.`},
+}
+
+// DescribeHardlinkDedup writes documentation for the supported hardlink
+// deduplication strategies to w.
+func DescribeHardlinkDedup(w io.Writer) error {
+	if _, err := fmt.Fprint(w, "\nHardlink deduplication strategies (hardlink_dedup):\n\n"+
+		"These apply only when count_hardlinks_as_files is false and no filter\n"+
+		"expression is used; stats with a filter expression always use rescan.\n"+
+		"Changing the strategy requires rerunning analyze for the entire prefix.\n\n"); err != nil {
+		return err
+	}
+	for _, st := range hardlinkDedupStrategies {
+		if _, err := fmt.Fprintf(w, "%s:\n  %s\n\n", st.name, st.desc); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Documentation will return a description of the format of the
 // yaml configuration file.
 func Documentation() string {
@@ -823,5 +893,6 @@ func Documentation() string {
 	}
 	out.WriteString(structdoc.FormatFields(0, 2, desc.Fields))
 	_ = DescribeLayouts(out)
+	_ = DescribeHardlinkDedup(out)
 	return out.String()
 }

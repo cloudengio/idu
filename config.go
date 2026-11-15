@@ -22,7 +22,7 @@ type configLoadError struct {
 func configCommands() cmdconfig.ConfigCommands[config.T] {
 	return cmdconfig.ConfigCommands[config.T]{
 		Summary:    "YAML configuration file options\n",
-		Describers: []func(io.Writer) error{config.DescribeLayouts},
+		Describers: []func(io.Writer) error{config.DescribeLayouts, config.DescribeHardlinkDedup},
 	}
 }
 
