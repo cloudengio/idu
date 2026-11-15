@@ -113,7 +113,7 @@ func (p *Prefix) CompactionInterval() time.Duration {
 }
 
 type Layout struct {
-	Calculator string    `yaml:"calculator" doc:"the type of disk usage calculator to use (bytes, block, raid0)"`
+	Calculator string    `yaml:"calculator" doc:"the type of disk usage calculator to use (allocated, bytes, block, raid0), defaults to allocated"`
 	Parameters yaml.Node `yaml:"parameters,omitempty" doc:"the layout parameters to use for this calculator"`
 }
 
@@ -354,7 +354,7 @@ func (t *T) SetDefaults() {
 			p.ScanSize = DefaultScanSize
 		}
 		if len(p.Layout.Calculator) == 0 {
-			p.Layout.Calculator = "bytes"
+			p.Layout.Calculator = defaultLayout
 		}
 	}
 }
@@ -384,7 +384,7 @@ func (t *T) Validate() error {
 		default:
 			return fmt.Errorf("filesystem %q: hardlink_dedup must be %q or %q, not %q", prefixLabel(p), HardlinkDedupSummaries, HardlinkDedupRescan, p.HardlinkDedup)
 		}
-		calc, err := parseLayout(&p.Layout)
+		calc, err := parseLayout(p.Prefix, &p.Layout)
 		if err != nil {
 			return fmt.Errorf("filesystem %q: %w", prefixLabel(p), err)
 		}
@@ -746,11 +746,11 @@ type RAID0 struct {
 }
 
 type Block struct {
-	BlockSize cmdtypes.ByteSize `yaml:"size" doc:"block size used by this filesystem (e.g. 4KiB or 4096)"`
+	BlockSize cmdtypes.ByteSize `yaml:"size" doc:"block size used by this filesystem (e.g. 4KiB or 4096), it is only used if the space allocated to files cannot be determined automatically"`
 }
 
 type layoutConfig struct {
-	newLayout      func(n yaml.Node) (diskusage.Calculator, error)
+	newLayout      func(prefix string, n yaml.Node) (diskusage.Calculator, error)
 	describeLayout func() string
 }
 
@@ -770,12 +770,19 @@ func decodeNodeStrict(n yaml.Node, dst any) error {
 	return nil
 }
 
-func bytesCalc(n yaml.Node) (diskusage.Calculator, error) {
+func noParameters(name string, n yaml.Node) error {
 	if !n.IsZero() {
 		var empty struct{}
 		if err := decodeNodeStrict(n, &empty); err != nil {
-			return nil, fmt.Errorf("failed parsing bytes layout parameters: %v", err)
+			return fmt.Errorf("failed parsing %v layout parameters: %v", name, err)
 		}
+	}
+	return nil
+}
+
+func bytesCalc(_ string, n yaml.Node) (diskusage.Calculator, error) {
+	if err := noParameters("bytes", n); err != nil {
+		return nil, err
 	}
 	return diskusage.NewIdentity(), nil
 }
@@ -784,23 +791,43 @@ func bytesDesc() string {
 	return "bytes: assumes that the size of each file is the number of bytes used\n"
 }
 
-func blockCalc(n yaml.Node) (diskusage.Calculator, error) {
+func allocatedCalc(prefix string, n yaml.Node) (diskusage.Calculator, error) {
+	if err := noParameters("allocated", n); err != nil {
+		return nil, err
+	}
+	return newAllocated(prefix, 0), nil
+}
+
+const allocatedDescription = `the space allocated to each file on disk.
+  On POSIX systems (e.g. Linux and macOS) this is the number of 512 byte
+  blocks reported for each file (st_blocks), which already accounts for the
+  filesystem's block size, holes in sparse files and compression. On other
+  systems, such as Windows, each file's size is rounded up to the
+  filesystem's block size, which is determined from the filesystem.
+`
+
+func allocatedDesc() string {
+	return "allocated: (default) " + allocatedDescription
+}
+
+func blockCalc(prefix string, n yaml.Node) (diskusage.Calculator, error) {
 	var b Block
 	if err := decodeNodeStrict(n, &b); err != nil {
 		return nil, fmt.Errorf("failed parsing block layout parameters: %v", err)
 	}
-	return diskusage.NewBlock(int64(b.BlockSize)), nil
+	return newAllocated(prefix, int64(b.BlockSize)), nil
 }
 
 func blockDesc() string {
 	desc, _ := structdoc.Describe(&Block{}, "doc", "block calculator parameters\n")
 	out := &strings.Builder{}
-	out.WriteString("block: the size of each file is a multiple of the block size\n")
+	out.WriteString("block: as for allocated, but with a configured block size that is used\n")
+	out.WriteString("  if the filesystem's block size cannot be determined\n")
 	out.WriteString(structdoc.FormatFields(2, 4, desc.Fields))
 	return out.String()
 }
 
-func raid0Calc(n yaml.Node) (diskusage.Calculator, error) {
+func raid0Calc(_ string, n yaml.Node) (diskusage.Calculator, error) {
 	var r RAID0
 	if err := decodeNodeStrict(n, &r); err != nil {
 		return nil, fmt.Errorf("failed parsing RAID0 layout parameters: %v", err)
@@ -817,20 +844,24 @@ func raid0Desc() string {
 }
 
 var supportedLayouts = map[string]layoutConfig{
-	"bytes": {bytesCalc, bytesDesc},
-	"block": {blockCalc, blockDesc},
-	"raid0": {raid0Calc, raid0Desc},
+	"allocated": {allocatedCalc, allocatedDesc},
+	"bytes":     {bytesCalc, bytesDesc},
+	"block":     {blockCalc, blockDesc},
+	"raid0":     {raid0Calc, raid0Desc},
 }
 
-func parseLayout(l *Layout) (diskusage.Calculator, error) {
+// defaultLayout is the disk usage calculator used when none is configured.
+const defaultLayout = "allocated"
+
+func parseLayout(prefix string, l *Layout) (diskusage.Calculator, error) {
 	if len(l.Calculator) == 0 {
-		l.Calculator = "bytes"
+		l.Calculator = defaultLayout
 	}
 	supported, ok := supportedLayouts[strings.ToLower(l.Calculator)]
 	if !ok {
 		return nil, fmt.Errorf("unsupported disk usage calculator: %v", l.Calculator)
 	}
-	return supported.newLayout(l.Parameters)
+	return supported.newLayout(prefix, l.Parameters)
 }
 
 // DescribeLayouts writes documentation for all supported disk usage layouts to w.
