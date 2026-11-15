@@ -417,6 +417,10 @@ func (db *Database) scanFrom(ctx context.Context, bucket byte, prefix []byte, vi
 	return db.bdb.View(func(tx *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
 		opts.Prefix = []byte{bucket}
+		// Values are small and stored in the LSM tree rather than the value
+		// log, and prefetching them creates a goroutine per item, which
+		// is far more expensive than reading them synchronously.
+		opts.PrefetchValues = false
 		it := tx.NewIterator(opts)
 		defer it.Close()
 		for it.Seek(prefix); it.Valid(); it.Next() {
@@ -449,6 +453,10 @@ func (db *Database) scanTimeRange(ctx context.Context, bucket byte, start, stop 
 	return db.bdb.View(func(tx *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
 		opts.Prefix = []byte{bucket}
+		// Values are small and stored in the LSM tree rather than the value
+		// log, and prefetching them creates a goroutine per item, which
+		// is far more expensive than reading them synchronously.
+		opts.PrefetchValues = false
 		it := tx.NewIterator(opts)
 		defer it.Close()
 		for it.Seek(startKb.Bytes()); it.Valid(); it.Next() {
@@ -512,6 +520,37 @@ func (db *Database) ScanSummaries(ctx context.Context, exactKey, childPrefix str
 		}
 		if !visitor(ctx, k, val) {
 			return errScanDone
+		}
+		return nil
+	})
+}
+
+// GetBatch calls fn with the value stored for each of keys, or nil if there
+// is none, reading all of them within a single read transaction since
+// creating a transaction per value is expensive.
+func (db *Database) GetBatch(ctx context.Context, keys []string, fn func(i int, val []byte) error) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
+	kb := &bytes.Buffer{}
+	return db.bdb.View(func(tx *badger.Txn) error {
+		for i, key := range keys {
+			kb.Reset()
+			kb.WriteByte(prefixBucket)
+			kb.WriteString(key)
+			item, err := tx.Get(kb.Bytes())
+			if err == badger.ErrKeyNotFound {
+				if err := fn(i, nil); err != nil {
+					return err
+				}
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if err := item.Value(func(v []byte) error { return fn(i, v) }); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
