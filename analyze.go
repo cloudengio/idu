@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -124,6 +125,12 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *anal
 	pcancel() // cancel progress tracker.
 	wg.Wait()
 
+	// Summaries are only known to be consistent with the current configuration
+	// once the entire prefix has been scanned without interruption.
+	if errs.Err() == nil && ctx.Err() == nil && filepath.Clean(target) == filepath.Clean(cfg.Prefix) {
+		errs.Append(sdb.MarkSummariesComplete(ctx))
+	}
+
 	errs.Append(alz.summarizeAndLog(ctx, sdb, pt, start))
 	if errs.Err() == nil {
 		return nil
@@ -156,9 +163,6 @@ func (alz *analyzeCmd) summarizeAndLog(ctx context.Context, sdb internal.ScanDB,
 	buf, err := json.Marshal(s)
 	if err != nil {
 		return err
-	}
-	if sdb == nil {
-		return nil
 	}
 	return sdb.LogAndClose(ctx, start, time.Now(), buf)
 }

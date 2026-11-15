@@ -1,5 +1,4 @@
 # Package [cloudeng.io/cmd/idu/internal](https://pkg.go.dev/cloudeng.io/cmd/idu/internal?tab=doc)
-[![CircleCI](https://circleci.com/gh/cloudengio/go.gotools.svg?style=svg)](https://circleci.com/gh/cloudengio/go.gotools) [![Go Report Card](https://goreportcard.com/badge/cloudeng.io/cmd/idu/internal)](https://goreportcard.com/report/cloudeng.io/cmd/idu/internal)
 
 ```go
 import cloudeng.io/cmd/idu/internal
@@ -9,30 +8,58 @@ import cloudeng.io/cmd/idu/internal
 ## Constants
 ### LogPrefix, LogProgress, LogError
 ```go
-LogPrefix = slog.Level(-1)
-LogProgress = slog.LevelInfo
-LogError = slog.LevelError
-
+const (
+	LogPrefix   = slog.Level(-1)
+	LogProgress = slog.LevelInfo
+	LogError    = slog.LevelError
+)
 ```
 
 
 
 ## Variables
-### LogDir
+### Verbosity, LogDir
 ```go
+Verbosity = LogError
 LogDir string
 
 ```
 
-### Verbosity
+### ErrLegacyDatabase
 ```go
-Verbosity slog.Level = LogError
+ErrLegacyDatabase = errors.New("legacy database format without summaries: delete it and rerun analyze")
 
 ```
+ErrLegacyDatabase is returned when opening a database that was created
+before precomputed summaries were introduced. Such databases are not
+supported and must be deleted and recreated by rerunning analyze.
+
+### ErrStaleSummaries
+```go
+ErrStaleSummaries = errors.New("summaries are incomplete or were computed with a different configuration (layout or hardlink settings): rerun analyze for the entire prefix")
+
+```
+ErrStaleSummaries is returned when the precomputed summaries are incomplete
+or were computed using a different configuration.
 
 
 
 ## Functions
+### Func CheckSummaries
+```go
+func CheckSummaries(ctx context.Context, db database.DB, calcID string, needLinks bool) error
+```
+CheckSummaries returns ErrStaleSummaries unless db contains complete
+precomputed summaries computed with calcID that also record hardlinks if
+needLinks is true.
+
+### Func CheckSummaryKeys
+```go
+func CheckSummaryKeys(ctx context.Context, db database.DB) error
+```
+CheckSummaryKeys returns ErrStaleSummaries if a summary could not be written
+and hence the summary keys may not include every prefix.
+
 ### Func Log
 ```go
 func Log(ctx context.Context, level slog.Level, msg string, args ...interface{})
@@ -63,6 +90,14 @@ func PrefixInfoAsFSInfo(pi prefixinfo.T, name string) fs.FileInfo
 ```
 PrefixInfoAsFSInfo returns a fs.FileInfo for the supplied PrefixInfo.
 
+### Func SummarySpec
+```go
+func SummarySpec(cfg *config.Prefix) string
+```
+SummarySpec returns the specification that the precomputed summaries must be
+created with for cfg: they depend on the disk usage calculator and whether
+hardlinks are recorded.
+
 ### Func UseBadgerDB
 ```go
 func UseBadgerDB()
@@ -80,6 +115,10 @@ type ScanDB interface {
 	LogAndClose(ctx context.Context, start, stop time.Time, detail []byte) error
 	DeletePrefix(ctx context.Context, prefix string) error
 	DeleteErrors(ctx context.Context, prefix string) error
+	// MarkSummariesComplete records that every summary in the database
+	// was computed with the current configuration. It must only be called
+	// after a complete, uninterrupted scan of the entire configured prefix.
+	MarkSummariesComplete(ctx context.Context) error
 	Close(ctx context.Context) error
 }
 ```
