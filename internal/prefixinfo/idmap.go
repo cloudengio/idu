@@ -35,20 +35,47 @@ func (idm idMap) appendBinary(buf *bytes.Buffer) {
 	}
 }
 
+func readVarint(data []byte) (int64, []byte, error) {
+	v, n := binary.Varint(data)
+	if n <= 0 {
+		return 0, nil, fmt.Errorf("invalid varint (n=%d)", n)
+	}
+	return v, data[n:], nil
+}
+
+func readUvarint(data []byte) (uint64, []byte, error) {
+	v, n := binary.Uvarint(data)
+	if n <= 0 {
+		return 0, nil, fmt.Errorf("invalid uvarint (n=%d)", n)
+	}
+	return v, data[n:], nil
+}
+
 func (idm *idMap) decodeBinary(data []byte) ([]byte, error) {
-	uid, n := binary.Varint(data)
-	data = data[n:]
+	uid, rest, err := readVarint(data)
+	if err != nil {
+		return nil, fmt.Errorf("idMap uid: %w", err)
+	}
+	l, rest, err := readUvarint(rest)
+	if err != nil {
+		return nil, fmt.Errorf("idMap length: %w", err)
+	}
+	if l > uint64(len(rest)) {
+		return nil, fmt.Errorf("idMap truncated: need at least %d bytes, have %d", l, len(rest))
+	}
 	idm.ID = uid
-	l, n := binary.Uvarint(data)
-	data = data[n:]
-	if l > 0 {
-		idm.Pos = make([]uint64, l)
-		for i := range idm.Pos {
-			idm.Pos[i], n = binary.Uvarint(data)
-			data = data[n:]
+	if l == 0 {
+		idm.Pos = nil
+		return rest, nil
+	}
+	idm.Pos = make([]uint64, int(l))
+	for i := range idm.Pos {
+		idm.Pos[i], rest, err = readUvarint(rest)
+		if err != nil {
+			return nil, fmt.Errorf("idMap pos[%d]: %w", i, err)
 		}
 	}
-	return data, nil
+	return rest, nil
 }
 
 type idMaps []idMap
@@ -75,16 +102,26 @@ func (idms idMaps) appendBinary(buf *bytes.Buffer) {
 }
 
 func (idms *idMaps) decodeBinary(data []byte) ([]byte, error) {
-	var n int
-	l, n := binary.Uvarint(data)
-	data = data[n:]
-	if l > 0 {
-		*idms = make([]idMap, l)
-		for i := range *idms {
-			data, _ = (*idms)[i].decodeBinary(data)
+	l, rest, err := readUvarint(data)
+	if err != nil {
+		return nil, fmt.Errorf("idMaps count: %w", err)
+	}
+	// Each encoded idMap requires at least 2 bytes (varint ID + uvarint length).
+	if l > uint64(len(rest))/2 {
+		return nil, fmt.Errorf("idMaps truncated: count %d exceeds remaining %d bytes", l, len(rest))
+	}
+	if l == 0 {
+		*idms = nil
+		return rest, nil
+	}
+	*idms = make([]idMap, int(l))
+	for i := range *idms {
+		rest, err = (*idms)[i].decodeBinary(rest)
+		if err != nil {
+			return nil, err
 		}
 	}
-	return data, nil
+	return rest, nil
 }
 
 func (idms idMaps) idMapFor(id int64) int {
@@ -117,6 +154,9 @@ func (idm *idMap) set(pos int) {
 }
 
 func (idm *idMap) isSet(pos int) bool {
+	if pos < 0 || pos/64 >= len(idm.Pos) {
+		return false
+	}
 	return idm.Pos[pos/64]>>(pos%64)&1 == 1
 }
 
@@ -129,7 +169,9 @@ func newIDMapScanner(idm idMap) *idMapScanner {
 
 type idMapScanner struct {
 	idMap
-	bitPos int
+	bitPos  int
+	started bool
+	done    bool
 }
 
 func select1(shift int, words []uint64) int {
@@ -144,18 +186,25 @@ func select1(shift int, words []uint64) int {
 }
 
 func (idm *idMapScanner) next() bool {
-	if idm.bitPos == -1 {
-		idm.bitPos = select1(0, idm.Pos)
-		return idm.bitPos >= 0
-	}
-	idm.bitPos++
-	word := idm.bitPos / 64
-	bit := idm.bitPos % 64
-	idm.bitPos = select1(bit, idm.Pos[word:])
-	if idm.bitPos < 0 {
+	if idm.done {
 		return false
 	}
-	idm.bitPos += word * 64
+	if !idm.started {
+		idm.started = true
+		idm.bitPos = select1(0, idm.Pos)
+	} else {
+		idm.bitPos++
+		word := idm.bitPos / 64
+		bit := idm.bitPos % 64
+		idm.bitPos = select1(bit, idm.Pos[word:])
+		if idm.bitPos >= 0 {
+			idm.bitPos += word * 64
+		}
+	}
+	if idm.bitPos < 0 {
+		idm.done = true
+		return false
+	}
 	return true
 }
 

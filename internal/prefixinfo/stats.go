@@ -6,6 +6,7 @@ package prefixinfo
 
 import (
 	"encoding/binary"
+	"fmt"
 )
 
 type Stats struct {
@@ -33,26 +34,33 @@ func (s *Stats) MarshalBinary() (data []byte, err error) {
 	return s.AppendBinary(make([]byte, 0, 100)), nil
 }
 
+func (s *Stats) decodeBinary(data []byte) ([]byte, error) {
+	id, rest, err := readUvarint(data)
+	if err != nil {
+		return nil, fmt.Errorf("Stats.ID: %w", err)
+	}
+	s.ID = uint32(id) //nolint:gosec // ID fits in uint32 when encoded from Stats.ID
+	fields := []*int64{&s.Files, &s.Bytes, &s.StorageBytes, &s.PrefixBytes, &s.Prefixes}
+	for _, f := range fields {
+		*f, rest, err = readVarint(rest)
+		if err != nil {
+			return nil, fmt.Errorf("Stats field: %w", err)
+		}
+	}
+	return rest, nil
+}
+
 func (s *Stats) DecodeBinary(data []byte) []byte {
-	var n int
-	id, n := binary.Uvarint(data)
-	data = data[n:]
-	s.ID = uint32(id)
-	s.Files, n = binary.Varint(data)
-	data = data[n:]
-	s.Bytes, n = binary.Varint(data)
-	data = data[n:]
-	s.StorageBytes, n = binary.Varint(data)
-	data = data[n:]
-	s.PrefixBytes, n = binary.Varint(data)
-	data = data[n:]
-	s.Prefixes, n = binary.Varint(data)
-	return data[n:]
+	rest, err := s.decodeBinary(data)
+	if err != nil {
+		return nil
+	}
+	return rest
 }
 
 func (s *Stats) UnmarshalBinary(data []byte) error {
-	s.DecodeBinary(data)
-	return nil
+	_, err := s.decodeBinary(data)
+	return err
 }
 
 func (sl StatsList) AppendBinary(data []byte) []byte {
@@ -67,18 +75,38 @@ func (sl StatsList) MarshalBinary() (data []byte, err error) {
 	return sl.AppendBinary(make([]byte, 0, 100)), nil
 }
 
-func (sl *StatsList) DecodeBinary(data []byte) []byte {
-	var n int
-	l, n := binary.Uvarint(data)
-	data = data[n:]
-	*sl = make([]Stats, l)
-	for i := range *sl {
-		data = (*sl)[i].DecodeBinary(data)
+func (sl *StatsList) decodeBinary(data []byte) ([]byte, error) {
+	l, rest, err := readUvarint(data)
+	if err != nil {
+		return nil, fmt.Errorf("StatsList count: %w", err)
 	}
-	return data
+	// Each encoded Stats requires at least 6 bytes (1 uvarint + 5 varints).
+	if l > uint64(len(rest))/6 {
+		return nil, fmt.Errorf("StatsList truncated: count %d exceeds remaining %d bytes", l, len(rest))
+	}
+	if l == 0 {
+		*sl = nil
+		return rest, nil
+	}
+	*sl = make([]Stats, int(l))
+	for i := range *sl {
+		rest, err = (*sl)[i].decodeBinary(rest)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return rest, nil
+}
+
+func (sl *StatsList) DecodeBinary(data []byte) []byte {
+	rest, err := sl.decodeBinary(data)
+	if err != nil {
+		return nil
+	}
+	return rest
 }
 
 func (sl *StatsList) UnmarshalBinary(data []byte) error {
-	sl.DecodeBinary(data)
-	return nil
+	_, err := sl.decodeBinary(data)
+	return err
 }
