@@ -168,3 +168,90 @@ func TestReadPrefixesInOrderError(t *testing.T) {
 	}
 	waitForGoroutines(t, before)
 }
+
+type failingScanSummariesDB struct {
+	database.DB
+	failAfter int
+	err       error
+}
+
+func (db *failingScanSummariesDB) ScanSummaries(ctx context.Context, exactKey, childPrefix string, visitor func(context.Context, string, []byte) bool) error {
+	seen := 0
+	var aborted bool
+	err := db.DB.ScanSummaries(ctx, exactKey, childPrefix, func(c context.Context, k string, v []byte) bool {
+		seen++
+		if seen > db.failAfter {
+			aborted = true
+			return false
+		}
+		return visitor(c, k, v)
+	})
+	if err != nil {
+		return err
+	}
+	if aborted {
+		return db.err
+	}
+	return nil
+}
+
+func TestReadPrefixesInOrderScanErrorAndDecodeErr(t *testing.T) {
+	ctx := context.Background()
+	cfg := createPrefixTreeDB(ctx, t, 40, 3)
+
+	t.Run("ScanSummaries mid-stream error", func(t *testing.T) {
+		rodb, err := internal.OpenDatabase(ctx, cfg, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rodb.Close(ctx)
+		exactKey, childPrefix := stats.SummaryKeys("/", "/root")
+		before := runtime.NumGoroutine()
+		errScan := errors.New("scan summaries failed")
+		db := &failingScanSummariesDB{DB: rodb, failAfter: prefixBatchSize + 5, err: errScan}
+		err = readPrefixesInOrder(ctx, db, "/", exactKey, childPrefix, 2, func(*prefixEntry) {})
+		if !errors.Is(err, errScan) {
+			t.Errorf("got %v, want %v", err, errScan)
+		}
+		waitForGoroutines(t, before)
+	})
+
+	t.Run("corrupt prefix entry and readers=0", func(t *testing.T) {
+		rwdb, err := internal.OpenDatabase(ctx, cfg, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		badPrefix := "/root/d000/corrupt"
+		badSK, _ := stats.SummaryKeys("/", badPrefix)
+		if err := rwdb.Set(ctx, badPrefix, []byte{0xff}, false); err != nil {
+			_ = rwdb.Close(ctx)
+			t.Fatal(err)
+		}
+		if err := rwdb.SetSummary(ctx, badSK, []byte{0x01}, false); err != nil {
+			_ = rwdb.Close(ctx)
+			t.Fatal(err)
+		}
+		_ = rwdb.Close(ctx)
+
+		rodb, err := internal.OpenDatabase(ctx, cfg, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rodb.Close(ctx)
+		exactKey, childPrefix := stats.SummaryKeys("/", "/root/d000")
+		before := runtime.NumGoroutine()
+		var gotDecodeErr int
+		err = readPrefixesInOrder(ctx, rodb, "/", exactKey, childPrefix, 0, func(e *prefixEntry) {
+			if e.prefix == badPrefix && e.decodeErr != nil {
+				gotDecodeErr++
+			}
+		})
+		if err != nil {
+			t.Fatalf("readPrefixesInOrder: %v", err)
+		}
+		if gotDecodeErr != 1 {
+			t.Errorf("gotDecodeErr = %d, want 1", gotDecodeErr)
+		}
+		waitForGoroutines(t, before)
+	})
+}

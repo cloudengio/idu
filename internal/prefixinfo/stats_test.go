@@ -30,3 +30,26 @@ func TestEncoding(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }
+
+func TestStatsBinaryRoundTrip(t *testing.T) {
+	t.Parallel()
+	in := prefixinfo.Stats{
+		ID:           42,
+		Files:        10,
+		Prefixes:     2,
+		Bytes:        1024,
+		StorageBytes: 4096,
+		PrefixBytes:  256,
+	}
+	data, err := in.MarshalBinary()
+	if err != nil {
+		t.Fatalf("MarshalBinary: %v", err)
+	}
+	var out prefixinfo.Stats
+	if err := out.UnmarshalBinary(data); err != nil {
+		t.Fatalf("UnmarshalBinary: %v", err)
+	}
+	if out != in {
+		t.Errorf("got %+v, want %+v", out, in)
+	}
+}

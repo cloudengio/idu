@@ -7,6 +7,7 @@ package prefixinfo
 import (
 	"bytes"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -88,5 +89,12 @@ func TestIDMaps(t *testing.T) {
 	}
 	if got, want := idms2, idms; !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
+	}
+
+	if s := idms.String(); !strings.Contains(s, "  1:") || !strings.Contains(s, "  2:") {
+		t.Errorf("unexpected idMaps.String(): %q", s)
+	}
+	if id, ok := idms.idForPos(5); ok || id != 0 {
+		t.Errorf("idForPos(5) = (%d, %v), want (0, false)", id, ok)
 	}
 }

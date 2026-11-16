@@ -6,6 +6,7 @@ package prefixinfo_test
 
 import (
 	"fmt"
+	"io/fs"
 	"reflect"
 	"runtime"
 	"testing"
@@ -178,5 +179,56 @@ func TestBinaryEncoding(t *testing.T) {
 		} {
 			assertBinaryEncodingRoundTrip(t, fn, &pi, tc, uid, gid, expectedDevice)
 		}
+	}
+}
+
+func TestAccessorsAndErrors(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	dirInfo := testutil.TestdataNewInfo("dir", 4096, 8, fs.ModeDir|0o755, now, 10, 20, 1, 100)
+	pi := prefixinfo.New("dir", dirInfo)
+	f1 := testutil.TestdataNewInfo("f1", 10, 1, 0o644, now, 10, 20, 1, 101)
+	d1 := testutil.TestdataNewInfo("sub", 4096, 8, fs.ModeDir|0o755, now, 10, 20, 1, 102)
+	pi.AppendInfoList(file.InfoList{f1, d1})
+
+	if pi.Size() != 4096 {
+		t.Errorf("Size() = %d, want 4096", pi.Size())
+	}
+	if pi.Type() != fs.ModeDir {
+		t.Errorf("Type() = %v, want %v", pi.Type(), fs.ModeDir)
+	}
+	if pi.XAttr().UID != 10 || pi.XAttr().GID != 20 {
+		t.Errorf("XAttr() = %+v", pi.XAttr())
+	}
+	if !pi.UnchangedInfo(dirInfo) {
+		t.Error("UnchangedInfo should be true for same info")
+	}
+	changedInfo := testutil.TestdataNewInfo("dir", 4096, 8, fs.ModeDir|0o700, now, 10, 20, 1, 100)
+	if pi.UnchangedInfo(changedInfo) {
+		t.Error("UnchangedInfo should be false when mode changes")
+	}
+
+	prefixes := pi.PrefixesOnly()
+	if len(prefixes) != 1 || prefixes[0].Name() != "sub" {
+		t.Errorf("PrefixesOnly() = %v, want [sub]", prefixes)
+	}
+	files := pi.FilesOnly()
+	if len(files) != 1 || files[0].Name() != "f1" {
+		t.Errorf("FilesOnly() = %v, want [f1]", files)
+	}
+
+	if _, err := pi.UserIDScan(10); err == nil {
+		t.Error("expected error calling UserIDScan before finalize")
+	}
+	if _, err := pi.GroupIDScan(20); err == nil {
+		t.Error("expected error calling GroupIDScan before finalize")
+	}
+
+	var empty prefixinfo.T
+	if err := empty.UnmarshalBinary(nil); err == nil {
+		t.Error("expected error unmarshaling empty slice")
+	}
+	if err := empty.UnmarshalBinary([]byte{0x03}); err == nil {
+		t.Error("expected error unmarshaling unsupported version")
 	}
 }

@@ -5,11 +5,14 @@
 package internal
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"cloudeng.io/cmd/idu/internal/config"
@@ -421,4 +424,451 @@ func readAllKeys(ctx context.Context, t *testing.T, cfg config.Prefix) (summarie
 		t.Fatal(err)
 	}
 	return summaries, prefixes, errs
+}
+
+type faultDB struct {
+	database.DB
+	setErr           error
+	getErr           error
+	setSummaryErr    error
+	setMetaErr       error
+	flushErr         error
+	deleteErr        error
+	deletePrefixErr  error
+	deleteSummaryErr error
+	deleteErrorErr   error
+	deleteErrorsErr  error
+	logErr           error
+	compactErr       error
+	gcErr            error
+	closeErr         error
+	closed           int
+}
+
+func (f *faultDB) Set(ctx context.Context, prefix string, value []byte, batch bool) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
+	return f.DB.Set(ctx, prefix, value, batch)
+}
+
+func (f *faultDB) Get(ctx context.Context, prefix string, buf *bytes.Buffer) error {
+	if f.getErr != nil {
+		return f.getErr
+	}
+	return f.DB.Get(ctx, prefix, buf)
+}
+
+func (f *faultDB) SetSummary(ctx context.Context, key string, value []byte, batch bool) error {
+	if f.setSummaryErr != nil {
+		return f.setSummaryErr
+	}
+	return f.DB.SetSummary(ctx, key, value, batch)
+}
+
+func (f *faultDB) SetMeta(ctx context.Context, key string, value []byte) error {
+	if f.setMetaErr != nil {
+		return f.setMetaErr
+	}
+	return f.DB.SetMeta(ctx, key, value)
+}
+
+func (f *faultDB) Flush(ctx context.Context) error {
+	if f.flushErr != nil {
+		return f.flushErr
+	}
+	return f.DB.Flush(ctx)
+}
+
+func (f *faultDB) Delete(ctx context.Context, prefix string) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	return f.DB.Delete(ctx, prefix)
+}
+
+func (f *faultDB) DeletePrefix(ctx context.Context, prefix string) error {
+	if f.deletePrefixErr != nil {
+		return f.deletePrefixErr
+	}
+	return f.DB.DeletePrefix(ctx, prefix)
+}
+
+func (f *faultDB) DeleteSummary(ctx context.Context, exactKey, childPrefix string) error {
+	if f.deleteSummaryErr != nil {
+		return f.deleteSummaryErr
+	}
+	return f.DB.DeleteSummary(ctx, exactKey, childPrefix)
+}
+
+func (f *faultDB) DeleteError(ctx context.Context, key string) error {
+	if f.deleteErrorErr != nil {
+		return f.deleteErrorErr
+	}
+	return f.DB.DeleteError(ctx, key)
+}
+
+func (f *faultDB) DeleteErrors(ctx context.Context, prefix string) error {
+	if f.deleteErrorsErr != nil {
+		return f.deleteErrorsErr
+	}
+	return f.DB.DeleteErrors(ctx, prefix)
+}
+
+func (f *faultDB) Log(ctx context.Context, start, stop time.Time, detail []byte) error {
+	if f.logErr != nil {
+		return f.logErr
+	}
+	return f.DB.Log(ctx, start, stop, detail)
+}
+
+func (f *faultDB) Compact(ctx context.Context) error {
+	if f.compactErr != nil {
+		return f.compactErr
+	}
+	if c, ok := f.DB.(compactor); ok {
+		return c.Compact(ctx)
+	}
+	return nil
+}
+
+func (f *faultDB) RunValueLogGC(discardRatio float64) error {
+	if f.gcErr != nil {
+		return f.gcErr
+	}
+	if gc, ok := f.DB.(valueLogGCRunner); ok {
+		return gc.RunValueLogGC(discardRatio)
+	}
+	return nil
+}
+
+func (f *faultDB) Close(ctx context.Context) error {
+	f.closed++
+	if f.closeErr != nil {
+		_ = f.DB.Close(ctx)
+		return f.closeErr
+	}
+	return f.DB.Close(ctx)
+}
+
+func TestOpenDatabaseErrorsAndSlowOpen(t *testing.T) {
+	origFactory := databaseFactory
+	t.Cleanup(func() {
+		databaseFactory = origFactory
+	})
+
+	t.Run("factory error", func(t *testing.T) {
+		wantErr := errors.New("open failed")
+		databaseFactory = func(context.Context, config.Prefix, bool) (database.DB, error) {
+			return nil, wantErr
+		}
+		if _, err := OpenDatabase(context.Background(), config.Prefix{Database: "/tmp/x"}, false); !errors.Is(err, wantErr) {
+			t.Fatalf("got %v, want %v", err, wantErr)
+		}
+	})
+
+	t.Run("canceled while opening", func(t *testing.T) {
+		release := make(chan struct{})
+		returned := make(chan struct{})
+		databaseFactory = func(context.Context, config.Prefix, bool) (database.DB, error) {
+			defer close(returned)
+			<-release
+			return nil, errors.New("canceled")
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if _, err := OpenDatabase(ctx, config.Prefix{Database: "/tmp/x"}, false); !errors.Is(err, context.Canceled) {
+			close(release)
+			<-returned
+			t.Fatalf("got %v, want context.Canceled", err)
+		}
+		close(release)
+		<-returned
+	})
+
+	t.Run("slow open prints waiting message", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			dbDir := filepath.Join(t.TempDir(), "slow-db")
+			databaseFactory = func(ctx context.Context, cfg config.Prefix, readonly bool) (database.DB, error) {
+				time.Sleep(1100 * time.Millisecond)
+				return origFactory(ctx, cfg, readonly)
+			}
+			db, err := OpenDatabase(context.Background(), config.Prefix{Database: dbDir}, false)
+			if err != nil {
+				t.Fatalf("OpenDatabase: %v", err)
+			}
+			_ = db.Close(context.Background())
+		})
+	})
+}
+
+func TestOpenPrefixAndDatabase(t *testing.T) {
+	ctx := context.Background()
+	dbDir := filepath.Join(t.TempDir(), "db")
+	allCfg, err := config.ParseConfig([]byte("filesystems:\n  - name: testfs\n    prefix: /test/root\n    database: " + dbDir + "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, cfg, target, db, err := OpenPrefixAndDatabase(ctx, allCfg, "testfs", false)
+	if err != nil {
+		t.Fatalf("OpenPrefixAndDatabase rw: %v", err)
+	}
+	if cfg.Name != "testfs" || target != "/test/root" {
+		t.Fatalf("got (%q, %q), want (testfs, /test/root)", cfg.Name, target)
+	}
+	_ = db.Close(ctx)
+
+	_, _, target, rdb, err := OpenPrefixAndDatabase(ctx, allCfg, "/test/root/sub", true)
+	if err != nil {
+		t.Fatalf("OpenPrefixAndDatabase ro: %v", err)
+	}
+	if target != "/test/root/sub" {
+		t.Fatalf("target = %q, want /test/root/sub", target)
+	}
+	_ = rdb.Close(ctx)
+
+	if _, _, _, _, err := OpenPrefixAndDatabase(ctx, allCfg, "/other/path", true); err == nil {
+		t.Fatal("expected error for unknown prefix")
+	}
+	if runtime.GOOS != "windows" {
+		badCfg, err := config.ParseConfig([]byte("filesystems:\n  - name: bad\n    prefix: /bad\n    database: " + filepath.Join(t.TempDir(), "missing") + "\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, _, db, err := OpenPrefixAndDatabase(ctx, badCfg, "bad", true); err == nil {
+			_ = db.Close(ctx)
+			t.Fatal("expected error opening missing readonly database")
+		}
+	}
+}
+
+func newFaultScanDBFactory(t *testing.T) **faultDB {
+	t.Helper()
+	origFactory := databaseFactory
+	var fdb *faultDB
+	databaseFactory = func(ctx context.Context, cfg config.Prefix, readonly bool) (database.DB, error) {
+		db, err := origFactory(ctx, cfg, readonly)
+		if err != nil {
+			return nil, err
+		}
+		fdb = &faultDB{DB: db}
+		return fdb, nil
+	}
+	t.Cleanup(func() {
+		databaseFactory = origFactory
+	})
+	return &fdb
+}
+
+func TestScanDBSummaryInvalidation(t *testing.T) {
+	ctx := context.Background()
+	fdbPtr := newFaultScanDBFactory(t)
+
+	cfg := config.Prefix{Prefix: "/a", Database: filepath.Join(t.TempDir(), "db-inv"), Separator: "/"}
+	sdb, err := NewScanDB(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sdb.Close(ctx)
+	fdb := *fdbPtr
+
+	pi := makeTestPrefixInfo(100)
+	errSummary := errors.New("summary write failed")
+	fdb.setSummaryErr = errSummary
+	if err := sdb.SetPrefixInfo(ctx, "/a", false, &pi); !errors.Is(err, errSummary) {
+		t.Fatalf("SetPrefixInfo = %v, want %v", err, errSummary)
+	}
+	fdb.setSummaryErr = nil
+
+	if err := CheckSummaryKeys(ctx, fdb); !errors.Is(err, ErrStaleSummaries) {
+		t.Errorf("CheckSummaryKeys = %v, want ErrStaleSummaries", err)
+	}
+	if err := CheckSummaries(ctx, fdb, diskusage.NewIdentity().String(), false); !errors.Is(err, ErrStaleSummaries) {
+		t.Errorf("CheckSummaries = %v, want ErrStaleSummaries", err)
+	}
+}
+
+func TestScanDBGetSetPrefixInfoErrors(t *testing.T) {
+	ctx := context.Background()
+	fdbPtr := newFaultScanDBFactory(t)
+
+	cfg := config.Prefix{Prefix: "/a", Database: filepath.Join(t.TempDir(), "db-gs"), Separator: "/"}
+	sdb, err := NewScanDB(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sdb.Close(ctx)
+	fdb := *fdbPtr
+
+	var out prefixinfo.T
+	if ok, err := sdb.GetPrefixInfo(ctx, "/missing", &out); ok || err != nil {
+		t.Errorf("missing GetPrefixInfo = (%v, %v), want (false, nil)", ok, err)
+	}
+	if err := fdb.DB.Set(ctx, "/corrupt", []byte{0xff}, false); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := sdb.GetPrefixInfo(ctx, "/corrupt", &out); !ok || err == nil {
+		t.Errorf("corrupt GetPrefixInfo = (%v, %v), want (true, err)", ok, err)
+	}
+
+	errGet := errors.New("get failed")
+	fdb.getErr = errGet
+	if ok, err := sdb.GetPrefixInfo(ctx, "/a", &out); ok || !errors.Is(err, errGet) {
+		t.Errorf("error GetPrefixInfo = (%v, %v), want (false, %v)", ok, err, errGet)
+	}
+	fdb.getErr = nil
+
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+	if ok, err := sdb.GetPrefixInfo(cctx, "/a", &out); ok || !errors.Is(err, context.Canceled) {
+		t.Errorf("canceled GetPrefixInfo = (%v, %v), want (false, context.Canceled)", ok, err)
+	}
+	pi := makeTestPrefixInfo(100)
+	if err := sdb.SetPrefixInfo(cctx, "/a", false, &pi); !errors.Is(err, context.Canceled) {
+		t.Errorf("canceled SetPrefixInfo = %v, want context.Canceled", err)
+	}
+
+	errSet := errors.New("set failed")
+	fdb.setErr = errSet
+	if err := sdb.SetPrefixInfo(ctx, "/a", false, &pi); !errors.Is(err, errSet) {
+		t.Errorf("SetPrefixInfo set err = %v, want %v", err, errSet)
+	}
+}
+
+func TestScanDBDeletePrefixAndErrorsPropagation(t *testing.T) {
+	ctx := context.Background()
+	fdbPtr := newFaultScanDBFactory(t)
+
+	cfg := config.Prefix{Prefix: "/", Database: filepath.Join(t.TempDir(), "db"), Separator: "/"}
+	sdb, err := NewScanDB(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sdb.Close(ctx)
+	fdb := *fdbPtr
+
+	pi := makeTestPrefixInfo(50)
+	if err := sdb.SetPrefixInfo(ctx, "/", false, &pi); err != nil {
+		t.Fatal(err)
+	}
+	if err := sdb.SetPrefixInfo(ctx, "/sub", false, &pi); err != nil {
+		t.Fatal(err)
+	}
+	if err := sdb.DeletePrefix(ctx, "/"); err != nil {
+		t.Fatalf("DeletePrefix(/): %v", err)
+	}
+
+	wantErr := errors.New("op failed")
+	fdb.flushErr = wantErr
+	if err := sdb.DeletePrefix(ctx, "/x"); !errors.Is(err, wantErr) {
+		t.Errorf("Flush err = %v, want %v", err, wantErr)
+	}
+	fdb.flushErr = nil
+
+	fdb.deleteErr = wantErr
+	if err := sdb.DeletePrefix(ctx, "/x"); !errors.Is(err, wantErr) {
+		t.Errorf("Delete err = %v, want %v", err, wantErr)
+	}
+	fdb.deleteErr = nil
+
+	fdb.deletePrefixErr = wantErr
+	if err := sdb.DeletePrefix(ctx, "/x"); !errors.Is(err, wantErr) {
+		t.Errorf("DeletePrefix err = %v, want %v", err, wantErr)
+	}
+	fdb.deletePrefixErr = nil
+
+	fdb.deleteErrorErr = wantErr
+	if err := sdb.DeleteErrors(ctx, "/x"); !errors.Is(err, wantErr) {
+		t.Errorf("DeleteError err = %v, want %v", err, wantErr)
+	}
+}
+
+func TestScanDBMarkCompleteAndLogCloseErrors(t *testing.T) {
+	ctx := context.Background()
+	fdbPtr := newFaultScanDBFactory(t)
+
+	dbDir := filepath.Join(t.TempDir(), "db-close")
+	cfg := config.Prefix{Prefix: "/a", Database: dbDir, Separator: "/"}
+	sdb, err := NewScanDB(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sdb.MarkSummariesComplete(ctx); err != nil {
+		t.Fatalf("MarkSummariesComplete no-op: %v", err)
+	}
+	if err := (*fdbPtr).DB.SetMeta(ctx, metaKeySummaries, []byte("other")); err != nil {
+		t.Fatal(err)
+	}
+	_ = sdb.Close(ctx)
+
+	sdb2, err := NewScanDB(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sdb2.Close(ctx)
+	fdb := *fdbPtr
+
+	wantErr := errors.New("boom")
+	fdb.flushErr = wantErr
+	if err := sdb2.MarkSummariesComplete(ctx); !errors.Is(err, wantErr) {
+		t.Errorf("MarkSummariesComplete Flush err = %v, want %v", err, wantErr)
+	}
+	fdb.flushErr = nil
+
+	fdb.setMetaErr = wantErr
+	if err := sdb2.MarkSummariesComplete(ctx); !errors.Is(err, wantErr) {
+		t.Errorf("MarkSummariesComplete SetMeta err = %v, want %v", err, wantErr)
+	}
+	fdb.setMetaErr = nil
+
+	if err := sdb2.MarkSummariesComplete(ctx); err != nil {
+		t.Fatalf("MarkSummariesComplete: %v", err)
+	}
+
+	fdb.logErr = wantErr
+	if err := sdb2.LogAndClose(ctx, time.Now(), time.Now(), []byte("{}")); !errors.Is(err, wantErr) {
+		t.Errorf("LogAndClose Log err = %v, want %v", err, wantErr)
+	}
+	fdb.logErr = nil
+
+	fdb.gcErr = wantErr
+	if err := sdb2.LogAndClose(ctx, time.Now(), time.Now(), []byte("{}")); !errors.Is(err, wantErr) {
+		t.Errorf("LogAndClose GC err = %v, want %v", err, wantErr)
+	}
+	fdb.gcErr = nil
+
+	fdb.closeErr = wantErr
+	if err := sdb2.LogAndClose(ctx, time.Now(), time.Now(), []byte("{}")); !errors.Is(err, wantErr) {
+		t.Errorf("LogAndClose Close err = %v, want %v", err, wantErr)
+	}
+}
+
+func TestScanDBCompactError(t *testing.T) {
+	ctx := context.Background()
+	origFactory := databaseFactory
+	dbDir := filepath.Join(t.TempDir(), "db-compact-err")
+	raw, err := origFactory(ctx, config.Prefix{Prefix: "/a", Database: dbDir}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-48 * time.Hour)
+	if err := raw.Log(ctx, old.Add(-time.Minute), old, []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	_ = raw.Close(ctx)
+
+	fdbPtr := newFaultScanDBFactory(t)
+	cfg := config.Prefix{Prefix: "/a", Database: dbDir, CompactInterval: time.Hour}
+	sdb, err := NewScanDB(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sdb.Close(ctx)
+
+	wantErr := errors.New("compact failed")
+	(*fdbPtr).compactErr = wantErr
+	if err := sdb.LogAndClose(ctx, time.Now(), time.Now(), []byte("{}")); !errors.Is(err, wantErr) {
+		t.Errorf("LogAndClose Compact err = %v, want %v", err, wantErr)
+	}
 }
