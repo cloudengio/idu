@@ -26,15 +26,15 @@ func TestProgressTracker_DisplayAndCounters(t *testing.T) {
 				pt := newProgressTracker(ctx, time.Millisecond, true, displayUnchanged, &wg)
 
 				start := pt.Before()
-				pt.incStartPrefix()
-				pt.incParentUnchanged()
-				pt.incChildrenUnchanged()
-				pt.incSlowScans()
-				pt.incErrors()
-				pt.setSyncScans(7)
-				pt.setSyncScans(3) // should not overwrite with smaller? (see code_review.md)
+				pt.PrefixStarted()
+				pt.ParentUnchanged()
+				pt.ChildrenUnchanged()
+				pt.SlowScan()
+				pt.Error()
+				pt.SyncScans(7)
+				pt.SyncScans(3) // should not overwrite with smaller? (see code_review.md)
 				pt.After(start)
-				pt.incDonePrefix(2, 10)
+				pt.PrefixDone(2, 10)
 
 				// Advance past the 30s non-interactive display interval.
 				time.Sleep(31 * time.Second)

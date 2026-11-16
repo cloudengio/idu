@@ -22,13 +22,12 @@ import (
 	"testing"
 	"time"
 
+	"cloudeng.io/cmd/idu/iduconfig"
+	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/cmd/idu/internal/config"
-	"cloudeng.io/cmd/idu/internal/database"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/file"
 	"cloudeng.io/file/filewalk"
-	"cloudeng.io/file/filewalk/asyncstat"
 	"cloudeng.io/file/localfs"
 )
 
@@ -89,7 +88,7 @@ func getExpectedErrors(c []string) []string {
 	return errors
 }
 
-func scanDB(ctx context.Context, t *testing.T, db database.DB, lfs filewalk.FS, arg0 string) []string {
+func scanDB(ctx context.Context, t *testing.T, db idudb.Reader, lfs filewalk.FS, arg0 string) []string {
 	scanned := []string{}
 	err := db.Scan(ctx, arg0, func(_ context.Context, k string, v []byte) bool {
 		var pi prefixinfo.T
@@ -135,7 +134,7 @@ func scanDB(ctx context.Context, t *testing.T, db database.DB, lfs filewalk.FS, 
 	return scanned
 }
 
-func scanErrors(ctx context.Context, t *testing.T, db database.DB, _ filewalk.FS, arg0 string) []string {
+func scanErrors(ctx context.Context, t *testing.T, db idudb.Reader, _ filewalk.FS, arg0 string) []string {
 	errors := []string{}
 	err := db.VisitErrors(ctx, arg0,
 		func(_ context.Context, key string, _ time.Time, detail []byte) bool {
@@ -149,7 +148,7 @@ func scanErrors(ctx context.Context, t *testing.T, db database.DB, _ filewalk.FS
 	return errors
 }
 
-func getLastLog(ctx context.Context, t *testing.T, db database.DB) (start, stop time.Time, s anaylzeSummary) {
+func getLastLog(ctx context.Context, t *testing.T, db idudb.Reader) (start, stop time.Time, s anaylzeSummary) {
 	start, stop, detail, err := db.LastLog(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -160,8 +159,8 @@ func getLastLog(ctx context.Context, t *testing.T, db database.DB) (start, stop 
 	return
 }
 
-func verifyDB(ctx context.Context, t *testing.T, cfg config.T, fs filewalk.FS, arg0 string, scannable []string) ([]string, anaylzeSummary) {
-	ctx, _, _, db, err := internal.OpenPrefixAndDatabase(ctx, cfg, arg0, true)
+func verifyDB(ctx context.Context, t *testing.T, cfg iduconfig.T, fs filewalk.FS, arg0 string, scannable []string) ([]string, anaylzeSummary) {
+	ctx, _, _, db, err := openPrefixReadOnly(ctx, cfg, arg0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +246,7 @@ func testAnalyze(ctx context.Context, t *testing.T) {
 		os.RemoveAll(tmpDir)
 	}()
 
-	cfg, err := config.ReadConfig(cfgFile)
+	cfg, err := iduconfig.ReadConfig(cfgFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +353,7 @@ func TestAnalyzeByName(t *testing.T) {
 	sort.Strings(scannable)
 	scannable = removeExclusions(scannable)
 
-	cfg, err := config.ReadConfig(cfgFile)
+	cfg, err := iduconfig.ReadConfig(cfgFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -371,7 +370,7 @@ func TestAnalyzeByName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, resolvedCfg, target, db, err := internal.OpenPrefixAndDatabase(ctx, cfg, "testtree", true)
+	_, resolvedCfg, target, db, err := openPrefixReadOnly(ctx, cfg, "testtree")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +446,7 @@ func setTempLogDir(t *testing.T) {
 	})
 }
 
-func setupAnalyzeTestConfig(t *testing.T, root string) config.T {
+func setupAnalyzeTestConfig(t *testing.T, root string) iduconfig.T {
 	t.Helper()
 	tmpDir := filepath.Dir(root)
 	cfgText := fmt.Sprintf(`filesystems:
@@ -458,7 +457,7 @@ func setupAnalyzeTestConfig(t *testing.T, root string) config.T {
     concurrent_scans: 2
     concurrent_stats: 2
 `, root, filepath.Join(tmpDir, "db"))
-	cfg, err := config.ParseConfig([]byte(cfgText))
+	cfg, err := iduconfig.ParseConfig([]byte(cfgText))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -496,7 +495,7 @@ func TestAnalyzeForceAndSubtree(t *testing.T) {
 	if err := alz.analyzeFS(ctx, lfs, &analyzeFlags{Force: true}, []string{root}); err != nil {
 		t.Fatalf("force analyzeFS: %v", err)
 	}
-	_, _, _, db, err := internal.OpenPrefixAndDatabase(ctx, cfg, root, true)
+	_, _, _, db, err := openPrefixReadOnly(ctx, cfg, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -513,7 +512,7 @@ func TestAnalyzeForceAndSubtree(t *testing.T) {
 	if err := alz.analyzeFS(ctx, lfs, &analyzeFlags{}, []string{root}); err != nil {
 		t.Fatalf("analyzeFS after subdir change: %v", err)
 	}
-	_, _, _, db2, err := internal.OpenPrefixAndDatabase(ctx, cfg, root, true)
+	_, _, _, db2, err := openPrefixReadOnly(ctx, cfg, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -544,7 +543,7 @@ func TestAnalyzeSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfgText := fmt.Sprintf("filesystems:\n  - name: sym\n    prefix: %s\n    database: %s\n", sym, filepath.Join(tmpDir, "symdb"))
-	cfg, err := config.ParseConfig([]byte(cfgText))
+	cfg, err := iduconfig.ParseConfig([]byte(cfgText))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -586,7 +585,7 @@ func TestAnalyzeFaults(t *testing.T) {
 		if err := alz.analyzeFS(ctx, ffs, &analyzeFlags{}, []string{root}); err != nil {
 			t.Fatalf("faulty analyzeFS: %v", err)
 		}
-		_, _, _, db, err := internal.OpenPrefixAndDatabase(ctx, cfg, root, true)
+		_, _, _, db, err := openPrefixReadOnly(ctx, cfg, root)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -607,7 +606,7 @@ func TestAnalyzeFaults(t *testing.T) {
 		if err := alz.analyzeFS(ctx, ffs, &analyzeFlags{}, []string{root}); err != nil {
 			t.Fatalf("analyzeFS: %v", err)
 		}
-		_, _, _, db, err := internal.OpenPrefixAndDatabase(ctx, cfg, root, true)
+		_, _, _, db, err := openPrefixReadOnly(ctx, cfg, root)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -653,28 +652,6 @@ func (f *interruptFS) XAttr(ctx context.Context, path string, info file.Info) (f
 	return f.FS.XAttr(ctx, path, info)
 }
 
-type spyScanDB struct {
-	internal.ScanDB
-	inWalk          *atomic.Int32
-	closedWhileWalk atomic.Bool
-	closedCount     atomic.Int32
-}
-
-func (s *spyScanDB) Close(ctx context.Context) error {
-	if s.inWalk.Load() > 0 {
-		s.closedWhileWalk.Store(true)
-	}
-	s.closedCount.Add(1)
-	return s.ScanDB.Close(ctx)
-}
-
-func (s *spyScanDB) LogAndClose(ctx context.Context, start, stop time.Time, detail []byte) error {
-	if s.inWalk.Load() > 0 {
-		s.closedWhileWalk.Store(true)
-	}
-	return s.ScanDB.LogAndClose(ctx, start, stop, detail)
-}
-
 func TestAnalyzeInterruptDoesNotCloseDBEarly(t *testing.T) {
 	tmpDir := t.TempDir()
 	root := filepath.Join(tmpDir, "root")
@@ -696,15 +673,14 @@ func TestAnalyzeInterruptDoesNotCloseDBEarly(t *testing.T) {
 	runInterrupt := func(t *testing.T, ctx context.Context, onFirst func()) {
 		t.Helper()
 		var ifs *interruptFS
-		var spy *spyScanDB
+		var closedWhileWalk atomic.Bool
+		var closedCount atomic.Int32
 		alz := &analyzeCmd{
-			openDB: func(c context.Context, p config.Prefix) (internal.ScanDB, error) {
-				sdb, err := internal.NewScanDB(c, p)
-				if err != nil {
-					return nil, err
+			beforeClose: func() {
+				if ifs.inWalk.Load() > 0 {
+					closedWhileWalk.Store(true)
 				}
-				spy = &spyScanDB{ScanDB: sdb, inWalk: &ifs.inWalk}
-				return spy, nil
+				closedCount.Add(1)
 			},
 		}
 		ifs = &interruptFS{
@@ -718,10 +694,10 @@ func TestAnalyzeInterruptDoesNotCloseDBEarly(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("analyzeFS err = %v, want context.Canceled", err)
 		}
-		if spy.closedWhileWalk.Load() {
+		if closedWhileWalk.Load() {
 			t.Fatal("database was closed while filesystem walk was still active")
 		}
-		if spy.closedCount.Load() == 0 {
+		if closedCount.Load() == 0 {
 			t.Fatal("expected database Close to be called after walk finished")
 		}
 	}
@@ -747,14 +723,14 @@ func TestAnalyzeInterruptDoesNotCloseDBEarly(t *testing.T) {
 	})
 
 	// Database must still open cleanly after interrupted runs.
-	_, _, _, db, err := internal.OpenPrefixAndDatabase(context.Background(), cfg, root, true)
+	_, _, _, db, err := openPrefixReadOnly(context.Background(), cfg, root)
 	if err != nil {
 		t.Fatalf("OpenPrefixAndDatabase after interrupt: %v", err)
 	}
 	_ = db.Close(context.Background())
 }
 
-func setupPopulatedRootAndSub(t *testing.T) (config.T, string, string) {
+func setupPopulatedRootAndSub(t *testing.T) (iduconfig.T, string, string) {
 	t.Helper()
 	ctx := context.Background()
 	tmpDir := t.TempDir()
@@ -777,10 +753,10 @@ func setupPopulatedRootAndSub(t *testing.T) (config.T, string, string) {
 	return cfg, root, sub
 }
 
-func assertSubtreePreserved(t *testing.T, cfg config.T, root, sub string) {
+func assertSubtreePreserved(t *testing.T, cfg iduconfig.T, root, sub string) {
 	t.Helper()
 	ctx := context.Background()
-	_, _, _, rodb, err := internal.OpenPrefixAndDatabase(ctx, cfg, root, true)
+	_, _, _, rodb, err := openPrefixReadOnly(ctx, cfg, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -798,53 +774,6 @@ func assertSubtreePreserved(t *testing.T, cfg config.T, root, sub string) {
 	if err := pi.UnmarshalBinary(buf.Bytes()); err != nil || len(pi.InfoList()) != 2 {
 		t.Errorf("expected %s InfoList len 2 preserved, got err=%v len=%d", root, err, len(pi.InfoList()))
 	}
-}
-
-func TestAnalyzeContentsErrorPreservesSubtree(t *testing.T) {
-	ctx := context.Background()
-	cfg, root, sub := setupPopulatedRootAndSub(t)
-	lfs := localfs.New()
-
-	sdb, err := internal.NewScanDB(ctx, cfg.Filesystems[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sdb.Close(ctx)
-
-	var ptWg sync.WaitGroup
-	ptWg.Add(1)
-	pt := newProgressTracker(ctx, time.Second, false, true, &ptWg)
-	w := &walker{cfg: cfg.Filesystems[0], db: sdb, fs: lfs, pt: pt}
-	w.lsi = asyncstat.New(lfs)
-	w.fw = filewalk.New(lfs, w)
-
-	var state prefixState
-	info, err := lfs.Lstat(ctx, root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stop, _, err := w.Prefix(ctx, &state, root, info, nil); stop || err != nil {
-		t.Fatalf("Prefix = (%v, %v)", stop, err)
-	}
-
-	cctx, cancel := context.WithCancel(ctx)
-	cancel()
-	_, cerr := w.Contents(cctx, &state, root, []filewalk.Entry{{Name: "sub", Type: fs.ModeDir}, {Name: "f0"}})
-	if cerr == nil {
-		t.Fatal("expected Contents to return error when processStats fails")
-	}
-	if sum := pt.summarize(); sum.Errors != 1 {
-		t.Errorf("errors count = %d, want 1 (no double logging)", sum.Errors)
-	}
-
-	_ = w.Done(ctx, &state, root, cerr)
-	if sum := pt.summarize(); sum.Errors != 1 {
-		t.Errorf("errors count after Done = %d, want 1", sum.Errors)
-	}
-	if err := sdb.Close(ctx); err != nil {
-		t.Fatal(err)
-	}
-	assertSubtreePreserved(t, cfg, root, sub)
 }
 
 func TestAnalyzeLevelScannerErrorPreservesSubtree(t *testing.T) {
@@ -886,9 +815,9 @@ func setupExclusionTree(t *testing.T) (root, ignoredDir, dbDir string) {
 	return root, ignoredDir, filepath.Join(tmpDir, "db")
 }
 
-func assertRootInfoAndAbsent(ctx context.Context, t *testing.T, cfg config.T, root, ignoredDir string, wantFiles int64, wantNames []string) {
+func assertRootInfoAndAbsent(ctx context.Context, t *testing.T, cfg iduconfig.T, root, ignoredDir string, wantFiles int64, wantNames []string) {
 	t.Helper()
-	_, _, _, db, err := internal.OpenPrefixAndDatabase(ctx, cfg, root, true)
+	_, _, _, db, err := openPrefixReadOnly(ctx, cfg, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -934,7 +863,7 @@ func TestAnalyzeExclusions(t *testing.T) {
       - '\.tmp$'
       - 'ignored_dir'
 `, root, dbDir)
-	cfg, err := config.ParseConfig([]byte(cfgText))
+	cfg, err := iduconfig.ParseConfig([]byte(cfgText))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -957,22 +886,8 @@ func TestAnalyzeExclusions(t *testing.T) {
 	assertRootInfoAndAbsent(ctx, t, cfg, root, ignoredDir, 2, []string{"keep.txt", "sub"})
 }
 
-type fakeDeletePrefixDB struct {
-	internal.ScanDB
-	deleteErr error
-}
-
-func (f *fakeDeletePrefixDB) DeletePrefix(context.Context, string) error {
-	return f.deleteErr
-}
-
-func (f *fakeDeletePrefixDB) LogError(context.Context, string, time.Time, []byte) error {
-	return nil
-}
-
 func TestAnalyzeMinorEdgeCases(t *testing.T) {
 	ctx := context.Background()
-	now := time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC)
 
 	t.Run("showDefaults formatting and spelling", func(t *testing.T) {
 		out, err := captureStdout(t, func() error {
@@ -998,37 +913,6 @@ func TestAnalyzeMinorEdgeCases(t *testing.T) {
 		got := cl()
 		if !strings.Contains(got, `"/dir with spaces"`) || !strings.Contains(got, `"/dir\twith\ttabs"`) {
 			t.Errorf("cl() = %q, expected quoted args with spaces/tabs", got)
-		}
-	})
-
-	t.Run("added subdir with parentUnchanged and DeletePrefix error", func(t *testing.T) {
-		var wg sync.WaitGroup
-		wg.Add(1)
-		pt := newProgressTracker(ctx, time.Second, false, false, &wg)
-		wg.Wait()
-
-		w := &walker{
-			fs: localfs.New(),
-			pt: pt,
-			db: &fakeDeletePrefixDB{deleteErr: errors.New("delete failed")},
-		}
-
-		dir1 := file.NewInfo("d1", 0, fs.ModeDir|0o755, now, file.XAttr{})
-		dir2 := file.NewInfo("d2", 0, fs.ModeDir|0o755, now, file.XAttr{})
-		prev := prefixinfo.New("/root", file.NewInfo("root", 0, fs.ModeDir|0o755, now, file.XAttr{}))
-		prev.SetInfoList(file.InfoList{dir1})
-		cur := prefixinfo.New("/root", file.NewInfo("root", 0, fs.ModeDir|0o755, now, file.XAttr{}))
-		cur.SetInfoList(file.InfoList{dir1, dir2})
-
-		n, unchanged, err := w.handleDeletedOrChangedPrefixes(ctx, "/root", true, cur, prev)
-		if err != nil || n != 0 || unchanged {
-			t.Errorf("added subdir with parentUnchanged=true: got (n=%d, unchanged=%v, err=%v), want (0, false, nil)", n, unchanged, err)
-		}
-
-		// When a dir is deleted and DeletePrefix fails, ndeleted must remain 0.
-		n, unchanged, err = w.handleDeletedOrChangedPrefixes(ctx, "/root", true, prev, cur)
-		if err == nil || unchanged || n != 0 {
-			t.Errorf("failed DeletePrefix: got (n=%d, unchanged=%v, err=%v), want (0, false, non-nil)", n, unchanged, err)
 		}
 	})
 }

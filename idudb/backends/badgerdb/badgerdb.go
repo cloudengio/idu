@@ -15,8 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"cloudeng.io/cmd/idu/internal/database"
-	"cloudeng.io/cmd/idu/internal/database/types"
+	"cloudeng.io/cmd/idu/idudb/backends/badgerdb/internal/types"
 	"cloudeng.io/errors"
 	"cloudeng.io/os/lockedfile"
 	"github.com/dgraph-io/badger/v4"
@@ -26,16 +25,33 @@ import (
 )
 
 // Option represents a specific option accepted by Open.
-type Option func(o *database.Options[Options])
+type Option func(o *options)
 
-var ReadOnly = database.ReadOnly[Options]
-var WithTimeout = database.WithTimeout[Options]
+type options struct {
+	ReadOnly bool
+	Timeout  time.Duration
+	Sub      Options
+}
+
+// ReadOnly requests that the database is opened in read-only mode.
+func ReadOnly() Option {
+	return func(o *options) {
+		o.ReadOnly = true
+	}
+}
+
+// WithTimeout requests that the database be opened with the specified timeout.
+func WithTimeout(t time.Duration) Option {
+	return func(o *options) {
+		o.Timeout = t
+	}
+}
 
 // WithBadgerOptions specifies the options to be used when opening the
 // database. Note, that it overrides all other badger specific options when
 // used.
 func WithBadgerOptions(opts badger.Options) Option {
-	return func(o *database.Options[Options]) {
+	return func(o *options) {
 		o.Sub.Options = opts
 	}
 }
@@ -46,7 +62,7 @@ type Options struct {
 
 // Database represents a badger database.
 type Database struct {
-	database.Options[Options]
+	options
 	location string
 	bdb      *badger.DB
 	// batchMu guards replacing batch, which is safe for concurrent use
@@ -59,7 +75,7 @@ type Database struct {
 	closeErr  error
 }
 
-// The database is paritioned into 6 'buckets':
+// The database is partitioned into 6 'buckets':
 // 1. inode bucket, keyed by inode and device numbers. This is by far
 //    the largest since it has an entry for every file.
 // 2. the prefix bucket, keyed by prefix. This contains an entry for
@@ -143,13 +159,13 @@ func openLockedBadger(db *Database, location string, timedOut <-chan struct{}) e
 
 // Open opens the specified database. If the database does not exist it will
 // be created unless opened read-only.
-func Open[T Options](location string, opts ...Option) (database.DB, error) {
+func Open(location string, opts ...Option) (*Database, error) {
 	db := &Database{
 		location: location,
 	}
 	db.Sub.Options = badger.DefaultOptions(location)
 	for _, fn := range opts {
-		fn(&db.Options)
+		fn(&db.options)
 	}
 	db.Sub.Options = db.Sub.WithReadOnly(db.ReadOnly)
 

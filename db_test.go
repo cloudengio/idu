@@ -8,10 +8,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
-	"cloudeng.io/cmd/idu/internal/config"
+	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/file/diskusage"
 )
 
@@ -27,7 +28,7 @@ func TestDBLocate(t *testing.T) {
 	}
 	missingDB := filepath.Join(tmpDir, "missing-db")
 
-	cfg, err := config.ParseConfig([]byte(
+	cfg, err := iduconfig.ParseConfig([]byte(
 		"filesystems:\n" +
 			"  - name: present\n    prefix: /p1\n    database: " + existingDB + "\n" +
 			"  - name: absent\n    prefix: /p2\n    database: " + missingDB + "\n",
@@ -71,5 +72,55 @@ func TestDBLocate(t *testing.T) {
 				t.Errorf("locate(%q) output = %q, want substring %q", tc.arg, out, tc.wantContains)
 			}
 		})
+	}
+}
+
+func TestOpenPrefixReadOnly(t *testing.T) {
+	ctx := context.Background()
+	dbDir := filepath.Join(t.TempDir(), "db")
+	allCfg, err := iduconfig.ParseConfig([]byte("filesystems:\n  - name: testfs\n    prefix: /test/root\n    database: " + dbDir + "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Create the database.
+	cfg, _ := allCfg.ForName("testfs")
+	wdb, err := openWritableDB(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wdb.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	_, cfg, target, rdb, err := openPrefixReadOnly(ctx, allCfg, "testfs")
+	if err != nil {
+		t.Fatalf("openPrefixReadOnly by name: %v", err)
+	}
+	_ = rdb.Close(ctx)
+	if cfg.Name != "testfs" || target != "/test/root" {
+		t.Fatalf("got (%q, %q), want (testfs, /test/root)", cfg.Name, target)
+	}
+
+	_, _, target, rdb, err = openPrefixReadOnly(ctx, allCfg, "/test/root/sub")
+	if err != nil {
+		t.Fatalf("openPrefixReadOnly by path: %v", err)
+	}
+	_ = rdb.Close(ctx)
+	if target != "/test/root/sub" {
+		t.Fatalf("target = %q, want /test/root/sub", target)
+	}
+
+	if _, _, _, _, err := openPrefixReadOnly(ctx, allCfg, "/other/path"); err == nil {
+		t.Fatal("expected error for unknown prefix")
+	}
+	if runtime.GOOS != "windows" {
+		badCfg, err := iduconfig.ParseConfig([]byte("filesystems:\n  - name: bad\n    prefix: /bad\n    database: " + filepath.Join(t.TempDir(), "missing") + "\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, _, db, err := openPrefixReadOnly(ctx, badCfg, "bad"); err == nil {
+			_ = db.Close(ctx)
+			t.Fatal("expected error opening missing readonly database")
+		}
 	}
 }

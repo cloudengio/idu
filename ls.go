@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/cmd/idu/internal/database"
 )
 
 type logFlags struct {
@@ -30,7 +30,7 @@ type errorFlags struct {
 
 type lister struct{}
 
-func errorGroupPrefix(ctx context.Context, db database.DB, key, target, sep string, buf *bytes.Buffer) string {
+func errorGroupPrefix(ctx context.Context, db idudb.Reader, key, target, sep string, buf *bytes.Buffer) string {
 	if key == target {
 		return key
 	}
@@ -50,14 +50,14 @@ func errorGroupPrefix(ctx context.Context, db database.DB, key, target, sep stri
 
 func (l *lister) errors(ctx context.Context, values interface{}, args []string) error {
 	ef := values.(*errorFlags)
-	ctx, cfg, target, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], !ef.Erase)
+	if ef.Erase {
+		return eraseEntries(ctx, args[0], idudb.EraseErrors)
+	}
+	ctx, cfg, target, db, err := openPrefixReadOnly(ctx, globalConfig, args[0])
 	if err != nil {
 		return err
 	}
 	defer db.Close(ctx)
-	if ef.Erase {
-		return db.Clear(ctx, false, true)
-	}
 
 	var buf bytes.Buffer
 	var lastPrefix string
@@ -86,15 +86,14 @@ func (l *lister) errors(ctx context.Context, values interface{}, args []string) 
 
 func (l *lister) logs(ctx context.Context, values interface{}, args []string) error {
 	lf := values.(*logFlags)
-	ctx, _, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], !lf.Erase)
+	if lf.Erase {
+		return eraseEntries(ctx, args[0], idudb.EraseLogs)
+	}
+	ctx, _, _, db, err := openPrefixReadOnly(ctx, globalConfig, args[0])
 	if err != nil {
 		return err
 	}
 	defer db.Close(ctx)
-
-	if lf.Erase {
-		return db.Clear(ctx, true, false)
-	}
 
 	from, to, _, err := lf.FromTo()
 	if err != nil {

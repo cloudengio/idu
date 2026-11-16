@@ -12,8 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/cmd/idu/internal/database"
+	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/stats"
 )
 
@@ -30,7 +29,7 @@ func waitForGoroutines(t *testing.T, n int) {
 	t.Errorf("goroutine leak: %v goroutines, want at most %v", runtime.NumGoroutine(), n)
 }
 
-func summaryKeysFor(ctx context.Context, t *testing.T, db database.DB, exactKey, childPrefix string) []string {
+func summaryKeysFor(ctx context.Context, t *testing.T, db idudb.Reader, exactKey, childPrefix string) []string {
 	t.Helper()
 	var keys []string
 	if err := db.ScanSummaries(ctx, exactKey, childPrefix, func(_ context.Context, k string, _ []byte) bool {
@@ -59,7 +58,7 @@ func TestReadPrefixesInOrder(t *testing.T) {
 	cfg := createPrefixTreeDB(ctx, t, 40, 3)
 
 	// A summary without any prefix metadata.
-	rawDB, err := internal.OpenDatabase(ctx, cfg, false)
+	rawDB, err := openRawDB(ctx, cfg.Database)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +68,7 @@ func TestReadPrefixesInOrder(t *testing.T) {
 	}
 	_ = rawDB.Close(ctx)
 
-	db, err := internal.OpenDatabase(ctx, cfg, true)
+	db, err := openReadOnlyDB(ctx, cfg.Database)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +109,7 @@ func TestReadPrefixesInOrder(t *testing.T) {
 func TestReadPrefixesInOrderCancel(t *testing.T) {
 	ctx := context.Background()
 	cfg := createPrefixTreeDB(ctx, t, 40, 3)
-	db, err := internal.OpenDatabase(ctx, cfg, true)
+	db, err := openReadOnlyDB(ctx, cfg.Database)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +131,7 @@ func TestReadPrefixesInOrderCancel(t *testing.T) {
 }
 
 type failingGetBatchDB struct {
-	database.DB
+	idudb.Reader
 	calls, failAt int
 }
 
@@ -143,20 +142,20 @@ func (db *failingGetBatchDB) GetBatch(ctx context.Context, prefixes []string, fn
 	if db.calls++; db.calls == db.failAt {
 		return errGetBatch
 	}
-	return db.DB.GetBatch(ctx, prefixes, fn)
+	return db.Reader.GetBatch(ctx, prefixes, fn)
 }
 
 func TestReadPrefixesInOrderError(t *testing.T) {
 	ctx := context.Background()
 	cfg := createPrefixTreeDB(ctx, t, 40, 3)
-	rodb, err := internal.OpenDatabase(ctx, cfg, true)
+	rodb, err := openReadOnlyDB(ctx, cfg.Database)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rodb.Close(ctx)
 	exactKey, childPrefix := stats.SummaryKeys("/", "/root")
 	before := runtime.NumGoroutine()
-	db := &failingGetBatchDB{DB: rodb, failAt: 3}
+	db := &failingGetBatchDB{Reader: rodb, failAt: 3}
 	n := 0
 	err = readPrefixesInOrder(ctx, db, "/", exactKey, childPrefix, 1, func(*prefixEntry) { n++ })
 	if !errors.Is(err, errGetBatch) {
@@ -170,7 +169,7 @@ func TestReadPrefixesInOrderError(t *testing.T) {
 }
 
 type failingScanSummariesDB struct {
-	database.DB
+	idudb.Reader
 	failAfter int
 	err       error
 }
@@ -178,7 +177,7 @@ type failingScanSummariesDB struct {
 func (db *failingScanSummariesDB) ScanSummaries(ctx context.Context, exactKey, childPrefix string, visitor func(context.Context, string, []byte) bool) error {
 	seen := 0
 	var aborted bool
-	err := db.DB.ScanSummaries(ctx, exactKey, childPrefix, func(c context.Context, k string, v []byte) bool {
+	err := db.Reader.ScanSummaries(ctx, exactKey, childPrefix, func(c context.Context, k string, v []byte) bool {
 		seen++
 		if seen > db.failAfter {
 			aborted = true
@@ -200,7 +199,7 @@ func TestReadPrefixesInOrderScanErrorAndDecodeErr(t *testing.T) {
 	cfg := createPrefixTreeDB(ctx, t, 40, 3)
 
 	t.Run("ScanSummaries mid-stream error", func(t *testing.T) {
-		rodb, err := internal.OpenDatabase(ctx, cfg, true)
+		rodb, err := openReadOnlyDB(ctx, cfg.Database)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -208,7 +207,7 @@ func TestReadPrefixesInOrderScanErrorAndDecodeErr(t *testing.T) {
 		exactKey, childPrefix := stats.SummaryKeys("/", "/root")
 		before := runtime.NumGoroutine()
 		errScan := errors.New("scan summaries failed")
-		db := &failingScanSummariesDB{DB: rodb, failAfter: prefixBatchSize + 5, err: errScan}
+		db := &failingScanSummariesDB{Reader: rodb, failAfter: prefixBatchSize + 5, err: errScan}
 		err = readPrefixesInOrder(ctx, db, "/", exactKey, childPrefix, 2, func(*prefixEntry) {})
 		if !errors.Is(err, errScan) {
 			t.Errorf("got %v, want %v", err, errScan)
@@ -217,7 +216,7 @@ func TestReadPrefixesInOrderScanErrorAndDecodeErr(t *testing.T) {
 	})
 
 	t.Run("corrupt prefix entry and readers=0", func(t *testing.T) {
-		rwdb, err := internal.OpenDatabase(ctx, cfg, false)
+		rwdb, err := openRawDB(ctx, cfg.Database)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -233,7 +232,7 @@ func TestReadPrefixesInOrderScanErrorAndDecodeErr(t *testing.T) {
 		}
 		_ = rwdb.Close(ctx)
 
-		rodb, err := internal.OpenDatabase(ctx, cfg, true)
+		rodb, err := openReadOnlyDB(ctx, cfg.Database)
 		if err != nil {
 			t.Fatal(err)
 		}

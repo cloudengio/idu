@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/internal"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
@@ -50,6 +51,8 @@ type progressStats struct {
 	memstats                                runtime.MemStats
 	sysMemstats                             *sysMemstats
 }
+
+var _ idudb.ScanProgress = (*progressTracker)(nil)
 
 type progressTracker struct {
 	sync.Mutex
@@ -106,7 +109,7 @@ func (pt *progressTracker) summarize() anaylzeSummary {
 	}
 }
 
-// Implements asyncstat.LatencyTracker
+// Implements idudb.ScanProgress
 func (pt *progressTracker) Before() time.Time {
 	pt.Lock()
 	defer pt.Unlock()
@@ -114,7 +117,7 @@ func (pt *progressTracker) Before() time.Time {
 	return time.Now()
 }
 
-// Implements asyncstat.LatencyTracker
+// Implements idudb.ScanProgress
 func (pt *progressTracker) After(start time.Time) {
 	took := time.Since(start)
 	pt.Lock()
@@ -123,13 +126,13 @@ func (pt *progressTracker) After(start time.Time) {
 	pt.statsTotalTime += int64(took)
 }
 
-func (pt *progressTracker) incStartPrefix() {
+func (pt *progressTracker) PrefixStarted() {
 	pt.Lock()
 	defer pt.Unlock()
 	pt.numPrefixesStarted++
 }
 
-func (pt *progressTracker) incDonePrefix(deleted int, files int64) {
+func (pt *progressTracker) PrefixDone(deleted int, files int64) {
 	pt.Lock()
 	defer pt.Unlock()
 	pt.numPrefixesFinished++
@@ -137,31 +140,31 @@ func (pt *progressTracker) incDonePrefix(deleted int, files int64) {
 	pt.numDeleted += int64(deleted)
 }
 
-func (pt *progressTracker) incErrors() {
+func (pt *progressTracker) Error() {
 	pt.Lock()
 	defer pt.Unlock()
 	pt.numErrors++
 }
 
-func (pt *progressTracker) incParentUnchanged() {
+func (pt *progressTracker) ParentUnchanged() {
 	pt.Lock()
 	defer pt.Unlock()
 	pt.numParentUnchanged++
 }
 
-func (pt *progressTracker) incChildrenUnchanged() {
+func (pt *progressTracker) ChildrenUnchanged() {
 	pt.Lock()
 	defer pt.Unlock()
 	pt.numChildrenUnchanged++
 }
 
-func (pt *progressTracker) incSlowScans() {
+func (pt *progressTracker) SlowScan() {
 	pt.Lock()
 	defer pt.Unlock()
 	pt.numSlowScans++
 }
 
-func (pt *progressTracker) setSyncScans(numSyncScans int64) {
+func (pt *progressTracker) SyncScans(numSyncScans int64) {
 	pt.Lock()
 	defer pt.Unlock()
 	if numSyncScans > pt.numSyncScans {

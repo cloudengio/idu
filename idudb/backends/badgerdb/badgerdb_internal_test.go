@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/dgraph-io/badger/v4"
 )
@@ -22,7 +23,7 @@ func TestFlushReplacesFailedWriteBatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db := raw.(*Database)
+	db := raw
 	defer db.Close(ctx)
 
 	if err := db.Set(ctx, "/k1", []byte("v1"), true); err != nil {
@@ -56,7 +57,7 @@ func TestBatchSetAndFlushAfterClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db := raw.(*Database)
+	db := raw
 	if err := db.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -66,5 +67,13 @@ func TestBatchSetAndFlushAfterClose(t *testing.T) {
 	}
 	if err := db.Flush(ctx); !errors.Is(err, badger.ErrDBClosed) {
 		t.Errorf("Flush after Close = %v, want badger.ErrDBClosed", err)
+	}
+}
+
+func TestWithTimeoutOption(t *testing.T) {
+	var opts options
+	WithTimeout(5 * time.Second)(&opts)
+	if opts.Timeout != 5*time.Second {
+		t.Errorf("Timeout = %v, want 5s", opts.Timeout)
 	}
 }

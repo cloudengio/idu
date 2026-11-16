@@ -9,7 +9,7 @@ import (
 	"errors"
 	"sync"
 
-	"cloudeng.io/cmd/idu/internal/database"
+	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/sync/syncsort"
@@ -39,7 +39,7 @@ type prefixBatch struct {
 	err     error // a database error, which is fatal.
 }
 
-func (b *prefixBatch) read(ctx context.Context, db database.DB, prefixes []string) {
+func (b *prefixBatch) read(ctx context.Context, db idudb.Reader, prefixes []string) {
 	b.err = db.GetBatch(ctx, prefixes, func(i int, val []byte) error {
 		e := &b.entries[i]
 		if val == nil {
@@ -63,7 +63,7 @@ type prefixJob struct {
 // The sequencer bounds the number of outstanding batches, including those
 // that have been read out of order and are waiting to be consumed.
 type prefixReader struct {
-	db                         database.DB
+	db                         idudb.Reader
 	sep, exactKey, childPrefix string
 	jobs                       chan prefixJob
 	results                    chan syncsort.Item[*prefixBatch]
@@ -77,7 +77,7 @@ type prefixReader struct {
 // DFS pre-order. The metadata is read and decoded concurrently by the
 // specified number of readers whilst visit is always called from the
 // calling goroutine. Memory usage is bounded by the number of readers.
-func readPrefixesInOrder(ctx context.Context, db database.DB, sep, exactKey, childPrefix string, readers int, visit func(*prefixEntry)) error {
+func readPrefixesInOrder(ctx context.Context, db idudb.Reader, sep, exactKey, childPrefix string, readers int, visit func(*prefixEntry)) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	readers = max(readers, 1)
@@ -166,7 +166,7 @@ func (pr *prefixReader) wait(err error) error {
 // scanBatches calls send with batches of the prefixes whose summary key is
 // exactKey or matches childPrefix, in summary key order, and the prefixes
 // that they correspond to.
-func scanBatches(ctx context.Context, db database.DB, sep, exactKey, childPrefix string, send func(*prefixBatch, []string) bool) error {
+func scanBatches(ctx context.Context, db idudb.Reader, sep, exactKey, childPrefix string, send func(*prefixBatch, []string) bool) error {
 	newBatch := func() (*prefixBatch, []string) {
 		return &prefixBatch{entries: make([]prefixEntry, 0, prefixBatchSize)}, make([]string, 0, prefixBatchSize)
 	}

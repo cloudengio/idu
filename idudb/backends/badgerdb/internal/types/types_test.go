@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"cloudeng.io/cmd/idu/internal/database/types"
+	"cloudeng.io/cmd/idu/idudb/backends/badgerdb/internal/types"
 )
 
 func assertGobRoundTrip[T any](t *testing.T, in T) {

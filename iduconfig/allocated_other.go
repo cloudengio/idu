@@ -4,7 +4,7 @@
 
 //go:build !unix && !windows
 
-package config
+package iduconfig
 
 import "errors"
 
