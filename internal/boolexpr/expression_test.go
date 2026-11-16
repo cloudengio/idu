@@ -6,8 +6,10 @@ package boolexpr_test
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"os/user"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -61,6 +63,8 @@ func TestMatcherEntryOperands(t *testing.T) {
 	lfs := localfs.New()
 	pi, f1, f2 := testMatcherFixture()
 	p := boolexpr.NewParserTests(ctx, lfs)
+	prefix := filepath.Join(string(filepath.Separator)+"root", "sub")
+	fullPath := lfs.Join(prefix, "alpha.txt")
 
 	tests := []struct {
 		name  string
@@ -70,8 +74,8 @@ func TestMatcherEntryOperands(t *testing.T) {
 	}{
 		{name: "name match", expr: "name=alpha.txt", entry: f1, want: true},
 		{name: "name mismatch", expr: "name=alpha.txt", entry: f2, want: false},
-		{name: "full path match with fs", expr: "name=/root/sub/alpha.txt", entry: f1, want: true},
-		{name: "regexp path match", expr: "re=sub/beta", entry: f2, want: true},
+		{name: "full path match with fs", expr: fmt.Sprintf("name='%s'", fullPath), entry: f1, want: true},
+		{name: "regexp path match", expr: `re='sub[/\\]beta'`, entry: f2, want: true},
 		{name: "type regular match", expr: "type=f", entry: f1, want: true},
 		{name: "type dir mismatch", expr: "type=d", entry: f1, want: false},
 	}
@@ -87,7 +91,7 @@ func TestMatcherEntryOperands(t *testing.T) {
 			if !m.HasExpression() {
 				t.Error("expected HasExpression() == true")
 			}
-			if got := m.Entry("/root/sub", &pi, tc.entry); got != tc.want {
+			if got := m.Entry(prefix, &pi, tc.entry); got != tc.want {
 				t.Errorf("Entry(%q) = %v, want %v", tc.expr, got, tc.want)
 			}
 		})
@@ -155,7 +159,7 @@ func TestMatcherHardlinkAndNewParser(t *testing.T) {
 		t.Skipf("user.Current: %v", err)
 	}
 	realParser := boolexpr.NewParser(ctx, lfs)
-	if _, err := boolexpr.CreateMatcher(realParser, boolexpr.WithEntryExpression("user="+cur.Username)); err != nil {
+	if _, err := boolexpr.CreateMatcher(realParser, boolexpr.WithEntryExpression(fmt.Sprintf("user='%s'", cur.Username))); err != nil {
 		t.Errorf("CreateMatcher(user=%s): %v", cur.Username, err)
 	}
 }

@@ -7,7 +7,6 @@ package main
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -26,16 +25,11 @@ func TestListerLogsAndErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	origCfg := globalConfig
-	origLogDir := internal.LogDir
 	globalConfig = cfg
-	internal.LogDir = filepath.Join(tmpDir, "logs")
-	if err := os.MkdirAll(internal.LogDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
 	t.Cleanup(func() {
 		globalConfig = origCfg
-		internal.LogDir = origLogDir
 	})
+	setTempLogDir(t)
 
 	lfs := localfs.New()
 	alz := &analyzeCmd{}

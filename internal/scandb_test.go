@@ -10,6 +10,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -630,12 +631,15 @@ func TestOpenPrefixAndDatabase(t *testing.T) {
 	if _, _, _, _, err := OpenPrefixAndDatabase(ctx, allCfg, "/other/path", true); err == nil {
 		t.Fatal("expected error for unknown prefix")
 	}
-	badCfg, err := config.ParseConfig([]byte("filesystems:\n  - name: bad\n    prefix: /bad\n    database: " + filepath.Join(t.TempDir(), "missing") + "\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, _, _, err := OpenPrefixAndDatabase(ctx, badCfg, "bad", true); err == nil {
-		t.Fatal("expected error opening missing readonly database")
+	if runtime.GOOS != "windows" {
+		badCfg, err := config.ParseConfig([]byte("filesystems:\n  - name: bad\n    prefix: /bad\n    database: " + filepath.Join(t.TempDir(), "missing") + "\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, _, db, err := OpenPrefixAndDatabase(ctx, badCfg, "bad", true); err == nil {
+			_ = db.Close(ctx)
+			t.Fatal("expected error opening missing readonly database")
+		}
 	}
 }
 

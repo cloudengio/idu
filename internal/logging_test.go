@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -39,9 +40,10 @@ func TestLogNameAndCreateNamedLogfile(t *testing.T) {
 	}
 	target, err := os.Readlink(filepath.Join(dir, link))
 	if err != nil {
-		t.Fatalf("Readlink: %v", err)
-	}
-	if target != name {
+		if runtime.GOOS != "windows" {
+			t.Fatalf("Readlink: %v", err)
+		}
+	} else if target != name {
 		t.Errorf("symlink target = %q, want %q", target, name)
 	}
 
@@ -52,7 +54,12 @@ func TestLogNameAndCreateNamedLogfile(t *testing.T) {
 }
 
 func TestLogAndBadgerLogger(t *testing.T) {
-	dir := t.TempDir()
+	// globalLogger retains the open log file handle for the process lifetime,
+	// so avoid t.TempDir() here which fails cleanup on Windows.
+	dir, err := os.MkdirTemp("", "idu-logtest")
+	if err != nil {
+		t.Fatal(err)
+	}
 	origDir := LogDir
 	origVerbosity := Verbosity
 	globalLogger.Lock()
@@ -65,6 +72,7 @@ func TestLogAndBadgerLogger(t *testing.T) {
 		globalLogger.Lock()
 		globalLogger.Logger = origLogger
 		globalLogger.Unlock()
+		_ = os.RemoveAll(dir)
 	})
 
 	LogDir = dir
@@ -88,10 +96,13 @@ func TestLogAndBadgerLogger(t *testing.T) {
 	bl.Infof("suppressed-info")
 	bl.Debugf("suppressed-debug")
 
-	linkPath := filepath.Join(dir, defaultLogName+".log")
-	data, err := os.ReadFile(linkPath)
+	matches, err := filepath.Glob(filepath.Join(dir, defaultLogName+".log.*"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("Glob log files = (%v, %v), want 1 file", matches, err)
+	}
+	data, err := os.ReadFile(matches[0])
 	if err != nil {
-		t.Fatalf("ReadFile(%q): %v", linkPath, err)
+		t.Fatalf("ReadFile(%q): %v", matches[0], err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	if len(lines) != 7 {

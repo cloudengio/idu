@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"sync"
 	"testing"
@@ -685,8 +686,12 @@ func TestOpenErrorsAndOptions(t *testing.T) {
 
 	t.Run("Open ReadOnly fails on missing database", func(t *testing.T) {
 		t.Parallel()
+		if runtime.GOOS == "windows" {
+			t.Skip("read-only mode is disabled on Windows")
+		}
 		missing := filepath.Join(t.TempDir(), "missing-db")
-		if _, err := badgerdb.Open(missing, badgerdb.ReadOnly()); err == nil {
+		if db, err := badgerdb.Open(missing, badgerdb.ReadOnly()); err == nil {
+			_ = db.Close(context.Background())
 			t.Fatal("expected Open ReadOnly to fail on non-existent database")
 		}
 	})

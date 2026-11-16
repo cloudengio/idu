@@ -427,6 +427,22 @@ func TestAnalyzeDefaults(t *testing.T) {
 	}
 }
 
+func setTempLogDir(t *testing.T) {
+	t.Helper()
+	// globalLogger retains its open file handle across tests, so keep LogDir
+	// outside t.TempDir() to avoid Windows TempDir cleanup failures.
+	logDir, err := os.MkdirTemp("", "idu-test-logs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	origLogDir := internal.LogDir
+	internal.LogDir = logDir
+	t.Cleanup(func() {
+		internal.LogDir = origLogDir
+		_ = os.RemoveAll(logDir)
+	})
+}
+
 func setupAnalyzeTestConfig(t *testing.T, root string) config.T {
 	t.Helper()
 	tmpDir := filepath.Dir(root)
@@ -443,16 +459,11 @@ func setupAnalyzeTestConfig(t *testing.T, root string) config.T {
 		t.Fatal(err)
 	}
 	origCfg := globalConfig
-	origLogDir := internal.LogDir
 	globalConfig = cfg
-	internal.LogDir = filepath.Join(tmpDir, "logs")
-	if err := os.MkdirAll(internal.LogDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
 	t.Cleanup(func() {
 		globalConfig = origCfg
-		internal.LogDir = origLogDir
 	})
+	setTempLogDir(t)
 	return cfg
 }
 
@@ -514,7 +525,37 @@ func TestAnalyzeForceAndSubtree(t *testing.T) {
 	}
 }
 
-func TestAnalyzeSymlinkAndFaults(t *testing.T) {
+func TestAnalyzeSymlink(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	root := filepath.Join(tmpDir, "root")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sym := filepath.Join(tmpDir, "sym-root")
+	if err := os.Symlink(root, sym); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		t.Fatal(err)
+	}
+	cfgText := fmt.Sprintf("filesystems:\n  - name: sym\n    prefix: %s\n    database: %s\n", sym, filepath.Join(tmpDir, "symdb"))
+	cfg, err := config.ParseConfig([]byte(cfgText))
+	if err != nil {
+		t.Fatal(err)
+	}
+	origCfg := globalConfig
+	globalConfig = cfg
+	t.Cleanup(func() { globalConfig = origCfg })
+	setTempLogDir(t)
+
+	alz := &analyzeCmd{}
+	if err := alz.analyzeFS(ctx, localfs.New(), &analyzeFlags{}, []string{sym}); err != nil {
+		t.Fatalf("symlink analyzeFS: %v", err)
+	}
+}
+
+func TestAnalyzeFaults(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	root := filepath.Join(tmpDir, "root")
@@ -525,44 +566,10 @@ func TestAnalyzeSymlinkAndFaults(t *testing.T) {
 	if err := os.WriteFile(f1, []byte("hello"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	sym := filepath.Join(tmpDir, "sym-root")
-	if err := os.Symlink(root, sym); err != nil {
-		t.Fatal(err)
-	}
 
-	dbDir := filepath.Join(tmpDir, "db")
-	cfgText := fmt.Sprintf(`filesystems:
-  - name: tree
-    prefix: %s
-    database: %s
-  - name: sym
-    prefix: %s
-    database: %s
-`, root, dbDir, sym, filepath.Join(tmpDir, "symdb"))
-	cfg, err := config.ParseConfig([]byte(cfgText))
-	if err != nil {
-		t.Fatal(err)
-	}
-	origCfg := globalConfig
-	origLogDir := internal.LogDir
-	globalConfig = cfg
-	internal.LogDir = filepath.Join(tmpDir, "logs")
-	if err := os.MkdirAll(internal.LogDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		globalConfig = origCfg
-		internal.LogDir = origLogDir
-	})
-
+	cfg := setupAnalyzeTestConfig(t, root)
 	alz := &analyzeCmd{}
 	lfs := localfs.New()
-
-	t.Run("symlink target ignored cleanly", func(t *testing.T) {
-		if err := alz.analyzeFS(ctx, lfs, &analyzeFlags{}, []string{sym}); err != nil {
-			t.Fatalf("symlink analyzeFS: %v", err)
-		}
-	})
 
 	t.Run("xattr error and lstat error logged", func(t *testing.T) {
 		ffs := &faultAnalyzeFS{
