@@ -52,9 +52,42 @@ func printEntry(pi prefixinfo.T, fi file.Info, long bool, sep, k string) {
 	}
 }
 
+// subtreeMatch reports whether key equals target or is beneath target
+// delimited by sep, and whether lexicographical scan has passed target's
+// subtree. Sibling keys sorting between target and target+sep (such as /a-b
+// for /a) return (false, false) so scanning skips them and continues to
+// /a/... descendants.
+func subtreeMatch(key, target, sep string) (match, stop bool) {
+	if key == target {
+		return true, false
+	}
+	if strings.HasSuffix(target, sep) {
+		if strings.HasPrefix(key, target) {
+			return true, false
+		}
+		return false, true
+	}
+	childPrefix := target + sep
+	if strings.HasPrefix(key, childPrefix) {
+		return true, false
+	}
+	if !strings.HasPrefix(key, target) || key > childPrefix {
+		return false, true
+	}
+	return false, false
+}
+
 func (fc *findCmds) findFS(ctx context.Context, fwfs filewalk.FS, ff *findFlags, args []string) error {
 
 	parser := boolexpr.NewParser(ctx, fwfs)
+
+	prefixMatch, err := boolexpr.CreateMatcher(parser,
+		boolexpr.WithEmptyEntryValue(true),
+		boolexpr.WithFilewalkFS(fwfs),
+		boolexpr.WithEntryExpression(ff.Prefix.Values...))
+	if err != nil {
+		return err
+	}
 
 	match, err := boolexpr.CreateMatcher(parser,
 		boolexpr.WithEmptyEntryValue(true),
@@ -73,13 +106,20 @@ func (fc *findCmds) findFS(ctx context.Context, fwfs filewalk.FS, ff *findFlags,
 	errs := &errors.M{}
 
 	err = db.Scan(ctx, target, func(_ context.Context, k string, v []byte) bool {
-		if !strings.HasPrefix(k, target) {
+		inSubtree, stop := subtreeMatch(k, target, sep)
+		if stop {
 			return false
+		}
+		if !inSubtree {
+			return true
 		}
 		var pi prefixinfo.T
 		if err := pi.UnmarshalBinary(v); err != nil {
 			errs.Append(fmt.Errorf("failed to unmarshal value for %v: %v", k, err))
 			return false
+		}
+		if !prefixMatch.Prefix(k, &pi) {
+			return true
 		}
 		if match.Prefix(k, &pi) {
 			printPrefix(pi, ff.Long, k)
