@@ -15,6 +15,29 @@ import (
 	"cloudeng.io/file/localfs"
 )
 
+func countLogsAndErrors(ctx context.Context, t *testing.T, target string) (int, int) {
+	t.Helper()
+	_, _, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, target, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close(ctx)
+	var logCount, errCount int
+	if err := db.VisitLogs(ctx, time.Time{}, time.Now().Add(time.Hour), func(context.Context, time.Time, time.Time, []byte) bool {
+		logCount++
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.VisitErrors(ctx, "", func(context.Context, string, time.Time, []byte) bool {
+		errCount++
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return logCount, errCount
+}
+
 func TestListerLogsAndErrors(t *testing.T) {
 	ctx := context.Background()
 	tmpDir, cfgFile, target, _ := setupAnalyze(t)
@@ -57,6 +80,19 @@ func TestListerLogsAndErrors(t *testing.T) {
 		}
 	})
 
+	t.Run("logs erase clears logs and preserves errors", func(t *testing.T) {
+		if err := ls.logs(ctx, &logFlags{Erase: true}, []string{target}); err != nil {
+			t.Fatalf("logs erase: %v", err)
+		}
+		logCount, errCount := countLogsAndErrors(ctx, t, target)
+		if logCount != 0 {
+			t.Errorf("logs remaining after erase = %d, want 0", logCount)
+		}
+		if errCount == 0 {
+			t.Errorf("expected errors to be preserved after logs --erase, got 0")
+		}
+	})
+
 	t.Run("errors list and erase", func(t *testing.T) {
 		if err := ls.errors(ctx, &errorFlags{}, []string{target}); err != nil {
 			t.Fatalf("errors list: %v", err)
@@ -64,19 +100,7 @@ func TestListerLogsAndErrors(t *testing.T) {
 		if err := ls.errors(ctx, &errorFlags{Erase: true}, []string{target}); err != nil {
 			t.Fatalf("errors erase: %v", err)
 		}
-		_, _, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, target, true)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer db.Close(ctx)
-		var count int
-		if err := db.VisitErrors(ctx, "", func(context.Context, string, time.Time, []byte) bool {
-			count++
-			return true
-		}); err != nil {
-			t.Fatal(err)
-		}
-		if count != 0 {
+		if _, count := countLogsAndErrors(ctx, t, target); count != 0 {
 			t.Errorf("errors remaining after erase = %d, want 0", count)
 		}
 		if err := ls.errors(ctx, &errorFlags{}, []string{"/unknown"}); err == nil {

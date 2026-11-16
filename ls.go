@@ -47,14 +47,14 @@ func (l *lister) errors(ctx context.Context, values interface{}, args []string) 
 
 func (l *lister) logs(ctx context.Context, values interface{}, args []string) error {
 	lf := values.(*logFlags)
-	ctx, _, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
+	ctx, _, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], !lf.Erase)
 	if err != nil {
 		return err
 	}
 	defer db.Close(ctx)
 
 	if lf.Erase {
-		return db.Clear(ctx, false, true)
+		return db.Clear(ctx, true, false)
 	}
 
 	from, to, _, err := lf.FromTo()
