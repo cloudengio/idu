@@ -75,7 +75,7 @@ func saveStats(dir, file string, stats statsFileFormat) error {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
-	basename := stats.Date.Format(time.DateTime)
+	basename := stats.Date.Format(statsFileLayout)
 	basename = strings.TrimSuffix(basename, ".idustats") + ".idustats"
 	filename := filepath.Join(dir, basename)
 	if err := os.WriteFile(filename, buf.Bytes(), 0660); err != nil { //nolint:gosec
@@ -83,7 +83,15 @@ func saveStats(dir, file string, stats statsFileFormat) error {
 	}
 	sl := filepath.Join(dir, "latest.idustats")
 	os.Remove(sl)
-	return os.Symlink(basename, sl)
+	if err := os.Symlink(basename, sl); err != nil {
+		if runtime.GOOS != "windows" {
+			return err
+		}
+		// Creating symlinks on Windows requires developer mode or
+		// administrator privileges, so fall back to a copy.
+		return os.WriteFile(sl, buf.Bytes(), 0660) //nolint:gosec
+	}
+	return nil
 }
 
 type statsCmds struct {
