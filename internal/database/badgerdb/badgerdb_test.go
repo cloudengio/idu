@@ -258,6 +258,26 @@ func TestClear(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("canceled and readonly Clear", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		db := openTestBadger(t, dir)
+		seedClearDB(ctx, t, db, base)
+
+		cctx, cancel := context.WithCancel(ctx)
+		cancel()
+		if err := db.Clear(cctx, true, true); !errors.Is(err, context.Canceled) {
+			t.Errorf("canceled Clear = %v, want context.Canceled", err)
+		}
+		_ = db.Close(ctx)
+
+		rdb := openTestBadger(t, dir, badgerdb.ReadOnly())
+		defer rdb.Close(ctx)
+		if err := rdb.Clear(ctx, true, true); !errors.Is(err, badger.ErrReadOnlyTxn) {
+			t.Errorf("readonly Clear = %v, want ErrReadOnlyTxn", err)
+		}
+	})
 }
 
 func TestDelete(t *testing.T) {
@@ -296,6 +316,15 @@ func TestDelete(t *testing.T) {
 	defer rdb.Close(ctx)
 	if err := rdb.Delete(ctx, "/a/b"); !errors.Is(err, badger.ErrReadOnlyTxn) {
 		t.Errorf("readonly Delete = %v, want ErrReadOnlyTxn", err)
+	}
+	if err := rdb.DeletePrefix(ctx, "/a/b"); !errors.Is(err, badger.ErrReadOnlyTxn) {
+		t.Errorf("readonly DeletePrefix = %v, want ErrReadOnlyTxn", err)
+	}
+	if err := rdb.DeleteError(ctx, "/e1"); !errors.Is(err, badger.ErrReadOnlyTxn) {
+		t.Errorf("readonly DeleteError = %v, want ErrReadOnlyTxn", err)
+	}
+	if err := rdb.DeleteErrors(ctx, "/e1"); !errors.Is(err, badger.ErrReadOnlyTxn) {
+		t.Errorf("readonly DeleteErrors = %v, want ErrReadOnlyTxn", err)
 	}
 }
 

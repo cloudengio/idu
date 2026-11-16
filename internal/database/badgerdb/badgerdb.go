@@ -357,6 +357,12 @@ func (db *Database) Flush(ctx context.Context) error {
 }
 
 func (db *Database) DeletePrefix(ctx context.Context, prefix string) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
+	if db.ReadOnly {
+		return badger.ErrReadOnlyTxn
+	}
 	kb := keyForBucket(prefixBucket, []byte(prefix))
 	defer bufPool.Put(kb)
 	return db.deletePrefix(ctx, kb.Bytes())
@@ -399,10 +405,19 @@ func (db *Database) DeleteError(ctx context.Context, key string) error {
 	if err := db.canceled(ctx); err != nil {
 		return err
 	}
+	if db.ReadOnly {
+		return badger.ErrReadOnlyTxn
+	}
 	return db.deleteKey(errorBucket, key)
 }
 
 func (db *Database) DeleteErrors(ctx context.Context, prefix string) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
+	if db.ReadOnly {
+		return badger.ErrReadOnlyTxn
+	}
 	kb := keyForBucket(errorBucket, []byte(prefix))
 	defer bufPool.Put(kb)
 	return db.deletePrefix(ctx, kb.Bytes())
@@ -719,7 +734,13 @@ func (db *Database) Close(_ context.Context) error {
 	return db.closeErr
 }
 
-func (db *Database) Clear(_ context.Context, logs, errors bool) error {
+func (db *Database) Clear(ctx context.Context, logs, errors bool) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
+	if db.ReadOnly {
+		return badger.ErrReadOnlyTxn
+	}
 	if logs {
 		if err := db.bdb.DropPrefix([]byte{logBucket}); err != nil {
 			return err
