@@ -6,6 +6,7 @@ package main_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -350,10 +351,21 @@ func verifyDistributedMode(t *testing.T, home, confDir, treeDir, fanoutRoot, nam
 		if err != nil {
 			t.Fatalf("%s missing report %s: %v", name, rel, err)
 		}
-		if !strings.Contains(string(data), fanoutRoot) {
+		if !strings.Contains(string(data), reportPath(rel, fanoutRoot)) {
 			t.Errorf("%s report %s does not mention fanout root %s:\n%s", name, rel, fanoutRoot, string(data))
 		}
 	}
+}
+
+// reportPath returns path as it appears in the report file rel, i.e.
+// escaped as a JSON string, which matters for Windows paths, for json
+// reports.
+func reportPath(rel, path string) string {
+	if filepath.Ext(rel) != ".json" {
+		return path
+	}
+	quoted, _ := json.Marshal(path)
+	return strings.Trim(string(quoted), `"`)
 }
 
 func TestDistributedSubtreeDetection(t *testing.T) {
