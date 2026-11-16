@@ -20,7 +20,6 @@ import (
 	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
-	"cloudeng.io/cmdutil"
 	"cloudeng.io/errors"
 	"cloudeng.io/file"
 	"cloudeng.io/file/filewalk"
@@ -42,7 +41,9 @@ type analyzeFlags struct {
 	Defaults  bool          `subcmd:"show-defaults,false,display default scanning options and exit"`
 }
 
-type analyzeCmd struct{}
+type analyzeCmd struct {
+	openDB func(context.Context, config.Prefix) (internal.ScanDB, error)
+}
 
 func (alz *analyzeCmd) analyze(ctx context.Context, values interface{}, args []string) error {
 	// TODO(cnicolaou): generalize this to other filesystems.
@@ -69,23 +70,36 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *anal
 		debug.SetMaxThreads(cfg.SetMaxThreads)
 		internal.Log(ctx, internal.LogProgress, "set max threads", "max-threads", cfg.SetMaxThreads)
 	}
-	var sdb internal.ScanDB
-	sdb, err = internal.NewScanDB(ctx, cfg)
+	openDB := alz.openDB
+	if openDB == nil {
+		openDB = internal.NewScanDB
+	}
+	sdb, err := openDB(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("open/create database: %v: %v", cfg.Database, err)
 	}
+	defer sdb.Close(ctx)
 	if err := sdb.DeleteErrors(ctx, target); err != nil {
 		return fmt.Errorf("DeleteErrors: %v", err)
 	}
-	defer sdb.Close(ctx)
 
-	// Close the database as quickly as possible.
-	signal.Reset(os.Interrupt, syscall.SIGTERM)
-	cmdutil.HandleSignals(func() {
-		cancel()
-		sdb.Close(ctx)
-		fmt.Printf("database closed, waiting for all filesystem operations to finish\n")
-	}, os.Interrupt, os.Kill)
+	// Cancel the walk on interrupt/termination so active filesystem and
+	// database operations finish cleanly before the database is closed.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	sigDone := make(chan struct{})
+	defer func() {
+		signal.Stop(sigCh)
+		close(sigDone)
+	}()
+	go func() {
+		select {
+		case <-sigCh:
+			cancel()
+			fmt.Printf("interrupted, waiting for all filesystem operations to finish\n")
+		case <-sigDone:
+		}
+	}()
 
 	pctx, pcancel := context.WithCancel(ctx)
 	defer pcancel() // cancel progress tracker

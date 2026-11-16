@@ -16,6 +16,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -619,4 +621,133 @@ func TestAnalyzeFaults(t *testing.T) {
 			t.Fatal("expected error for unknown prefix")
 		}
 	})
+}
+
+type interruptFS struct {
+	filewalk.FS
+	root      string
+	onFirst   func()
+	once      sync.Once
+	triggered chan struct{}
+	inWalk    atomic.Int32
+}
+
+func (f *interruptFS) XAttr(ctx context.Context, path string, info file.Info) (file.XAttr, error) {
+	if path != f.root {
+		f.inWalk.Add(1)
+		defer f.inWalk.Add(-1)
+		f.once.Do(func() {
+			f.onFirst()
+			close(f.triggered)
+		})
+		// Wait for ctx cancellation so the signal handler has executed before
+		// this walker finishes.
+		select {
+		case <-ctx.Done():
+		case <-time.After(5 * time.Second):
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return f.FS.XAttr(ctx, path, info)
+}
+
+type spyScanDB struct {
+	internal.ScanDB
+	inWalk          *atomic.Int32
+	closedWhileWalk atomic.Bool
+	closedCount     atomic.Int32
+}
+
+func (s *spyScanDB) Close(ctx context.Context) error {
+	if s.inWalk.Load() > 0 {
+		s.closedWhileWalk.Store(true)
+	}
+	s.closedCount.Add(1)
+	return s.ScanDB.Close(ctx)
+}
+
+func (s *spyScanDB) LogAndClose(ctx context.Context, start, stop time.Time, detail []byte) error {
+	if s.inWalk.Load() > 0 {
+		s.closedWhileWalk.Store(true)
+	}
+	return s.ScanDB.LogAndClose(ctx, start, stop, detail)
+}
+
+func TestAnalyzeInterruptDoesNotCloseDBEarly(t *testing.T) {
+	tmpDir := t.TempDir()
+	root := filepath.Join(tmpDir, "root")
+	for i := range 12 {
+		sub := filepath.Join(root, fmt.Sprintf("d%02d", i))
+		if err := os.MkdirAll(sub, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for j := range 5 {
+			if err := os.WriteFile(filepath.Join(sub, fmt.Sprintf("f%02d", j)), []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	cfg := setupAnalyzeTestConfig(t, root)
+	lfs := localfs.New()
+
+	runInterrupt := func(t *testing.T, ctx context.Context, onFirst func()) {
+		t.Helper()
+		var ifs *interruptFS
+		var spy *spyScanDB
+		alz := &analyzeCmd{
+			openDB: func(c context.Context, p config.Prefix) (internal.ScanDB, error) {
+				sdb, err := internal.NewScanDB(c, p)
+				if err != nil {
+					return nil, err
+				}
+				spy = &spyScanDB{ScanDB: sdb, inWalk: &ifs.inWalk}
+				return spy, nil
+			},
+		}
+		ifs = &interruptFS{
+			FS:        lfs,
+			root:      root,
+			onFirst:   onFirst,
+			triggered: make(chan struct{}),
+		}
+		err := alz.analyzeFS(ctx, ifs, &analyzeFlags{}, []string{root})
+		<-ifs.triggered
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("analyzeFS err = %v, want context.Canceled", err)
+		}
+		if spy.closedWhileWalk.Load() {
+			t.Fatal("database was closed while filesystem walk was still active")
+		}
+		if spy.closedCount.Load() == 0 {
+			t.Fatal("expected database Close to be called after walk finished")
+		}
+	}
+
+	t.Run("context cancel mid-walk", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		runInterrupt(t, ctx, cancel)
+	})
+
+	t.Run("os.Interrupt mid-walk", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("os.Process.Signal(os.Interrupt) is not supported on Windows")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		runInterrupt(t, ctx, func() {
+			p, err := os.FindProcess(os.Getpid())
+			if err == nil {
+				_ = p.Signal(os.Interrupt)
+			}
+		})
+	})
+
+	// Database must still open cleanly after interrupted runs.
+	_, _, _, db, err := internal.OpenPrefixAndDatabase(context.Background(), cfg, root, true)
+	if err != nil {
+		t.Fatalf("OpenPrefixAndDatabase after interrupt: %v", err)
+	}
+	_ = db.Close(context.Background())
 }
