@@ -63,14 +63,14 @@ func TestLogAndBadgerLogger(t *testing.T) {
 	origDir := LogDir
 	origVerbosity := Verbosity
 	globalLogger.Lock()
-	origLogger := globalLogger.Logger
-	globalLogger.Logger = nil
+	origLoggers := globalLogger.loggers
+	globalLogger.loggers = map[string]*slog.Logger{}
 	globalLogger.Unlock()
 	t.Cleanup(func() {
 		LogDir = origDir
 		Verbosity = origVerbosity
 		globalLogger.Lock()
-		globalLogger.Logger = origLogger
+		globalLogger.loggers = origLoggers
 		globalLogger.Unlock()
 		_ = os.RemoveAll(dir)
 	})
@@ -105,8 +105,21 @@ func TestLogAndBadgerLogger(t *testing.T) {
 		t.Fatalf("ReadFile(%q): %v", matches[0], err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) != 7 {
-		t.Fatalf("got %d log lines, want 7:\n%s", len(lines), string(data))
+	if len(lines) != 3 {
+		t.Fatalf("got %d default log lines, want 3:\n%s", len(lines), string(data))
+	}
+
+	bmatches, err := filepath.Glob(filepath.Join(dir, badgerLogName+".log.*"))
+	if err != nil || len(bmatches) != 1 {
+		t.Fatalf("Glob badger log files = (%v, %v), want 1 file", bmatches, err)
+	}
+	bdata, err := os.ReadFile(bmatches[0])
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", bmatches[0], err)
+	}
+	blines := strings.Split(strings.TrimSpace(string(bdata)), "\n")
+	if len(blines) != 4 {
+		t.Fatalf("got %d badger log lines, want 4:\n%s", len(blines), string(bdata))
 	}
 
 	var rec map[string]any
@@ -115,5 +128,11 @@ func TestLogAndBadgerLogger(t *testing.T) {
 	}
 	if rec[slog.LevelKey] != "PREFIX" || rec[slog.MessageKey] != "prefix-msg" {
 		t.Errorf("unexpected first record: %v", rec)
+	}
+
+	// newLogger(nil) must fall back to stderr cleanly instead of panicking on nil *os.File.
+	nilLogger := newLogger(nil)
+	if err := nilLogger.Handler().Handle(ctx, slog.NewRecord(time.Now(), LogError, "stderr-fallback", 0)); err != nil {
+		t.Errorf("newLogger(nil) Handle error = %v", err)
 	}
 }

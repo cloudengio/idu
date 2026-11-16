@@ -615,6 +615,7 @@ func TestOpenPrefixAndDatabase(t *testing.T) {
 		t.Fatalf("OpenPrefixAndDatabase rw: %v", err)
 	}
 	if cfg.Name != "testfs" || target != "/test/root" {
+		_ = db.Close(ctx)
 		t.Fatalf("got (%q, %q), want (testfs, /test/root)", cfg.Name, target)
 	}
 	_ = db.Close(ctx)
@@ -624,6 +625,7 @@ func TestOpenPrefixAndDatabase(t *testing.T) {
 		t.Fatalf("OpenPrefixAndDatabase ro: %v", err)
 	}
 	if target != "/test/root/sub" {
+		_ = rdb.Close(ctx)
 		t.Fatalf("target = %q, want /test/root/sub", target)
 	}
 	_ = rdb.Close(ctx)
@@ -830,18 +832,83 @@ func TestScanDBMarkCompleteAndLogCloseErrors(t *testing.T) {
 	if err := sdb2.LogAndClose(ctx, time.Now(), time.Now(), []byte("{}")); !errors.Is(err, wantErr) {
 		t.Errorf("LogAndClose Log err = %v, want %v", err, wantErr)
 	}
-	fdb.logErr = nil
-
-	fdb.gcErr = wantErr
-	if err := sdb2.LogAndClose(ctx, time.Now(), time.Now(), []byte("{}")); !errors.Is(err, wantErr) {
-		t.Errorf("LogAndClose GC err = %v, want %v", err, wantErr)
+	if fdb.closed != 1 {
+		t.Errorf("LogAndClose Log error did not close DB: closed=%d, want 1", fdb.closed)
 	}
-	fdb.gcErr = nil
 
-	fdb.closeErr = wantErr
-	if err := sdb2.LogAndClose(ctx, time.Now(), time.Now(), []byte("{}")); !errors.Is(err, wantErr) {
-		t.Errorf("LogAndClose Close err = %v, want %v", err, wantErr)
+	for _, tc := range []struct {
+		name string
+		set  func(*faultDB)
+	}{
+		{name: "gc", set: func(f *faultDB) { f.gcErr = wantErr }},
+		{name: "close", set: func(f *faultDB) { f.closeErr = wantErr }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, err := NewScanDB(ctx, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := *fdbPtr
+			tc.set(f)
+			if err := s.LogAndClose(ctx, time.Now(), time.Now(), []byte("{}")); !errors.Is(err, wantErr) {
+				t.Errorf("LogAndClose %s err = %v, want %v", tc.name, err, wantErr)
+			}
+			if f.closed != 1 {
+				t.Errorf("LogAndClose %s error did not close DB: closed=%d, want 1", tc.name, f.closed)
+			}
+		})
 	}
+}
+
+func TestOpenDatabaseCanceledClosesDB(t *testing.T) {
+	origFactory := databaseFactory
+	t.Cleanup(func() { databaseFactory = origFactory })
+
+	dbDir := t.TempDir()
+	raw, err := origFactory(context.Background(), config.Prefix{Prefix: "/a", Database: dbDir}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closedCh := make(chan struct{})
+	fdb := &closeNotifyDB{DB: raw, closedCh: closedCh}
+
+	unblock := make(chan struct{})
+	started := make(chan struct{})
+	databaseFactory = func(context.Context, config.Prefix, bool) (database.DB, error) {
+		close(started)
+		<-unblock
+		return fdb, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-started
+		cancel()
+	}()
+
+	_, err = OpenDatabase(ctx, config.Prefix{Database: dbDir}, false)
+	close(unblock)
+	if !errors.Is(err, context.Canceled) {
+		_ = raw.Close(context.Background())
+		t.Fatalf("OpenDatabase err = %v, want context.Canceled", err)
+	}
+	select {
+	case <-closedCh:
+	case <-time.After(2 * time.Second):
+		_ = raw.Close(context.Background())
+		t.Fatal("leaked opened DB after OpenDatabase context cancellation")
+	}
+}
+
+type closeNotifyDB struct {
+	database.DB
+	closedCh chan struct{}
+}
+
+func (c *closeNotifyDB) Close(ctx context.Context) error {
+	err := c.DB.Close(ctx)
+	close(c.closedCh)
+	return err
 }
 
 func TestScanDBCompactError(t *testing.T) {
@@ -870,6 +937,9 @@ func TestScanDBCompactError(t *testing.T) {
 	(*fdbPtr).compactErr = wantErr
 	if err := sdb.LogAndClose(ctx, time.Now(), time.Now(), []byte("{}")); !errors.Is(err, wantErr) {
 		t.Errorf("LogAndClose Compact err = %v, want %v", err, wantErr)
+	}
+	if (*fdbPtr).closed != 1 {
+		t.Errorf("LogAndClose Compact error did not close DB: closed=%d, want 1", (*fdbPtr).closed)
 	}
 }
 

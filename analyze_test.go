@@ -956,3 +956,79 @@ func TestAnalyzeExclusions(t *testing.T) {
 	}
 	assertRootInfoAndAbsent(ctx, t, cfg, root, ignoredDir, 2, []string{"keep.txt", "sub"})
 }
+
+type fakeDeletePrefixDB struct {
+	internal.ScanDB
+	deleteErr error
+}
+
+func (f *fakeDeletePrefixDB) DeletePrefix(context.Context, string) error {
+	return f.deleteErr
+}
+
+func (f *fakeDeletePrefixDB) LogError(context.Context, string, time.Time, []byte) error {
+	return nil
+}
+
+func TestAnalyzeMinorEdgeCases(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC)
+
+	t.Run("showDefaults formatting and spelling", func(t *testing.T) {
+		out, err := captureStdout(t, func() error {
+			return (&analyzeCmd{}).analyzeFS(ctx, localfs.New(), &analyzeFlags{Defaults: true}, nil)
+		})
+		if err != nil {
+			t.Fatalf("analyzeFS(Defaults): %v", err)
+		}
+		if !strings.Contains(out, "concurrent_stats_threshold:") {
+			t.Errorf("showDefaults output = %q, want concurrent_stats_threshold:", out)
+		}
+		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+			if strings.Contains(line, "concurrent_stats:") && strings.Contains(line, "concurrent_stats_threshold:") {
+				t.Errorf("missing newline after concurrent_stats in %q", out)
+			}
+		}
+	})
+
+	t.Run("cl quotes single space or tab", func(t *testing.T) {
+		origArgs := os.Args
+		t.Cleanup(func() { os.Args = origArgs })
+		os.Args = []string{"idu", "analyze", "/dir with spaces", "/dir\twith\ttabs"}
+		got := cl()
+		if !strings.Contains(got, `"/dir with spaces"`) || !strings.Contains(got, `"/dir\twith\ttabs"`) {
+			t.Errorf("cl() = %q, expected quoted args with spaces/tabs", got)
+		}
+	})
+
+	t.Run("added subdir with parentUnchanged and DeletePrefix error", func(t *testing.T) {
+		var wg sync.WaitGroup
+		wg.Add(1)
+		pt := newProgressTracker(ctx, time.Second, false, false, &wg)
+		wg.Wait()
+
+		w := &walker{
+			fs: localfs.New(),
+			pt: pt,
+			db: &fakeDeletePrefixDB{deleteErr: errors.New("delete failed")},
+		}
+
+		dir1 := file.NewInfo("d1", 0, fs.ModeDir|0o755, now, file.XAttr{})
+		dir2 := file.NewInfo("d2", 0, fs.ModeDir|0o755, now, file.XAttr{})
+		prev := prefixinfo.New("/root", file.NewInfo("root", 0, fs.ModeDir|0o755, now, file.XAttr{}))
+		prev.SetInfoList(file.InfoList{dir1})
+		cur := prefixinfo.New("/root", file.NewInfo("root", 0, fs.ModeDir|0o755, now, file.XAttr{}))
+		cur.SetInfoList(file.InfoList{dir1, dir2})
+
+		n, unchanged, err := w.handleDeletedOrChangedPrefixes(ctx, "/root", true, cur, prev)
+		if err != nil || n != 0 || unchanged {
+			t.Errorf("added subdir with parentUnchanged=true: got (n=%d, unchanged=%v, err=%v), want (0, false, nil)", n, unchanged, err)
+		}
+
+		// When a dir is deleted and DeletePrefix fails, ndeleted must remain 0.
+		n, unchanged, err = w.handleDeletedOrChangedPrefixes(ctx, "/root", true, prev, cur)
+		if err == nil || unchanged || n != 0 {
+			t.Errorf("failed DeletePrefix: got (n=%d, unchanged=%v, err=%v), want (0, false, non-nil)", n, unchanged, err)
+		}
+	})
+}

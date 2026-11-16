@@ -34,23 +34,29 @@ var (
 
 type logger struct {
 	sync.Mutex
-	*slog.Logger
+	loggers map[string]*slog.Logger
 }
 
-var globalLogger = &logger{}
+var globalLogger = &logger{
+	loggers: map[string]*slog.Logger{},
+}
 
 func getOrCreateLogger(name string) *slog.Logger {
 	globalLogger.Lock()
 	defer globalLogger.Unlock()
-	if globalLogger.Logger != nil {
-		return globalLogger.Logger
+	if l, ok := globalLogger.loggers[name]; ok {
+		return l
 	}
-	f, name, err := createNamedLogfile(name, LogDir, time.Now())
+	f, fname, err := createNamedLogfile(name, LogDir, time.Now())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to create log file: %v, %v\n", name, err)
+		fmt.Fprintf(os.Stderr, "failed to create log file: %v, %v\n", fname, err)
 	}
-	globalLogger.Logger = newLogger(f)
-	return globalLogger.Logger
+	l := newLogger(f)
+	if globalLogger.loggers == nil {
+		globalLogger.loggers = map[string]*slog.Logger{}
+	}
+	globalLogger.loggers[name] = l
+	return l
 }
 
 func Log(ctx context.Context, level slog.Level, msg string, args ...interface{}) {
@@ -114,5 +120,9 @@ func newLogger(f *os.File) *slog.Logger {
 			}
 			return a
 		}}
-	return slog.New(slog.NewJSONHandler(f, opts))
+	out := f
+	if out == nil {
+		out = os.Stderr
+	}
+	return slog.New(slog.NewJSONHandler(out, opts))
 }

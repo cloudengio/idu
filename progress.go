@@ -94,6 +94,7 @@ func (pt *progressTracker) summarize() anaylzeSummary {
 		PrefixesStarted:   cpy.numPrefixesStarted,
 		PrefixesFinished:  cpy.numPrefixesFinished,
 		SynchronousScans:  cpy.numSyncScans,
+		SlowScans:         cpy.numSlowScans,
 		FSStats:           cpy.numStatsFinished,
 		FSStatsTotal:      cpy.statsTotalTime,
 		FSStatMeanLatency: cpy.meanStatLatency(),
@@ -163,7 +164,7 @@ func (pt *progressTracker) incSlowScans() {
 func (pt *progressTracker) setSyncScans(numSyncScans int64) {
 	pt.Lock()
 	defer pt.Unlock()
-	if numSyncScans > 0 {
+	if numSyncScans > pt.numSyncScans {
 		pt.numSyncScans = numSyncScans
 	}
 }

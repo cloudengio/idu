@@ -9,6 +9,7 @@ import (
 	"flag"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -192,6 +193,56 @@ func TestTimeRangeEdgesAndErrors(t *testing.T) {
 		}
 		if _, _, _, err := internal.LookupPrefix(context.Background(), cfg, "/nonexistent/path"); err == nil {
 			t.Fatal("expected error for unmatched prefix")
+		}
+	})
+}
+
+func TestLookupPrefixCleanAndNegativeSince(t *testing.T) {
+	t.Parallel()
+
+	t.Run("LookupPrefix cleans trailing slash", func(t *testing.T) {
+		t.Parallel()
+		root := filepath.Join(t.TempDir(), "tree")
+		cfg, err := config.ParseConfig([]byte(
+			"filesystems:\n" +
+				"  - name: mytree\n    prefix: " + root + string(filepath.Separator) + "\n" +
+				"  - name: posix\n    prefix: /fs/a\n",
+		))
+		if err != nil {
+			t.Fatal(err)
+		}
+		sub := filepath.Join(root, "sub")
+		for _, tc := range []struct {
+			in, want string
+		}{
+			{sub + string(filepath.Separator), sub},
+			{"mytree", root},
+			{"/fs/a", "/fs/a"},
+			{"/fs/a/", "/fs/a"},
+			{"posix", "/fs/a"},
+		} {
+			_, _, target, err := internal.LookupPrefix(context.Background(), cfg, tc.in)
+			if err != nil {
+				t.Fatalf("LookupPrefix(%q): %v", tc.in, err)
+			}
+			if target != tc.want {
+				t.Errorf("LookupPrefix(%q) target = %q, want %q", tc.in, target, tc.want)
+			}
+		}
+	})
+
+	t.Run("negative since returns error", func(t *testing.T) {
+		t.Parallel()
+		var trf internal.TimeRangeFlags
+		fs := &flag.FlagSet{}
+		if err := flags.RegisterFlagsInStruct(fs, "subcmd", &trf, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := fs.Parse([]string{"--since=-1h"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, _, err := trf.FromTo(); err == nil {
+			t.Fatal("expected error for negative --since duration")
 		}
 	})
 }
