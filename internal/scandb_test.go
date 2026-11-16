@@ -872,3 +872,70 @@ func TestScanDBCompactError(t *testing.T) {
 		t.Errorf("LogAndClose Compact err = %v, want %v", err, wantErr)
 	}
 }
+
+func writeScanDBPrefixes(ctx context.Context, t *testing.T, cfg config.Prefix, unchanged bool, complete bool, keys ...string) {
+	t.Helper()
+	sdb, err := NewScanDB(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range keys {
+		pi := makeTestPrefixInfo(100)
+		if err := sdb.SetPrefixInfo(ctx, k, unchanged, &pi); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if complete {
+		if err := sdb.MarkSummariesComplete(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = sdb.Close(ctx)
+}
+
+func TestScanDBPartialRewriteInvalidatesOldSpec(t *testing.T) {
+	ctx := context.Background()
+	dbDir := filepath.Join(t.TempDir(), "db-partial-rewrite")
+	calcID := diskusage.NewIdentity().String()
+
+	// 1. Build a complete DB recording hardlinks.
+	cfgOld := config.Prefix{Prefix: "/a", Database: dbDir, Separator: "/", CountHardlinkAsFiles: false}
+	writeScanDBPrefixes(ctx, t, cfgOld, false, true, "/a", "/a/sub")
+
+	// 2. Switch to CountHardlinkAsFiles: true and rewrite only /a/sub
+	// (simulating a sub-prefix analyze or an interrupted full analyze).
+	cfgNew := config.Prefix{Prefix: "/a", Database: dbDir, Separator: "/", CountHardlinkAsFiles: true}
+	writeScanDBPrefixes(ctx, t, cfgNew, false, false, "/a/sub")
+
+	// 3. The old spec (needLinks=true) and new spec must both be rejected
+	// because summaries are now mixed and incomplete.
+	rodb, err := OpenDatabase(ctx, cfgNew, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckSummaries(ctx, rodb, calcID, true); !errors.Is(err, ErrStaleSummaries) {
+		t.Errorf("CheckSummaries(needLinks=true) = %v, want ErrStaleSummaries", err)
+	}
+	if err := CheckSummaries(ctx, rodb, calcID, false); !errors.Is(err, ErrStaleSummaries) {
+		t.Errorf("CheckSummaries(needLinks=false) = %v, want ErrStaleSummaries", err)
+	}
+	if err := CheckSummaryKeys(ctx, rodb); !errors.Is(err, ErrStaleSummaries) {
+		t.Errorf("CheckSummaryKeys = %v, want ErrStaleSummaries", err)
+	}
+	_ = rodb.Close(ctx)
+
+	// 4. Completing a full scan with cfgNew restores valid summaries.
+	writeScanDBPrefixes(ctx, t, cfgNew, true, true, "/a", "/a/sub")
+
+	rodb2, err := OpenDatabase(ctx, cfgNew, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rodb2.Close(ctx)
+	if err := CheckSummaries(ctx, rodb2, calcID, false); err != nil {
+		t.Errorf("CheckSummaries(needLinks=false) after complete = %v, want nil", err)
+	}
+	if err := CheckSummaries(ctx, rodb2, calcID, true); !errors.Is(err, ErrStaleSummaries) {
+		t.Errorf("CheckSummaries(needLinks=true) after non-hardlink complete = %v, want ErrStaleSummaries", err)
+	}
+}
