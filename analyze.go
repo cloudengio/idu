@@ -202,6 +202,7 @@ type prefixState struct {
 	ndeleted        int
 	start           time.Time
 	contentsStart   time.Time
+	contentsErr     error
 }
 
 func (w *walker) dbLogErr(ctx context.Context, prefix string, val []byte) {
@@ -331,9 +332,10 @@ func (w *walker) Contents(ctx context.Context, state *prefixState, prefix string
 			"duration", sinceLast.String())
 		w.pt.incSlowScans()
 	}
+	toStat := contents
 	if state.parentUnchanged {
 		// Need to traverse sub-directories even if the parent is unchanged.
-		toStat := []filewalk.Entry{}
+		toStat = make([]filewalk.Entry, 0, len(contents))
 		for _, entry := range contents {
 			if !entry.IsDir() {
 				state.nfiles++
@@ -341,28 +343,20 @@ func (w *walker) Contents(ctx context.Context, state *prefixState, prefix string
 			}
 			toStat = append(toStat, entry)
 		}
-		children, all, err := w.processStats(ctx, prefix, toStat)
-		if err != nil {
-			w.dbLogErr(ctx, prefix, []byte(err.Error()))
-		}
-		state.current.AppendInfoList(all)
-		state.nfiles += int64(len(all) - len(children))
-		state.nchildren += int64(len(children))
-		return children, nil
 	}
-
-	children, all, err := w.processStats(ctx, prefix, contents)
+	children, all, err := w.processStats(ctx, prefix, toStat)
 	if err != nil {
-		w.dbLogErr(ctx, prefix, []byte(err.Error()))
+		state.contentsErr = err
+		return nil, err
 	}
+	state.current.AppendInfoList(all)
 	state.nfiles += int64(len(all) - len(children))
 	state.nchildren += int64(len(children))
-	state.current.AppendInfoList(all)
 	return children, nil
 }
 
 func (w *walker) Done(ctx context.Context, state *prefixState, prefix string, err error) error {
-	if err != nil {
+	if err != nil && !errors.Is(err, state.contentsErr) {
 		internal.Log(ctx, internal.LogPrefix, "prefix done with error",
 			"prefix", w.cfg.Prefix,
 			"path", prefix,
@@ -383,6 +377,22 @@ func (w *walker) Done(ctx context.Context, state *prefixState, prefix string, er
 		w.pt.setSyncScans(stats.SynchronousScans)
 		w.pt.incDonePrefix(state.ndeleted, state.nfiles)
 	}(state)
+
+	if err != nil || state.contentsErr != nil {
+		// Preserve any previously stored subtree metadata if scanning this
+		// directory failed; only record/confirm empty entries when no prior
+		// entries exist (e.g. an inaccessible directory).
+		if len(state.existing.InfoList()) == 0 {
+			if state.existing.ModTime().IsZero() {
+				if serr := w.db.SetPrefixInfo(ctx, prefix, false, &state.current); serr != nil {
+					return serr
+				}
+			} else if state.parentUnchanged && state.contentsErr == nil {
+				w.pt.incChildrenUnchanged()
+			}
+		}
+		return state.contentsErr
+	}
 
 	n, unchanged, err := w.handleDeletedOrChangedPrefixes(ctx, prefix, state.parentUnchanged, state.current, state.existing)
 	state.ndeleted += n

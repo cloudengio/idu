@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -27,6 +28,7 @@ import (
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/file"
 	"cloudeng.io/file/filewalk"
+	"cloudeng.io/file/filewalk/asyncstat"
 	"cloudeng.io/file/localfs"
 )
 
@@ -750,4 +752,112 @@ func TestAnalyzeInterruptDoesNotCloseDBEarly(t *testing.T) {
 		t.Fatalf("OpenPrefixAndDatabase after interrupt: %v", err)
 	}
 	_ = db.Close(context.Background())
+}
+
+func setupPopulatedRootAndSub(t *testing.T) (config.T, string, string) {
+	t.Helper()
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	root := filepath.Join(tmpDir, "root")
+	sub := filepath.Join(root, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "f0"), []byte("a"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "f1"), []byte("b"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := setupAnalyzeTestConfig(t, root)
+	alz := &analyzeCmd{}
+	if err := alz.analyzeFS(ctx, localfs.New(), &analyzeFlags{}, []string{root}); err != nil {
+		t.Fatalf("initial analyzeFS: %v", err)
+	}
+	return cfg, root, sub
+}
+
+func assertSubtreePreserved(t *testing.T, cfg config.T, root, sub string) {
+	t.Helper()
+	ctx := context.Background()
+	_, _, _, rodb, err := internal.OpenPrefixAndDatabase(ctx, cfg, root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rodb.Close(ctx)
+
+	var buf bytes.Buffer
+	if err := rodb.Get(ctx, sub, &buf); err != nil || buf.Len() == 0 {
+		t.Errorf("expected %s to be preserved in DB, got (%d bytes, %v)", sub, buf.Len(), err)
+	}
+	buf.Reset()
+	if err := rodb.Get(ctx, root, &buf); err != nil || buf.Len() == 0 {
+		t.Fatalf("expected %s in DB, got (%d bytes, %v)", root, buf.Len(), err)
+	}
+	var pi prefixinfo.T
+	if err := pi.UnmarshalBinary(buf.Bytes()); err != nil || len(pi.InfoList()) != 2 {
+		t.Errorf("expected %s InfoList len 2 preserved, got err=%v len=%d", root, err, len(pi.InfoList()))
+	}
+}
+
+func TestAnalyzeContentsErrorPreservesSubtree(t *testing.T) {
+	ctx := context.Background()
+	cfg, root, sub := setupPopulatedRootAndSub(t)
+	lfs := localfs.New()
+
+	sdb, err := internal.NewScanDB(ctx, cfg.Filesystems[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sdb.Close(ctx)
+
+	var ptWg sync.WaitGroup
+	ptWg.Add(1)
+	pt := newProgressTracker(ctx, time.Second, false, true, &ptWg)
+	w := &walker{cfg: cfg.Filesystems[0], db: sdb, fs: lfs, pt: pt}
+	w.lsi = asyncstat.New(lfs)
+	w.fw = filewalk.New(lfs, w)
+
+	var state prefixState
+	info, err := lfs.Lstat(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stop, _, err := w.Prefix(ctx, &state, root, info, nil); stop || err != nil {
+		t.Fatalf("Prefix = (%v, %v)", stop, err)
+	}
+
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+	_, cerr := w.Contents(cctx, &state, root, []filewalk.Entry{{Name: "sub", Type: fs.ModeDir}, {Name: "f0"}})
+	if cerr == nil {
+		t.Fatal("expected Contents to return error when processStats fails")
+	}
+	if sum := pt.summarize(); sum.Errors != 1 {
+		t.Errorf("errors count = %d, want 1 (no double logging)", sum.Errors)
+	}
+
+	_ = w.Done(ctx, &state, root, cerr)
+	if sum := pt.summarize(); sum.Errors != 1 {
+		t.Errorf("errors count after Done = %d, want 1", sum.Errors)
+	}
+	if err := sdb.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertSubtreePreserved(t, cfg, root, sub)
+}
+
+func TestAnalyzeLevelScannerErrorPreservesSubtree(t *testing.T) {
+	ctx := context.Background()
+	cfg, root, sub := setupPopulatedRootAndSub(t)
+	alz := &analyzeCmd{}
+	ffs := &faultAnalyzeFS{
+		FS:          localfs.New(),
+		scanErrPath: root,
+		scanErr:     errors.New("transient read error"),
+	}
+	if err := alz.analyzeFS(ctx, ffs, &analyzeFlags{}, []string{root}); err != nil {
+		t.Fatalf("analyzeFS: %v", err)
+	}
+	assertSubtreePreserved(t, cfg, root, sub)
 }
