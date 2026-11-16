@@ -5,13 +5,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"cloudeng.io/cmd/idu/internal"
+	"cloudeng.io/cmd/idu/internal/database"
 )
 
 type logFlags struct {
@@ -27,9 +30,27 @@ type errorFlags struct {
 
 type lister struct{}
 
+func errorGroupPrefix(ctx context.Context, db database.DB, key, target, sep string, buf *bytes.Buffer) string {
+	if key == target {
+		return key
+	}
+	buf.Reset()
+	if err := db.Get(ctx, key, buf); err == nil && buf.Len() > 0 {
+		return key
+	}
+	idx := strings.LastIndex(key, sep)
+	if idx < 0 {
+		return key
+	}
+	if idx == 0 {
+		return sep
+	}
+	return key[:idx]
+}
+
 func (l *lister) errors(ctx context.Context, values interface{}, args []string) error {
 	ef := values.(*errorFlags)
-	ctx, _, target, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], !ef.Erase)
+	ctx, cfg, target, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], !ef.Erase)
 	if err != nil {
 		return err
 	}
@@ -38,9 +59,27 @@ func (l *lister) errors(ctx context.Context, values interface{}, args []string) 
 		return db.Clear(ctx, false, true)
 	}
 
+	var buf bytes.Buffer
+	var lastPrefix string
 	return db.VisitErrors(ctx, target,
-		func(_ context.Context, key string, when time.Time, detail []byte) bool {
-			fmt.Printf("%s: %s (%s)\n", key, detail, when.Format(time.RFC3339))
+		func(ctx context.Context, key string, when time.Time, detail []byte) bool {
+			inSubtree, stop := subtreeMatch(key, target, cfg.Separator)
+			if stop {
+				return false
+			}
+			if !inSubtree {
+				return true
+			}
+			if !ef.Prefix {
+				fmt.Printf("%s: %s (%s)\n", key, detail, when.Format(time.RFC3339))
+				return true
+			}
+			prefix := errorGroupPrefix(ctx, db, key, target, cfg.Separator, &buf)
+			if prefix != lastPrefix {
+				fmt.Printf("%s:\n", prefix)
+				lastPrefix = prefix
+			}
+			fmt.Printf("  %s: %s (%s)\n", key, detail, when.Format(time.RFC3339))
 			return true
 		})
 }

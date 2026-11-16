@@ -7,6 +7,8 @@ package main
 import (
 	"context"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -107,4 +109,87 @@ func TestListerLogsAndErrors(t *testing.T) {
 			t.Fatal("expected error for unknown prefix")
 		}
 	})
+}
+
+func setupSiblingErrorsDB(ctx context.Context, t *testing.T) (targetA, subDir string) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	root := filepath.Join(tmpDir, "root")
+	dbDir := filepath.Join(tmpDir, "db")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgText := "filesystems:\n  - name: tree\n    prefix: " + root + "\n    database: " + dbDir + "\n"
+	cfg, err := config.ParseConfig([]byte(cfgText))
+	if err != nil {
+		t.Fatal(err)
+	}
+	origCfg := globalConfig
+	globalConfig = cfg
+	t.Cleanup(func() { globalConfig = origCfg })
+	setTempLogDir(t)
+
+	_, _, _, db, err := internal.OpenPrefixAndDatabase(ctx, cfg, root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetA = filepath.Join(root, "a")
+	subDir = filepath.Join(targetA, "sub")
+	now := time.Now().UTC()
+	for _, e := range []struct {
+		key string
+		msg string
+	}{
+		{targetA, "err root a"},
+		{filepath.Join(subDir, "f1"), "err sub f1"},
+		{filepath.Join(subDir, "f2"), "err sub f2"},
+		{filepath.Join(root, "a-b", "f3"), "err sibling dash"},
+		{filepath.Join(root, "ab", "f4"), "err sibling ab"},
+		{filepath.Join(root, "z", "f5"), "err tail z"},
+	} {
+		if err := db.LogError(ctx, e.key, now, []byte(e.msg)); err != nil {
+			_ = db.Close(ctx)
+			t.Fatal(err)
+		}
+	}
+	if err := db.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return targetA, subDir
+}
+
+func TestErrorsNoSiblingBleedAndPrefixFlag(t *testing.T) {
+	ctx := context.Background()
+	targetA, subDir := setupSiblingErrorsDB(ctx, t)
+
+	ls := &lister{}
+	out, err := captureStdout(t, func() error {
+		return ls.errors(ctx, &errorFlags{}, []string{targetA})
+	})
+	if err != nil {
+		t.Fatalf("errors: %v", err)
+	}
+	for _, want := range []string{"err root a", "err sub f1", "err sub f2"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("errors output missing %q:\n%s", want, out)
+		}
+	}
+	for _, forbid := range []string{"err sibling dash", "err sibling ab", "err tail z"} {
+		if strings.Contains(out, forbid) {
+			t.Errorf("errors output leaked %q:\n%s", forbid, out)
+		}
+	}
+
+	prefOut, err := captureStdout(t, func() error {
+		return ls.errors(ctx, &errorFlags{Prefix: true}, []string{targetA})
+	})
+	if err != nil {
+		t.Fatalf("errors --prefix: %v", err)
+	}
+	if count := strings.Count(prefOut, subDir+":\n"); count != 1 {
+		t.Errorf("expected prefix header %q once in --prefix output, got %d:\n%s", subDir+":", count, prefOut)
+	}
+	if strings.Contains(prefOut, "err sibling dash") || strings.Contains(prefOut, "err sibling ab") {
+		t.Errorf("errors --prefix leaked sibling:\n%s", prefOut)
+	}
 }
