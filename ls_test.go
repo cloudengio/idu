@@ -111,8 +111,8 @@ func TestListerLogsAndErrors(t *testing.T) {
 	})
 }
 
-func TestErrorsNoSiblingBleedAndPrefixFlag(t *testing.T) {
-	ctx := context.Background()
+func setupSiblingErrorsDB(ctx context.Context, t *testing.T) (targetA, subDir string) {
+	t.Helper()
 	tmpDir := t.TempDir()
 	root := filepath.Join(tmpDir, "root")
 	dbDir := filepath.Join(tmpDir, "db")
@@ -133,8 +133,8 @@ func TestErrorsNoSiblingBleedAndPrefixFlag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	targetA := filepath.Join(root, "a")
-	subDir := filepath.Join(targetA, "sub")
+	targetA = filepath.Join(root, "a")
+	subDir = filepath.Join(targetA, "sub")
 	now := time.Now().UTC()
 	for _, e := range []struct {
 		key string
@@ -155,6 +155,12 @@ func TestErrorsNoSiblingBleedAndPrefixFlag(t *testing.T) {
 	if err := db.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
+	return targetA, subDir
+}
+
+func TestErrorsNoSiblingBleedAndPrefixFlag(t *testing.T) {
+	ctx := context.Background()
+	targetA, subDir := setupSiblingErrorsDB(ctx, t)
 
 	ls := &lister{}
 	out, err := captureStdout(t, func() error {
