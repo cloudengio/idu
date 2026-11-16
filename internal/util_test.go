@@ -9,6 +9,7 @@ import (
 	"flag"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -192,6 +193,44 @@ func TestTimeRangeEdgesAndErrors(t *testing.T) {
 		}
 		if _, _, _, err := internal.LookupPrefix(context.Background(), cfg, "/nonexistent/path"); err == nil {
 			t.Fatal("expected error for unmatched prefix")
+		}
+	})
+}
+
+func TestLookupPrefixCleanAndNegativeSince(t *testing.T) {
+	t.Parallel()
+
+	t.Run("LookupPrefix cleans trailing slash", func(t *testing.T) {
+		t.Parallel()
+		root := filepath.Join(t.TempDir(), "tree")
+		cfg, err := config.ParseConfig([]byte("filesystems:\n  - name: mytree\n    prefix: " + root + string(filepath.Separator) + "\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		sub := filepath.Join(root, "sub")
+		for _, in := range []string{sub + string(filepath.Separator), "mytree"} {
+			_, _, target, err := internal.LookupPrefix(context.Background(), cfg, in)
+			if err != nil {
+				t.Fatalf("LookupPrefix(%q): %v", in, err)
+			}
+			if target != filepath.Clean(target) {
+				t.Errorf("LookupPrefix(%q) target = %q, want cleaned %q", in, target, filepath.Clean(target))
+			}
+		}
+	})
+
+	t.Run("negative since returns error", func(t *testing.T) {
+		t.Parallel()
+		var trf internal.TimeRangeFlags
+		fs := &flag.FlagSet{}
+		if err := flags.RegisterFlagsInStruct(fs, "subcmd", &trf, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := fs.Parse([]string{"--since=-1h"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, _, err := trf.FromTo(); err == nil {
+			t.Fatal("expected error for negative --since duration")
 		}
 	})
 }

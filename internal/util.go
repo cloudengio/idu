@@ -29,6 +29,9 @@ func (tr *TimeRangeFlags) FromTo() (from, to time.Time, set bool, err error) {
 	if !set {
 		return
 	}
+	if tr.Since < 0 {
+		return time.Time{}, time.Time{}, false, fmt.Errorf("since duration must be non-negative: %v", tr.Since)
+	}
 	if tr.Since > 0 {
 		from = to.Add(-tr.Since)
 		return
@@ -48,13 +51,14 @@ func (tr *TimeRangeFlags) FromTo() (from, to time.Time, set bool, err error) {
 // by prefix).
 func LookupPrefix(ctx context.Context, all config.T, target string) (context.Context, config.Prefix, string, error) {
 	if cfg, ok := all.ForName(target); ok {
-		return ctx, cfg, cfg.Prefix, nil
+		return ctx, cfg, filepath.Clean(cfg.Prefix), nil
 	}
 	if filepath.IsLocal(target) || len(target) == 0 {
 		if dir, err := os.Getwd(); err == nil {
 			target = filepath.Join(dir, target)
 		}
 	}
+	target = filepath.Clean(target)
 	cfg, ok := all.ForPrefix(target)
 	if !ok {
 		return ctx, cfg, "", fmt.Errorf("no configuration for %v", target)

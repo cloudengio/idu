@@ -8,6 +8,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"cloudeng.io/cmd/idu/internal/config"
@@ -19,6 +20,9 @@ func TestDBLocate(t *testing.T) {
 	tmpDir := t.TempDir()
 	existingDB := filepath.Join(tmpDir, "existing-db")
 	if err := os.MkdirAll(existingDB, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(existingDB, "data.sst"), make([]byte, 5000), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	missingDB := filepath.Join(tmpDir, "missing-db")
@@ -45,20 +49,26 @@ func TestDBLocate(t *testing.T) {
 
 	cmd := &dbCmd{}
 	for _, tc := range []struct {
-		name    string
-		flags   locateFlags
-		arg     string
-		wantErr bool
+		name         string
+		flags        locateFlags
+		arg          string
+		wantErr      bool
+		wantContains string
 	}{
 		{name: "non-verbose", flags: locateFlags{Verbose: false}, arg: "present"},
-		{name: "verbose existing", flags: locateFlags{Verbose: true}, arg: "present"},
-		{name: "verbose missing", flags: locateFlags{Verbose: true}, arg: "absent"},
+		{name: "verbose existing", flags: locateFlags{Verbose: true}, arg: "present", wantContains: "5.000 KB"},
+		{name: "verbose missing", flags: locateFlags{Verbose: true}, arg: "absent", wantContains: "database for absent"},
 		{name: "unknown prefix", flags: locateFlags{Verbose: false}, arg: "nope", wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := cmd.locate(ctx, &tc.flags, []string{tc.arg})
+			out, err := captureStdout(t, func() error {
+				return cmd.locate(ctx, &tc.flags, []string{tc.arg})
+			})
 			if (err != nil) != tc.wantErr {
 				t.Errorf("locate(%q) err = %v, wantErr=%v", tc.arg, err, tc.wantErr)
+			}
+			if tc.wantContains != "" && !strings.Contains(out, tc.wantContains) {
+				t.Errorf("locate(%q) output = %q, want substring %q", tc.arg, out, tc.wantContains)
 			}
 		})
 	}

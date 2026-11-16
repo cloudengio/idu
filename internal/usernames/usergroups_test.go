@@ -67,4 +67,12 @@ func TestIDManager_NumericAndUnknown(t *testing.T) {
 	if _, err := usernames.Manager.GIDForName("idu-nonexistent-group-xyz"); err == nil {
 		t.Error("expected error for non-existent group name")
 	}
+
+	// Unsigned 32-bit IDs > math.MaxInt32 (such as macOS/NFS nobody 4294967294).
+	if got, err := usernames.Manager.UIDForName("4294967294"); err != nil || got != 4294967294 {
+		t.Errorf("UIDForName(4294967294) = (%d, %v), want (4294967294, nil)", got, err)
+	}
+	if got, err := usernames.Manager.GIDForName("4294967294"); err != nil || got != 4294967294 {
+		t.Errorf("GIDForName(4294967294) = (%d, %v), want (4294967294, nil)", got, err)
+	}
 }

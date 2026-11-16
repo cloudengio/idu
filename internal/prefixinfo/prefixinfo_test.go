@@ -235,6 +235,21 @@ func TestAccessorsAndErrors(t *testing.T) {
 	}
 }
 
+func TestUnchangedDetectsChown(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	pi := prefixinfo.New("dir", testutil.TestdataNewInfo("dir", 4096, 8, fs.ModeDir|0o755, now, 10, 20, 1, 100))
+
+	chownUID := prefixinfo.New("dir", testutil.TestdataNewInfo("dir", 4096, 8, fs.ModeDir|0o755, now, 11, 20, 1, 100))
+	if pi.Unchanged(chownUID) {
+		t.Error("Unchanged should be false when UID changes")
+	}
+	chownGID := prefixinfo.New("dir", testutil.TestdataNewInfo("dir", 4096, 8, fs.ModeDir|0o755, now, 10, 21, 1, 100))
+	if pi.Unchanged(chownGID) {
+		t.Error("Unchanged should be false when GID changes")
+	}
+}
+
 func assertUnmarshalFailsNoPanic(t *testing.T, name string, data []byte) {
 	t.Helper()
 	defer func() {

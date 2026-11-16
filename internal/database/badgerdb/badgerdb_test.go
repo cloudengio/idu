@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"slices"
 	"sync"
 	"testing"
@@ -715,15 +714,105 @@ func TestOpenErrorsAndOptions(t *testing.T) {
 
 	t.Run("Open ReadOnly fails on missing database", func(t *testing.T) {
 		t.Parallel()
-		if runtime.GOOS == "windows" {
-			t.Skip("read-only mode is disabled on Windows")
-		}
 		missing := filepath.Join(t.TempDir(), "missing-db")
 		if db, err := badgerdb.Open(missing, badgerdb.ReadOnly()); err == nil {
 			_ = db.Close(context.Background())
 			t.Fatal("expected Open ReadOnly to fail on non-existent database")
 		}
+		if _, err := os.Stat(missing); !os.IsNotExist(err) {
+			t.Errorf("expected ReadOnly Open on missing DB not to create %q, stat err = %v", missing, err)
+		}
 	})
+}
+
+func TestCanceledScansSkipFirstItem(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db, err := badgerdb.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close(ctx) }()
+
+	now := time.Date(2025, 4, 1, 10, 0, 0, 0, time.UTC)
+	if err := db.Set(ctx, "/a", []byte("1"), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Log(ctx, now, now.Add(time.Minute), []byte("log")); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.LogError(ctx, "/a", now, []byte("err")); err != nil {
+		t.Fatal(err)
+	}
+
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+
+	scanCalls := 0
+	if err := db.Scan(cctx, "/", func(context.Context, string, []byte) bool {
+		scanCalls++
+		return true
+	}); !errors.Is(err, context.Canceled) || scanCalls != 0 {
+		t.Errorf("Scan(canceled) = (%v, calls=%d), want (context.Canceled, 0)", err, scanCalls)
+	}
+
+	logCalls := 0
+	if err := db.VisitLogs(cctx, time.Time{}, now.Add(time.Hour), func(context.Context, time.Time, time.Time, []byte) bool {
+		logCalls++
+		return true
+	}); !errors.Is(err, context.Canceled) || logCalls != 0 {
+		t.Errorf("VisitLogs(canceled) = (%v, calls=%d), want (context.Canceled, 0)", err, logCalls)
+	}
+
+	errCalls := 0
+	if err := db.VisitErrors(cctx, "/", func(context.Context, string, time.Time, []byte) bool {
+		errCalls++
+		return true
+	}); !errors.Is(err, context.Canceled) || errCalls != 0 {
+		t.Errorf("VisitErrors(canceled) = (%v, calls=%d), want (context.Canceled, 0)", err, errCalls)
+	}
+}
+
+func TestOpenWithTimeoutHeldLock(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+	db1, err := badgerdb.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db1Closed := false
+	defer func() {
+		if !db1Closed {
+			_ = db1.Close(ctx)
+		}
+	}()
+
+	type result struct {
+		db  database.DB
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		db2, err := badgerdb.Open(dir, badgerdb.WithTimeout(50*time.Millisecond))
+		ch <- result{db: db2, err: err}
+	}()
+
+	select {
+	case res := <-ch:
+		if res.err == nil {
+			_ = res.db.Close(ctx)
+			t.Fatal("expected Open with held lock to time out and return error")
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Error("badgerdb.Open ignored WithTimeout while lock was held")
+		_ = db1.Close(ctx)
+		db1Closed = true
+		res := <-ch
+		if res.db != nil {
+			_ = res.db.Close(ctx)
+		}
+	}
 }
 
 func collectLogs(t *testing.T, db database.DB, start, stop time.Time) string {

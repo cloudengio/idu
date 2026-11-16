@@ -7,6 +7,7 @@ package badgerdb
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -106,23 +107,7 @@ func keyForBucket(bucket byte, key []byte) *bytes.Buffer {
 	return buf
 }
 
-// Open opens the specified database. If the database does not exist it will
-// be created.
-func Open[T Options](location string, opts ...Option) (database.DB, error) {
-	if len(location) > 0 && location != "." {
-		if err := os.MkdirAll(location, 0770); err != nil {
-			return nil, err
-		}
-	}
-	db := &Database{
-		location: location,
-	}
-	db.Sub.Options = badger.DefaultOptions(location)
-	for _, fn := range opts {
-		fn(&db.Options)
-	}
-	db.Sub.Options = db.Sub.WithReadOnly(db.ReadOnly)
-
+func openLockedBadger(db *Database, location string, timedOut <-chan struct{}) error {
 	lockfile := filepath.Join(location, "applock")
 	db.lock = lockedfile.MutexAt(lockfile)
 	var unlock func()
@@ -133,7 +118,13 @@ func Open[T Options](location string, opts ...Option) (database.DB, error) {
 		unlock, err = db.lock.Lock()
 	}
 	if err != nil {
-		return nil, err
+		return err
+	}
+	select {
+	case <-timedOut:
+		unlock()
+		return context.DeadlineExceeded
+	default:
 	}
 	db.unlock = unlock
 	osopts := osOptions(db.Sub.Options)
@@ -141,13 +132,64 @@ func Open[T Options](location string, opts ...Option) (database.DB, error) {
 	if err != nil {
 		unlock()
 		db.unlock = nil
-		return nil, err
+		return err
 	}
 	db.bdb = bdb
 	if !db.ReadOnly {
 		db.batch = newWriteBatch(bdb)
 	}
-	return db, nil
+	return nil
+}
+
+// Open opens the specified database. If the database does not exist it will
+// be created unless opened read-only.
+func Open[T Options](location string, opts ...Option) (database.DB, error) {
+	db := &Database{
+		location: location,
+	}
+	db.Sub.Options = badger.DefaultOptions(location)
+	for _, fn := range opts {
+		fn(&db.Options)
+	}
+	db.Sub.Options = db.Sub.WithReadOnly(db.ReadOnly)
+
+	if db.ReadOnly {
+		if _, err := os.Stat(location); err != nil {
+			return nil, err
+		}
+	} else if len(location) > 0 && location != "." {
+		if err := os.MkdirAll(location, 0770); err != nil {
+			return nil, err
+		}
+	}
+
+	if db.Timeout <= 0 {
+		if err := openLockedBadger(db, location, nil); err != nil {
+			return nil, err
+		}
+		return db, nil
+	}
+
+	timedOut := make(chan struct{})
+	ch := make(chan error, 1)
+	go func() {
+		ch <- openLockedBadger(db, location, timedOut)
+	}()
+	select {
+	case err := <-ch:
+		if err != nil {
+			return nil, err
+		}
+		return db, nil
+	case <-time.After(db.Timeout):
+		close(timedOut)
+		go func() {
+			if err := <-ch; err == nil {
+				_ = db.Close(context.Background())
+			}
+		}()
+		return nil, fmt.Errorf("timed out opening database %s after %s", location, db.Timeout)
+	}
 }
 
 func (db *Database) BadgerDB() *badger.DB {
@@ -439,6 +481,9 @@ func (db *Database) DeleteErrors(ctx context.Context, prefix string) error {
 var errScanDone = errors.New("scan done")
 
 func (db *Database) scanFrom(ctx context.Context, bucket byte, prefix []byte, visitor func(ctx context.Context, key string, val []byte) error) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
 	kb := keyForBucket(bucket, prefix)
 	defer bufPool.Put(kb)
 	prefix = kb.Bytes()
@@ -452,6 +497,11 @@ func (db *Database) scanFrom(ctx context.Context, bucket byte, prefix []byte, vi
 		it := tx.NewIterator(opts)
 		defer it.Close()
 		for it.Seek(prefix); it.Valid(); it.Next() {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 			item := it.Item()
 			k := item.Key()
 			err := item.Value(func(v []byte) error {
@@ -463,17 +513,15 @@ func (db *Database) scanFrom(ctx context.Context, bucket byte, prefix []byte, vi
 				}
 				return err
 			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
 		}
 		return nil
 	})
 }
 
 func (db *Database) scanTimeRange(ctx context.Context, bucket byte, start, stop time.Time, visitor func(ctx context.Context, key string, val []byte) error) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
 	startKb := logKeyForTime(bucket, start)
 	defer bufPool.Put(startKb)
 	stopKb := logKeyForTime(bucket, stop)
@@ -488,6 +536,11 @@ func (db *Database) scanTimeRange(ctx context.Context, bucket byte, start, stop 
 		it := tx.NewIterator(opts)
 		defer it.Close()
 		for it.Seek(startKb.Bytes()); it.Valid(); it.Next() {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 			k := it.Item().Key()
 			if bytes.Compare(k, stopKb.Bytes()) > 0 {
 				break
@@ -501,11 +554,6 @@ func (db *Database) scanTimeRange(ctx context.Context, bucket byte, start, stop 
 					break
 				}
 				return err
-			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
 			}
 		}
 		return nil

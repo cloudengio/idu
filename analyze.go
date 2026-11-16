@@ -30,8 +30,8 @@ import (
 func showDefaults() {
 	fmt.Printf("scan_size: %v\n", filewalk.DefaultScanSize)
 	fmt.Printf("concurrent_scans: %v\n", filewalk.DefaultConcurrentScans)
-	fmt.Printf("concurrent_stats: %v", asyncstat.DefaultAsyncStats)
-	fmt.Printf("concurrent_stats_threadhold: %v\n", asyncstat.DefaultAsyncThreshold)
+	fmt.Printf("concurrent_stats: %v\n", asyncstat.DefaultAsyncStats)
+	fmt.Printf("concurrent_stats_threshold: %v\n", asyncstat.DefaultAsyncThreshold)
 }
 
 type analyzeFlags struct {
@@ -155,7 +155,7 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *anal
 func cl() string {
 	out := strings.Builder{}
 	for _, arg := range os.Args {
-		if strings.Contains(arg, " \t") {
+		if strings.ContainsAny(arg, " \t") {
 			fmt.Fprintf(&out, "%q", arg)
 		} else {
 			out.WriteString(arg)
@@ -193,16 +193,17 @@ type walker struct {
 }
 
 type prefixState struct {
-	parentUnchanged bool
-	info            file.Info
-	existing        prefixinfo.T
-	current         prefixinfo.T
-	nfiles          int64
-	nchildren       int64
-	ndeleted        int
-	start           time.Time
-	contentsStart   time.Time
-	contentsErr     error
+	parentUnchanged   bool
+	childrenUnchanged bool
+	info              file.Info
+	existing          prefixinfo.T
+	current           prefixinfo.T
+	nfiles            int64
+	nchildren         int64
+	ndeleted          int
+	start             time.Time
+	contentsStart     time.Time
+	contentsErr       error
 }
 
 func (w *walker) dbLogErr(ctx context.Context, prefix string, val []byte) {
@@ -372,7 +373,7 @@ func (w *walker) Done(ctx context.Context, state *prefixState, prefix string, er
 			"prefix", w.cfg.Prefix,
 			"path", prefix,
 			"parent-unchanged", state.parentUnchanged,
-			"children-unchanged", state.parentUnchanged,
+			"children-unchanged", state.childrenUnchanged,
 			"duration", time.Since(state.start).String(),
 			"nfiles", state.nfiles,
 			"ndeleted", state.ndeleted)
@@ -391,6 +392,7 @@ func (w *walker) Done(ctx context.Context, state *prefixState, prefix string, er
 					return serr
 				}
 			} else if state.parentUnchanged && state.contentsErr == nil {
+				state.childrenUnchanged = true
 				w.pt.incChildrenUnchanged()
 			}
 		}
@@ -399,6 +401,7 @@ func (w *walker) Done(ctx context.Context, state *prefixState, prefix string, er
 
 	n, unchanged, err := w.handleDeletedOrChangedPrefixes(ctx, prefix, state.parentUnchanged, state.current, state.existing)
 	state.ndeleted += n
+	state.childrenUnchanged = unchanged
 	if err != nil {
 		return err
 	}
@@ -423,8 +426,10 @@ func (w *walker) handleDeletedOrChangedPrefixes(ctx context.Context, prefix stri
 		}
 	}
 	childrenUnchanged := parentUnchanged
+	prevDirs := 0
 	for _, prev := range previous.InfoList() {
 		if prev.IsDir() {
+			prevDirs++
 			pi, ok := cm[prev.Name()]
 			if !ok {
 				childrenUnchanged = false
@@ -435,6 +440,9 @@ func (w *walker) handleDeletedOrChangedPrefixes(ctx context.Context, prefix stri
 				childrenUnchanged = false
 			}
 		}
+	}
+	if len(cm) != prevDirs {
+		childrenUnchanged = false
 	}
 
 	if childrenUnchanged {
@@ -450,6 +458,7 @@ func (w *walker) handleDeletedOrChangedPrefixes(ctx context.Context, prefix stri
 		if err := w.db.DeletePrefix(ctx, p); err != nil {
 			errs.Append(err)
 			w.dbLogErr(ctx, p, []byte(err.Error()))
+			continue
 		}
 		ndeleted++
 	}

@@ -53,6 +53,12 @@ func TestProgressTracker_DisplayAndCounters(t *testing.T) {
 				if s.ParentUnchanged != 1 || s.ChildrenUnchanged != 1 || s.FSStats != 1 {
 					t.Errorf("unexpected summary unchanged/stats: %+v", s)
 				}
+				if s.SlowScans != 1 {
+					t.Errorf("SlowScans = %d, want 1", s.SlowScans)
+				}
+				if s.SynchronousScans != 7 {
+					t.Errorf("SynchronousScans = %d, want 7 (must not regress on smaller updates)", s.SynchronousScans)
+				}
 			})
 		})
 	}

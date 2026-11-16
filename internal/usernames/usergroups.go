@@ -37,7 +37,7 @@ func (um *IDManager) UIDForName(name string) (int64, error) {
 	if err == nil {
 		name = info.UID
 	}
-	id, err := strconv.ParseInt(name, 10, 32)
+	id, err := strconv.ParseInt(name, 10, 64)
 	return id, err
 }
 
@@ -46,7 +46,7 @@ func (um *IDManager) GIDForName(name string) (int64, error) {
 	if err == nil {
 		name = grp.Gid
 	}
-	id, err := strconv.ParseInt(name, 10, 32)
+	id, err := strconv.ParseInt(name, 10, 64)
 	return id, err
 }
 

@@ -119,11 +119,25 @@ func (pi T) InfoList() file.InfoList {
 }
 
 func (pi T) Unchanged(npi T) bool {
-	return pi.modTime.Equal(npi.modTime) && pi.mode == npi.mode
+	return pi.modTime.Equal(npi.modTime) &&
+		pi.mode == npi.mode &&
+		pi.xattr.UID == npi.xattr.UID &&
+		pi.xattr.GID == npi.xattr.GID
 }
 
 func (pi T) UnchangedInfo(info file.Info) bool {
-	return pi.modTime.Equal(info.ModTime()) && pi.mode == info.Mode()
+	if !pi.modTime.Equal(info.ModTime()) || pi.mode != info.Mode() {
+		return false
+	}
+	switch v := info.Sys().(type) {
+	case file.XAttr:
+		return pi.xattr.UID == v.UID && pi.xattr.GID == v.GID
+	case *file.XAttr:
+		if v != nil {
+			return pi.xattr.UID == v.UID && pi.xattr.GID == v.GID
+		}
+	}
+	return true
 }
 
 func (pi T) FilesOnly() file.InfoList {

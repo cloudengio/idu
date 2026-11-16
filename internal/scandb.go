@@ -118,6 +118,13 @@ func OpenDatabase(ctx context.Context, cfg config.Prefix, readonly bool) (databa
 	for {
 		select {
 		case <-ctx.Done():
+			closeCtx := context.WithoutCancel(ctx)
+			go func() {
+				res := <-doneCh
+				if res.err == nil && res.db != nil {
+					_ = res.db.Close(closeCtx)
+				}
+			}()
 			return nil, ctx.Err()
 		case res := <-doneCh:
 			if delayed {
@@ -359,33 +366,29 @@ type compactor interface {
 	Compact(ctx context.Context) error
 }
 
-func (sdb *scanDB) LogAndClose(ctx context.Context, start, stop time.Time, detail []byte) error {
+func (sdb *scanDB) logAndMaintain(ctx context.Context, start, stop time.Time, detail []byte) error {
 	if err := sdb.db.Log(ctx, start, stop, detail); err != nil {
 		return err
 	}
-	if ctx.Err() == nil {
-		compacted := false
-		if sdb.compactInterval != 0 && !sdb.lastWritten.IsZero() && time.Since(sdb.lastWritten) > sdb.compactInterval {
-			if c, ok := sdb.db.(compactor); ok {
-				Log(ctx, LogProgress, "compacting database", "interval", sdb.compactInterval, "last_written", sdb.lastWritten)
-				if err := c.Compact(ctx); err != nil {
-					return err
-				}
-				compacted = true
-			}
-		}
-		if !compacted {
-			if gc, ok := sdb.db.(valueLogGCRunner); ok {
-				if err := gc.RunValueLogGC(0.5); err != nil {
-					return err
-				}
-			}
+	if ctx.Err() != nil {
+		return nil
+	}
+	if sdb.compactInterval != 0 && !sdb.lastWritten.IsZero() && time.Since(sdb.lastWritten) > sdb.compactInterval {
+		if c, ok := sdb.db.(compactor); ok {
+			Log(ctx, LogProgress, "compacting database", "interval", sdb.compactInterval, "last_written", sdb.lastWritten)
+			return c.Compact(ctx)
 		}
 	}
-	if err := sdb.db.Close(ctx); err != nil {
-		return err
+	if gc, ok := sdb.db.(valueLogGCRunner); ok {
+		return gc.RunValueLogGC(0.5)
 	}
 	return nil
+}
+
+func (sdb *scanDB) LogAndClose(ctx context.Context, start, stop time.Time, detail []byte) error {
+	opErr := sdb.logAndMaintain(ctx, start, stop, detail)
+	closeErr := sdb.db.Close(ctx)
+	return errors.Join(opErr, closeErr)
 }
 
 // childPrefix returns the key prefix shared by all of the descendants
