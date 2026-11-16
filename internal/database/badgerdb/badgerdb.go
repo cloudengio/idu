@@ -76,13 +76,18 @@ type Database struct {
 // to the key.
 
 const (
-	inodeBucket   = 0xf0
-	prefixBucket  = 0xf1
-	logBucket     = 0xf2
-	errorBucket   = 0xf3
-	summaryBucket = 0xf4
-	metaBucket    = 0xf5
+	inodeBucket      = 0xf0
+	prefixBucket     = 0xf1
+	logBucket        = 0xf2
+	errorBucket      = 0xf3
+	summaryBucket    = 0xf4
+	metaBucket       = 0xf5
+	logKeyTimeFormat = "2006-01-02T15:04:05.000000000Z"
 )
+
+func logKeyForTime(bucket byte, ts time.Time) *bytes.Buffer {
+	return keyForBucket(bucket, []byte(ts.UTC().Format(logKeyTimeFormat)))
+}
 
 var bufPool = sync.Pool{
 	New: func() any {
@@ -469,9 +474,9 @@ func (db *Database) scanFrom(ctx context.Context, bucket byte, prefix []byte, vi
 }
 
 func (db *Database) scanTimeRange(ctx context.Context, bucket byte, start, stop time.Time, visitor func(ctx context.Context, key string, val []byte) error) error {
-	startKb := keyForBucket(bucket, []byte(start.Format(time.RFC3339)))
+	startKb := logKeyForTime(bucket, start)
 	defer bufPool.Put(startKb)
-	stopKb := keyForBucket(bucket, []byte(stop.Format(time.RFC3339)))
+	stopKb := logKeyForTime(bucket, stop)
 	defer bufPool.Put(stopKb)
 	return db.bdb.View(func(tx *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
@@ -678,7 +683,7 @@ func (db *Database) Log(ctx context.Context, start, stop time.Time, detail []byt
 	if err := types.Encode(&buf, pl); err != nil {
 		return err
 	}
-	kb := keyForBucket(logBucket, []byte(start.Format(time.RFC3339)))
+	kb := logKeyForTime(logBucket, start)
 	defer bufPool.Put(kb)
 	return db.set(ctx, kb.Bytes(), buf.Bytes())
 }

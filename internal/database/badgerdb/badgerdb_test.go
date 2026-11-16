@@ -725,3 +725,94 @@ func TestOpenErrorsAndOptions(t *testing.T) {
 		}
 	})
 }
+
+func collectLogs(t *testing.T, db database.DB, start, stop time.Time) string {
+	t.Helper()
+	var got []byte
+	if err := db.VisitLogs(context.Background(), start, stop, func(_ context.Context, _, _ time.Time, detail []byte) bool {
+		got = append(got, detail...)
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return string(got)
+}
+
+func assertLastLogDetail(t *testing.T, db database.DB, want string) {
+	t.Helper()
+	_, _, last, err := db.LastLog(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(last) != want {
+		t.Errorf("LastLog detail = %q, want %q", last, want)
+	}
+}
+
+func TestLogSubsecondAndTimezoneOrdering(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	t.Run("subsecond entries do not collide", func(t *testing.T) {
+		t.Parallel()
+		db, err := badgerdb.Open(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = db.Close(ctx) }()
+
+		base := time.Date(2025, 3, 9, 12, 0, 0, 0, time.UTC)
+		stamps := []time.Time{
+			base,
+			base.Add(100 * time.Millisecond),
+			base.Add(500 * time.Millisecond),
+			base.Add(500*time.Millisecond + time.Nanosecond),
+		}
+		for i, ts := range stamps {
+			if err := db.Log(ctx, ts, ts.Add(time.Millisecond), []byte{byte('0' + i)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		if got := collectLogs(t, db, time.Time{}, base.Add(time.Second)); got != "0123" {
+			t.Errorf("VisitLogs subsecond = %q, want %q", got, "0123")
+		}
+		if got := collectLogs(t, db, base, base.Add(200*time.Millisecond)); got != "01" {
+			t.Errorf("VisitLogs bounded subsecond = %q, want %q", got, "01")
+		}
+		assertLastLogDetail(t, db, "3")
+	})
+
+	t.Run("mixed timezones sort chronologically", func(t *testing.T) {
+		t.Parallel()
+		db, err := badgerdb.Open(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = db.Close(ctx) }()
+
+		tzMinus8 := time.FixedZone("PST", -8*3600)
+		tzMinus7 := time.FixedZone("PDT", -7*3600)
+		tzPlus2 := time.FixedZone("CEST", 2*3600)
+
+		entries := []struct {
+			ts     time.Time
+			detail string
+		}{
+			{time.Date(2025, 3, 9, 10, 0, 0, 0, time.UTC), "0"}, // 10:00Z
+			{time.Date(2025, 3, 9, 2, 30, 0, 0, tzMinus8), "1"}, // 10:30Z
+			{time.Date(2025, 3, 9, 13, 0, 0, 0, tzPlus2), "2"},  // 11:00Z
+			{time.Date(2025, 3, 9, 4, 30, 0, 0, tzMinus7), "3"}, // 11:30Z
+		}
+		for _, e := range entries {
+			if err := db.Log(ctx, e.ts, e.ts.Add(time.Minute), []byte(e.detail)); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		if got := collectLogs(t, db, entries[0].ts, entries[3].ts); got != "0123" {
+			t.Errorf("VisitLogs mixed tz = %q, want %q", got, "0123")
+		}
+		assertLastLogDetail(t, db, "3")
+	})
+}
