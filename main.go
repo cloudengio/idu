@@ -85,7 +85,8 @@ commands:
       - name: view
         summary: view the statistics stored in a file created using the compute command.
         arguments:
-          - <filename>
+          - <prefix-or-filename>
+          - ...
 
 
   - name: reports

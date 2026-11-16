@@ -164,6 +164,18 @@ func TestConfigSubcommandsAndUnits(t *testing.T) {
 	}
 }
 
+func assertStatsViewOutput(t *testing.T, env []string, wantPrefix string, extraArgs ...string) {
+	t.Helper()
+	args := append([]string{"stats", "view", "--info"}, extraArgs...)
+	out, err := runIDUEnv(env, args...)
+	if err != nil {
+		t.Fatalf("stats view %v failed: %v\n%s", extraArgs, err, out)
+	}
+	if !strings.Contains(out, "Prefix     : "+wantPrefix) {
+		t.Fatalf("stats view %v unexpected output:\n%s", extraArgs, out)
+	}
+}
+
 func TestConfigFallbackAndCLIFlowByName(t *testing.T) {
 	home := t.TempDir()
 	confDir := filepath.Join(home, ".config", "idu")
@@ -225,6 +237,13 @@ func TestConfigFallbackAndCLIFlowByName(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(overrideStatsDir, "latest.idustats")); err != nil {
 		t.Fatalf("expected latest.idustats in --stats-dir override %s: %v", overrideStatsDir, err)
+	}
+
+	assertStatsViewOutput(t, env, treeDir, "mytree")
+	assertStatsViewOutput(t, env, treeDir, treeDir)
+	assertStatsViewOutput(t, env, treeDir, "--stats-dir="+overrideStatsDir, "mytree")
+	if targetFile, err := os.Readlink(filepath.Join(statsDir, "latest.idustats")); err == nil {
+		assertStatsViewOutput(t, env, treeDir, "mytree", filepath.Base(targetFile))
 	}
 }
 
