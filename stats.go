@@ -148,6 +148,7 @@ func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *comput
 		stats.WithFilewalkFS(fwfs),
 		stats.WithHardlinkHandling(!cfg.CountHardlinkAsFiles))
 	if err != nil {
+		rdb.Close(ctx)
 		return err
 	}
 

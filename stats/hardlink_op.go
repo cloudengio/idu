@@ -6,6 +6,7 @@ package stats
 
 import (
 	"context"
+	"fmt"
 
 	"cloudeng.io/cmdutil/boolexpr"
 	"cloudeng.io/file"
@@ -13,6 +14,9 @@ import (
 )
 
 func prepare(ctx context.Context, name string, fs file.FS) (file.XAttr, error) {
+	if fs == nil {
+		return file.XAttr{}, fmt.Errorf("hardlink operand requires a non-nil filesystem")
+	}
 	f, err := fs.Open(name)
 	if err != nil {
 		return file.XAttr{}, err

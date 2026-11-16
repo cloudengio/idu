@@ -27,9 +27,13 @@ type OperandFactory func(name, value string) boolexpr.Operand
 // ParserOption represents an option to NewParser.
 type ParserOption func(o *parserOptions)
 
+type customOperand struct {
+	name    string
+	factory OperandFactory
+}
+
 type parserOptions struct {
-	names     []string
-	factories []OperandFactory
+	operands []customOperand
 }
 
 // WithOperand registers an additional operand with the parser created by
@@ -39,8 +43,7 @@ type parserOptions struct {
 // false for any other type.
 func WithOperand(name string, factory OperandFactory) ParserOption {
 	return func(o *parserOptions) {
-		o.names = append(o.names, name)
-		o.factories = append(o.factories, factory)
+		o.operands = append(o.operands, customOperand{name: name, factory: factory})
 	}
 }
 
@@ -69,8 +72,8 @@ func NewParser(ctx context.Context, fs filewalk.FS, opts ...ParserOption) *boole
 	parser.RegisterOperand("hardlink", func(n, v string) boolexpr.Operand {
 		return newHardlink(ctx, n, v, fs)
 	})
-	for i, name := range o.names {
-		parser.RegisterOperand(name, o.factories[i])
+	for _, op := range o.operands {
+		parser.RegisterOperand(op.name, op.factory)
 	}
 	return parser
 }
@@ -143,9 +146,12 @@ func NewMatcher(parser *boolexpr.Parser, opts ...MatcherOption) (Matcher, error)
 	if len(input) == 0 {
 		return m, nil
 	}
+	if parser == nil {
+		return Matcher{}, fmt.Errorf("failed to parse expression: %v: nil parser", input)
+	}
 	expr, err := parser.Parse(input)
 	if err != nil {
-		return Matcher{}, fmt.Errorf("failed to parse expression: %v: %v", input, err)
+		return Matcher{}, fmt.Errorf("failed to parse expression: %v: %w", input, err)
 	}
 	m.expr = expr
 	return m, nil
@@ -196,9 +202,9 @@ func (m Matcher) Entry(prefix string, pi *prefixinfo.T, fi file.Info) bool {
 }
 
 func (m Matcher) String() string {
-	ph := "[hardlink handling disabled]:"
+	ph := "[hardlink handling disabled]"
 	if m.hl != nil {
-		ph = "[hardlink handling enabled]:"
+		ph = "[hardlink handling enabled]"
 	}
 	return fmt.Sprintf("%v: %v (default: %v)", ph, m.expr.String(), m.emptyValue)
 }

@@ -20,19 +20,19 @@ import (
 func NewParser(ctx context.Context, fs filewalk.FS) *boolexpr.Parser {
 	return stats.NewParser(ctx, fs,
 		stats.WithOperand("user", func(n, v string) boolexpr.Operand {
-			return matcher.NewUser(n, v, func(string) (file.XAttr, error) {
-				id, err := strconv.ParseInt(v, 10, 64)
+			return matcher.NewUser(n, v, func(text string) (file.XAttr, error) {
+				id, err := strconv.ParseInt(text, 10, 64)
 				if err != nil {
-					return file.XAttr{UID: -1, User: v}, nil
+					return file.XAttr{UID: -1, User: text}, nil
 				}
 				return file.XAttr{UID: id}, nil
 			})
 		}),
 		stats.WithOperand("group", func(n, v string) boolexpr.Operand {
-			return matcher.NewGroup(n, v, func(string) (file.XAttr, error) {
-				id, err := strconv.ParseInt(v, 10, 64)
+			return matcher.NewGroup(n, v, func(text string) (file.XAttr, error) {
+				id, err := strconv.ParseInt(text, 10, 64)
 				if err != nil {
-					return file.XAttr{GID: -1, Group: v}, nil
+					return file.XAttr{GID: -1, Group: text}, nil
 				}
 				return file.XAttr{GID: id}, nil
 			})

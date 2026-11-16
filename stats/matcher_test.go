@@ -57,7 +57,7 @@ func TestAlwaysMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	if mFalse.Prefix("/root/sub", &pi) || mFalse.Entry("/root/sub", &pi, f1) {
-		t.Error("expected false when WithEmptyEntryValue(false)")
+		t.Error("expected false when WithEmptyValue(false)")
 	}
 }
 
@@ -95,7 +95,7 @@ func TestMatcherEntryOperands(t *testing.T) {
 				stats.WithFilewalkFS(lfs),
 				stats.WithExpression(tc.expr))
 			if err != nil {
-				t.Fatalf("CreateMatcher(%q): %v", tc.expr, err)
+				t.Fatalf("NewMatcher(%q): %v", tc.expr, err)
 			}
 			if !m.HasExpression() {
 				t.Error("expected HasExpression() == true")
@@ -130,7 +130,7 @@ func TestMatcherPrefixOperands(t *testing.T) {
 				stats.WithFilewalkFS(lfs),
 				stats.WithExpression(tc.expr))
 			if err != nil {
-				t.Fatalf("CreateMatcher(%q): %v", tc.expr, err)
+				t.Fatalf("NewMatcher(%q): %v", tc.expr, err)
 			}
 			if got := m.Prefix("/root/sub", &pi); got != tc.want {
 				t.Errorf("Prefix(%q) = %v, want %v", tc.expr, got, tc.want)
@@ -149,7 +149,7 @@ func TestMatcherHardlinkAndNewParser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s := m.String(); !strings.Contains(s, "hardlink handling enabled") {
+	if s := m.String(); !strings.Contains(s, "hardlink handling enabled") || strings.Contains(s, "::") {
 		t.Errorf("unexpected String(): %q", s)
 	}
 	x := file.XAttr{Device: 1, FileID: 101}
@@ -162,6 +162,12 @@ func TestMatcherHardlinkAndNewParser(t *testing.T) {
 	if _, err := stats.NewMatcher(p, stats.WithExpression("invalid_op=1")); err == nil {
 		t.Error("expected parse error for unknown operand")
 	}
+	if _, err := stats.NewMatcher(nil, stats.WithExpression("name=alpha")); err == nil {
+		t.Error("expected parse error for nil parser with non-empty expression")
+	}
+	if _, err := stats.NewMatcher(stats.NewParser(ctx, nil), stats.WithExpression("hardlink=missing")); err == nil {
+		t.Error("expected parse error for hardlink operand with nil filesystem")
+	}
 
 	cur, err := user.Current()
 	if err != nil {
@@ -169,7 +175,7 @@ func TestMatcherHardlinkAndNewParser(t *testing.T) {
 	}
 	realParser := stats.NewParser(ctx, lfs)
 	if _, err := stats.NewMatcher(realParser, stats.WithExpression(fmt.Sprintf("user='%s'", cur.Username))); err != nil {
-		t.Errorf("CreateMatcher(user=%s): %v", cur.Username, err)
+		t.Errorf("NewMatcher(user=%s): %v", cur.Username, err)
 	}
 }
 
