@@ -335,6 +335,9 @@ func (db *Database) GetMeta(ctx context.Context, key string, buf *bytes.Buffer) 
 func (db *Database) batchSet(key, val []byte) error {
 	db.batchMu.RLock()
 	defer db.batchMu.RUnlock()
+	if db.batch == nil {
+		return badger.ErrDBClosed
+	}
 	return db.batch.set(key, val)
 }
 
@@ -346,14 +349,19 @@ func (db *Database) Flush(ctx context.Context) error {
 	}
 	db.batchMu.Lock()
 	defer db.batchMu.Unlock()
-	if db.batch == nil {
+	if db.ReadOnly {
 		return nil
 	}
-	if err := db.batch.flush(); err != nil {
-		return err
+	if db.batch == nil {
+		return badger.ErrDBClosed
 	}
-	db.batch = newWriteBatch(db.bdb)
-	return nil
+	err := db.batch.flush()
+	if db.bdb != nil && !db.bdb.IsClosed() {
+		db.batch = newWriteBatch(db.bdb)
+	} else {
+		db.batch = nil
+	}
+	return err
 }
 
 func (db *Database) DeletePrefix(ctx context.Context, prefix string) error {
@@ -720,6 +728,7 @@ func (db *Database) Close(_ context.Context) error {
 		db.batchMu.Lock()
 		if db.batch != nil {
 			errs.Append(db.batch.flush())
+			db.batch = nil
 		}
 		db.batchMu.Unlock()
 		if db.bdb != nil {
