@@ -267,7 +267,7 @@ func testAnalyze(ctx context.Context, t *testing.T) {
 	scanned, summary := verifyDB(ctx, t, cfg, fs, arg0, scannable)
 	nDirs, nFiles := numDirsAndFiles(scanned)
 
-	compareSummary(t, summary, nDirs, nFiles, 0, 0, 0, nDirs+nFiles)
+	compareSummary(t, summary, nDirs, nFiles, 0, 0, 0, nDirs+nFiles-1)
 
 	if got, want := summary.Files+summary.PrefixesFinished, int64(len(scanned)); got < want {
 		t.Errorf("unexpected number of prefixes+files: %v, %v", got, want)
@@ -290,7 +290,7 @@ func testAnalyze(ctx context.Context, t *testing.T) {
 		nDirs,
 		nDirs,
 		0,
-		nDirs)
+		nDirs-1)
 
 	// Run again, pick up new files and directories.
 	if err := tt.createAdditional(3, 2, 1); err != nil {
@@ -321,7 +321,7 @@ func testAnalyze(ctx context.Context, t *testing.T) {
 		nDirs-nAddedDirs,
 		nDirs-nAddedDirs-1, // one of the subdirectories has changed.
 		0,
-		nDirs+nAddedDirs+nAddedFiles)
+		nDirs+nAddedDirs+nAddedFiles-1)
 
 	// Run again, make sure deletions are detected.
 	if err := tt.deletionAdditonal(); err != nil {
@@ -342,7 +342,7 @@ func testAnalyze(ctx context.Context, t *testing.T) {
 		nDirs-nAddedDirs,
 		nDirs-nAddedDirs-1, // one of the subdirectories has changed.
 		nAddedDirs,
-		nDirs)
+		nDirs-1)
 }
 
 func TestAnalyzeByName(t *testing.T) {
@@ -860,4 +860,99 @@ func TestAnalyzeLevelScannerErrorPreservesSubtree(t *testing.T) {
 		t.Fatalf("analyzeFS: %v", err)
 	}
 	assertSubtreePreserved(t, cfg, root, sub)
+}
+
+func setupExclusionTree(t *testing.T) (root, ignoredDir, dbDir string) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	root = filepath.Join(tmpDir, "root")
+	sub := filepath.Join(root, "sub")
+	ignoredDir = filepath.Join(root, "ignored_dir")
+	for _, d := range []string{sub, ignoredDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, f := range []string{
+		filepath.Join(root, "keep.txt"),
+		filepath.Join(root, "skip.tmp"),
+		filepath.Join(sub, "nested.txt"),
+		filepath.Join(ignoredDir, "inside.txt"),
+	} {
+		if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root, ignoredDir, filepath.Join(tmpDir, "db")
+}
+
+func assertRootInfoAndAbsent(ctx context.Context, t *testing.T, cfg config.T, root, ignoredDir string, wantFiles int64, wantNames []string) {
+	t.Helper()
+	_, _, _, db, err := internal.OpenPrefixAndDatabase(ctx, cfg, root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close(ctx) }()
+
+	_, _, sum := getLastLog(ctx, t, db)
+	if sum.Files != wantFiles {
+		t.Errorf("Files = %d, want %d", sum.Files, wantFiles)
+	}
+
+	var buf bytes.Buffer
+	if err := db.Get(ctx, root, &buf); err != nil {
+		t.Fatal(err)
+	}
+	var rootPI prefixinfo.T
+	if err := rootPI.UnmarshalBinary(buf.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, fi := range rootPI.InfoList() {
+		names = append(names, fi.Name())
+	}
+	sort.Strings(names)
+	if !slices.Equal(names, wantNames) {
+		t.Errorf("root InfoList names = %v, want %v", names, wantNames)
+	}
+
+	buf.Reset()
+	if err := db.Get(ctx, ignoredDir, &buf); err != nil || buf.Len() != 0 {
+		t.Errorf("expected ignored_dir absent from DB, got (%d bytes, %v)", buf.Len(), err)
+	}
+}
+
+func TestAnalyzeExclusions(t *testing.T) {
+	ctx := context.Background()
+	root, ignoredDir, dbDir := setupExclusionTree(t)
+
+	cfgText := fmt.Sprintf(`filesystems:
+  - name: tree
+    prefix: %s
+    database: %s
+    exclusions:
+      - '\.tmp$'
+      - 'ignored_dir'
+`, root, dbDir)
+	cfg, err := config.ParseConfig([]byte(cfgText))
+	if err != nil {
+		t.Fatal(err)
+	}
+	origCfg := globalConfig
+	globalConfig = cfg
+	t.Cleanup(func() { globalConfig = origCfg })
+	setTempLogDir(t)
+
+	alz := &analyzeCmd{}
+	lfs := localfs.New()
+	if err := alz.analyzeFS(ctx, lfs, &analyzeFlags{}, []string{root}); err != nil {
+		t.Fatalf("analyzeFS: %v", err)
+	}
+	assertRootInfoAndAbsent(ctx, t, cfg, root, ignoredDir, 2, []string{"keep.txt", "sub"})
+
+	// Re-run with unchanged parent: excluded files must still not be counted.
+	if err := alz.analyzeFS(ctx, lfs, &analyzeFlags{}, []string{root}); err != nil {
+		t.Fatalf("second analyzeFS: %v", err)
+	}
+	assertRootInfoAndAbsent(ctx, t, cfg, root, ignoredDir, 2, []string{"keep.txt", "sub"})
 }

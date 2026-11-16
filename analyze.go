@@ -332,17 +332,20 @@ func (w *walker) Contents(ctx context.Context, state *prefixState, prefix string
 			"duration", sinceLast.String())
 		w.pt.incSlowScans()
 	}
-	toStat := contents
-	if state.parentUnchanged {
-		// Need to traverse sub-directories even if the parent is unchanged.
-		toStat = make([]filewalk.Entry, 0, len(contents))
-		for _, entry := range contents {
-			if !entry.IsDir() {
-				state.nfiles++
-				continue
-			}
-			toStat = append(toStat, entry)
+	toStat := make([]filewalk.Entry, 0, len(contents))
+	for _, entry := range contents {
+		path := w.fs.Join(prefix, entry.Name)
+		if w.cfg.Exclude(path) {
+			internal.Log(ctx, internal.LogPrefix, "entry exclusion",
+				"prefix", w.cfg.Prefix,
+				"path", path)
+			continue
 		}
+		if state.parentUnchanged && !entry.IsDir() {
+			state.nfiles++
+			continue
+		}
+		toStat = append(toStat, entry)
 	}
 	children, all, err := w.processStats(ctx, prefix, toStat)
 	if err != nil {
