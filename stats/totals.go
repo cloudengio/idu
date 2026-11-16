@@ -8,7 +8,6 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/file/diskusage"
 )
@@ -198,7 +197,7 @@ const verbose = false
 //  2. SubPrefixes is the number of prefixes this prefix contains
 //  3. The size of this prefix is included in the totals for the prefix, but
 //     the sizes of prefixes it contains are not.
-func ComputeTotals(prefix string, pi *prefixinfo.T, du diskusage.Calculator, match boolexpr.Matcher) (totals Totals, perUser, perGroup PerIDTotals) {
+func ComputeTotals(prefix string, pi *prefixinfo.T, du diskusage.Calculator, match Matcher) (totals Totals, perUser, perGroup PerIDTotals) {
 	if !match.Prefix(prefix, pi) {
 		return
 	}

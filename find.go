@@ -11,8 +11,8 @@ import (
 	"strings"
 
 	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
+	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/cmdutil/flags"
 	"cloudeng.io/errors"
 	"cloudeng.io/file"
@@ -79,20 +79,20 @@ func subtreeMatch(key, target, sep string) (match, stop bool) {
 
 func (fc *findCmds) findFS(ctx context.Context, fwfs filewalk.FS, ff *findFlags, args []string) error {
 
-	parser := boolexpr.NewParser(ctx, fwfs)
+	parser := stats.NewParser(ctx, fwfs)
 
-	prefixMatch, err := boolexpr.CreateMatcher(parser,
-		boolexpr.WithEmptyEntryValue(true),
-		boolexpr.WithFilewalkFS(fwfs),
-		boolexpr.WithEntryExpression(ff.Prefix.Values...))
+	prefixMatch, err := stats.NewMatcher(parser,
+		stats.WithEmptyValue(true),
+		stats.WithFilewalkFS(fwfs),
+		stats.WithExpression(ff.Prefix.Values...))
 	if err != nil {
 		return err
 	}
 
-	match, err := boolexpr.CreateMatcher(parser,
-		boolexpr.WithEmptyEntryValue(true),
-		boolexpr.WithFilewalkFS(fwfs),
-		boolexpr.WithEntryExpression(args[1:]...))
+	match, err := stats.NewMatcher(parser,
+		stats.WithEmptyValue(true),
+		stats.WithFilewalkFS(fwfs),
+		stats.WithExpression(args[1:]...))
 	if err != nil {
 		return err
 	}

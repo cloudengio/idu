@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"strings"
 
-	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/hardlinks"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/file/diskusage"
@@ -90,7 +89,7 @@ type FileEntry struct {
 // If hardlinkInfo is true the summary records the information required
 // for hardlinks to be deduplicated by ApplyHardlinks. match should not
 // perform hardlink handling itself.
-func ComputeSummary(prefix string, pi *prefixinfo.T, du diskusage.Calculator, match boolexpr.Matcher, hardlinkInfo bool) PrefixSummary {
+func ComputeSummary(prefix string, pi *prefixinfo.T, du diskusage.Calculator, match Matcher, hardlinkInfo bool) PrefixSummary {
 	direct, users, groups := ComputeTotals(prefix, pi, du, match)
 	calcID := ""
 	if du != nil {
@@ -111,7 +110,7 @@ func ComputeSummary(prefix string, pi *prefixinfo.T, du diskusage.Calculator, ma
 }
 
 // computeFileEntries returns the files counted by ComputeTotals.
-func computeFileEntries(prefix string, pi *prefixinfo.T, du diskusage.Calculator, match boolexpr.Matcher) []FileEntry {
+func computeFileEntries(prefix string, pi *prefixinfo.T, du diskusage.Calculator, match Matcher) []FileEntry {
 	if !match.Prefix(prefix, pi) {
 		return nil
 	}

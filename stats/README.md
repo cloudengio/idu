@@ -28,7 +28,7 @@ that derive the number of blocks from the file's size.
 ## Functions
 ### Func ComputeTotals
 ```go
-func ComputeTotals(prefix string, pi *prefixinfo.T, du diskusage.Calculator, match boolexpr.Matcher) (totals Totals, perUser, perGroup PerIDTotals)
+func ComputeTotals(prefix string, pi *prefixinfo.T, du diskusage.Calculator, match Matcher) (totals Totals, perUser, perGroup PerIDTotals)
 ```
 ComputeTotals computes the totals for the prefix itself and any
 non-directory contents. Hardlinks are handled as per match.IsHardlink.
@@ -43,6 +43,16 @@ Note that:
 func DecodeSummaryKey(sep, key string) string
 ```
 DecodeSummaryKey reverses SummaryKeys back to a filesystem path.
+
+### Func NewParser
+```go
+func NewParser(ctx context.Context, fs filewalk.FS, opts ...ParserOption) *boolexpr.Parser
+```
+NewParser returns a parser for expressions that can be used with NewMatcher.
+It supports all of the operands provided by cloudeng.io/file/matcher as
+well as user and group operands that accept user/group names or IDs,
+and a hardlink operand that uses fs to determine the file referred to.
+Additional operands may be registered using WithOperand.
 
 ### Func SparseBytes
 ```go
@@ -78,6 +88,227 @@ type FileEntry struct {
 ```
 FileEntry records the contribution of a file to the totals of the prefix
 that contains it.
+
+
+### Type MatchEntry
+```go
+type MatchEntry struct {
+	// contains filtered or unexported fields
+}
+```
+MatchEntry is the value that expressions are evaluated against for each
+entry (file or directory) within a prefix.
+
+### Methods
+
+```go
+func (e MatchEntry) Info() file.Info
+```
+Info returns the file.Info for the entry.
+
+
+```go
+func (e MatchEntry) ModTime() time.Time
+```
+ModTime returns the modification time of the entry.
+
+
+```go
+func (e MatchEntry) Mode() fs.FileMode
+```
+Mode returns the mode of the entry.
+
+
+```go
+func (e MatchEntry) Name() string
+```
+Name returns the name of the entry within its prefix.
+
+
+```go
+func (e MatchEntry) Path() string
+```
+Path returns the full path name of the entry.
+
+
+```go
+func (e MatchEntry) Size() int64
+```
+Size returns the size of the entry in bytes.
+
+
+```go
+func (e MatchEntry) Type() fs.FileMode
+```
+Type returns the type bits of the entry.
+
+
+```go
+func (e MatchEntry) XAttr() file.XAttr
+```
+XAttr returns the extended attributes (e.g. user and group) for the entry.
+
+
+
+
+### Type MatchPrefix
+```go
+type MatchPrefix struct {
+	*prefixinfo.T
+	// contains filtered or unexported fields
+}
+```
+MatchPrefix is the value that expressions are evaluated against for each
+prefix (directory).
+
+### Methods
+
+```go
+func (p MatchPrefix) Name() string
+```
+Name returns the base name of the prefix.
+
+
+```go
+func (p MatchPrefix) NumEntries() int64
+```
+NumEntries returns the number of entries in the prefix.
+
+
+```go
+func (p MatchPrefix) Path() string
+```
+Path returns the full path name of the prefix.
+
+
+
+
+### Type Matcher
+```go
+type Matcher struct {
+	// contains filtered or unexported fields
+}
+```
+Matcher evaluates a boolean expression against prefixes and the entries
+within them.
+
+### Functions
+
+```go
+func AlwaysMatch() Matcher
+```
+AlwaysMatch returns a Matcher that matches all prefixes and entries.
+
+
+```go
+func NewMatcher(parser *boolexpr.Parser, opts ...MatcherOption) (Matcher, error)
+```
+NewMatcher returns a Matcher for the expression specified via
+WithExpression, parsed using parser. The parser may be nil if no expression
+is specified.
+
+
+
+### Methods
+
+```go
+func (m Matcher) Entry(prefix string, pi *prefixinfo.T, fi file.Info) bool
+```
+Entry evaluates the expression against the entry fi within prefix.
+
+
+```go
+func (m Matcher) HasExpression() bool
+```
+HasExpression reports whether an expression was specified.
+
+
+```go
+func (m Matcher) IsHardlink(xattr file.XAttr) bool
+```
+IsHardlink returns true if hardlink handling is enabled and the file
+identified by xattr has been seen before.
+
+
+```go
+func (m Matcher) Prefix(prefix string, pi *prefixinfo.T) bool
+```
+Prefix evaluates the expression against prefix.
+
+
+```go
+func (m Matcher) String() string
+```
+
+
+
+
+### Type MatcherOption
+```go
+type MatcherOption func(o *matcherOptions)
+```
+MatcherOption represents an option to NewMatcher.
+
+### Functions
+
+```go
+func WithEmptyValue(v bool) MatcherOption
+```
+WithEmptyValue specifies the value to be returned when no expression is
+specified.
+
+
+```go
+func WithExpression(expr ...string) MatcherOption
+```
+WithExpression specifies the expression to be evaluated. Multiple arguments
+are joined using spaces.
+
+
+```go
+func WithFilewalkFS(fs filewalk.FS) MatcherOption
+```
+WithFilewalkFS specifies the filesystem used to construct the names and
+paths of prefixes and entries.
+
+
+```go
+func WithHardlinkHandling(v bool) MatcherOption
+```
+WithHardlinkHandling enables incremental detection of hardlinks so as to
+avoid counting the second and subsequent file system entries that represent
+the same file. With this option enabled, IsHardlink will return true for any
+file that has already been seen (based on its device and inode numbers).
+
+
+
+
+### Type OperandFactory
+```go
+type OperandFactory func(name, value string) boolexpr.Operand
+```
+OperandFactory creates an operand for use in an expression, see
+boolexpr.Parser.RegisterOperand.
+
+
+### Type ParserOption
+```go
+type ParserOption func(o *parserOptions)
+```
+ParserOption represents an option to NewParser.
+
+### Functions
+
+```go
+func WithOperand(name string, factory OperandFactory) ParserOption
+```
+WithOperand registers an additional operand with the parser created by
+NewParser. It may also be used to replace one of the default operands by
+specifying the same name. The value passed to the operand's Eval method will
+be either a MatchPrefix or a MatchEntry and operands should return false for
+any other type.
+
+
 
 
 ### Type PerIDTotals
@@ -136,7 +367,7 @@ single prefix along with the calculator identifier used for StorageBytes.
 ### Functions
 
 ```go
-func ComputeSummary(prefix string, pi *prefixinfo.T, du diskusage.Calculator, match boolexpr.Matcher, hardlinkInfo bool) PrefixSummary
+func ComputeSummary(prefix string, pi *prefixinfo.T, du diskusage.Calculator, match Matcher, hardlinkInfo bool) PrefixSummary
 ```
 ComputeSummary computes a PrefixSummary for a single directory/prefix.
 If hardlinkInfo is true the summary records the information required for

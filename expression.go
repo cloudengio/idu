@@ -9,14 +9,14 @@ import (
 	"fmt"
 	"strings"
 
-	"cloudeng.io/cmd/idu/internal/boolexpr"
+	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/text/linewrap"
 )
 
 type exprCmd struct{}
 
 func (ec *exprCmd) explain(ctx context.Context, _ interface{}, _ []string) error {
-	p := boolexpr.NewParser(ctx, nil)
+	p := stats.NewParser(ctx, nil)
 	var out strings.Builder
 	out.WriteString("idu commands accept boolean expressions using || && ! and ( and ) to combine any of the following operands:\n\n")
 
@@ -40,7 +40,7 @@ levels must be specified, i.e. 'name=/*/*/baz' is required to match
 `)
 
 	out.WriteString(`
-The expression may span multiple arguments which are concatenated together using spaces. Operand values may be quoted using single quotes or may contain escaped characters using. For example re='a b.pdf' or re=a\\ b.pdf\n
+The expression may span multiple arguments which are concatenated together using spaces. Operand values may be quoted using single quotes (no escapes are interpreted), double quotes (\ escapes are interpreted) or may contain characters escaped using \. For example re='a b.pdf', re="a b.pdf" or re=a\ b.pdf. The ! operator has the highest precedence, followed by && and then ||.
 `)
 
 	fmt.Println(linewrap.Block(4, 80, out.String()))

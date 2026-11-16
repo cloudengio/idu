@@ -2,7 +2,7 @@
 // Use of this source code is governed by the Apache-2.0
 // license that can be found in the LICENSE file.
 
-package boolexpr_test
+package stats_test
 
 import (
 	"context"
@@ -13,17 +13,18 @@ import (
 	"testing"
 	"time"
 
-	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
+	"cloudeng.io/cmd/idu/internal/testutil"
+	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/file"
 	"cloudeng.io/file/filewalk"
 	"cloudeng.io/file/localfs"
 )
 
-func createMatcher(t *testing.T, fs filewalk.FS, expr string) boolexpr.Matcher {
-	parser := boolexpr.NewParserTests(context.Background(), fs)
-	matcher, err := boolexpr.CreateMatcher(parser,
-		boolexpr.WithEntryExpression(expr))
+func createMatcher(t *testing.T, fs filewalk.FS, expr string) stats.Matcher {
+	parser := testutil.NewParser(context.Background(), fs)
+	matcher, err := stats.NewMatcher(parser,
+		stats.WithExpression(expr))
 	if err != nil {
 		t.Fatalf("failed to create matcher: %v", err)
 	}

@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/hardlinks"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/stats"
@@ -176,7 +175,7 @@ func TestSparseBytes(t *testing.T) {
 
 func TestComputeTotalsSparse(t *testing.T) {
 	calc := diskusage.NewBlock(512)
-	match := boolexpr.AlwaysMatch(nil)
+	match := stats.AlwaysMatch()
 	pi := newLinkTestPrefix(7, 1,
 		newSparseTestFile("dense", 1<<20, (1<<20)/512, 2, 1),
 		newSparseTestFile("sparse", 1<<30, 8, 3, 1),
@@ -203,7 +202,7 @@ func TestComputeTotalsSparse(t *testing.T) {
 
 func TestComputeSummaryRecordsFiles(t *testing.T) {
 	calc := diskusage.NewIdentity()
-	match := boolexpr.AlwaysMatch(nil)
+	match := stats.AlwaysMatch()
 	pi := newLinkTestPrefix(7, 1,
 		newLinkTestFile("single", 10, 2, 1),
 		newLinkTestFile("linked", 20, 3, 2),
@@ -229,7 +228,7 @@ func TestComputeSummaryRecordsFiles(t *testing.T) {
 
 func TestApplyHardlinks(t *testing.T) {
 	calc := diskusage.NewIdentity()
-	match := boolexpr.AlwaysMatch(nil)
+	match := stats.AlwaysMatch()
 	first := newLinkTestPrefix(7, 1, newLinkTestFile("f", 20, 3, 2), newLinkTestFile("g", 5, 4, 1),
 		newSparseTestFile("s", 1<<30, 8, 7, 2))
 	second := newLinkTestPrefix(7, 2, newLinkTestFile("l", 20, 3, 2), newLinkTestFile("h", 7, 5, 1),
@@ -252,9 +251,9 @@ func TestApplyHardlinks(t *testing.T) {
 	}
 }
 
-func hardlinkMatcher(t *testing.T) boolexpr.Matcher {
+func hardlinkMatcher(t *testing.T) stats.Matcher {
 	t.Helper()
-	m, err := boolexpr.CreateMatcher(nil, boolexpr.WithEmptyEntryValue(true), boolexpr.WithHardlinkHandling(true))
+	m, err := stats.NewMatcher(nil, stats.WithEmptyValue(true), stats.WithHardlinkHandling(true))
 	if err != nil {
 		t.Fatal(err)
 	}
