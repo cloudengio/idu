@@ -245,7 +245,9 @@ func checkDatabaseFormat(ctx context.Context, db database.DB) error {
 // initSummaryMeta returns true if the existing summaries were computed
 // with a specification other than spec and hence need to be rewritten.
 // OpenDatabase rejects legacy databases, so a missing metadata entry
-// denotes a new, empty, database.
+// denotes a new, empty, database. When a rewrite is required, the stored
+// specification is invalidated immediately so partial or interrupted scans
+// do not leave mixed summaries marked as valid under the prior spec.
 func initSummaryMeta(ctx context.Context, db database.DB, spec string) (bool, error) {
 	var metaBuf bytes.Buffer
 	if err := db.GetMeta(ctx, metaKeySummaries, &metaBuf); err != nil {
@@ -254,7 +256,15 @@ func initSummaryMeta(ctx context.Context, db database.DB, spec string) (bool, er
 	if metaBuf.Len() == 0 {
 		return false, db.SetMeta(ctx, metaKeySummaries, []byte(spec))
 	}
-	return metaBuf.String() != spec, nil
+	if metaBuf.String() == spec {
+		return false, nil
+	}
+	if metaBuf.String() != invalidSummariesSpec {
+		if err := db.SetMeta(ctx, metaKeySummaries, []byte(invalidSummariesSpec)); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 // CheckSummaries returns ErrStaleSummaries unless db contains complete
