@@ -203,18 +203,30 @@ func TestLookupPrefixCleanAndNegativeSince(t *testing.T) {
 	t.Run("LookupPrefix cleans trailing slash", func(t *testing.T) {
 		t.Parallel()
 		root := filepath.Join(t.TempDir(), "tree")
-		cfg, err := config.ParseConfig([]byte("filesystems:\n  - name: mytree\n    prefix: " + root + string(filepath.Separator) + "\n"))
+		cfg, err := config.ParseConfig([]byte(
+			"filesystems:\n" +
+				"  - name: mytree\n    prefix: " + root + string(filepath.Separator) + "\n" +
+				"  - name: posix\n    prefix: /fs/a\n",
+		))
 		if err != nil {
 			t.Fatal(err)
 		}
 		sub := filepath.Join(root, "sub")
-		for _, in := range []string{sub + string(filepath.Separator), "mytree"} {
-			_, _, target, err := internal.LookupPrefix(context.Background(), cfg, in)
+		for _, tc := range []struct {
+			in, want string
+		}{
+			{sub + string(filepath.Separator), sub},
+			{"mytree", root},
+			{"/fs/a", "/fs/a"},
+			{"/fs/a/", "/fs/a"},
+			{"posix", "/fs/a"},
+		} {
+			_, _, target, err := internal.LookupPrefix(context.Background(), cfg, tc.in)
 			if err != nil {
-				t.Fatalf("LookupPrefix(%q): %v", in, err)
+				t.Fatalf("LookupPrefix(%q): %v", tc.in, err)
 			}
-			if target != filepath.Clean(target) {
-				t.Errorf("LookupPrefix(%q) target = %q, want cleaned %q", in, target, filepath.Clean(target))
+			if target != tc.want {
+				t.Errorf("LookupPrefix(%q) target = %q, want %q", tc.in, target, tc.want)
 			}
 		}
 	})
