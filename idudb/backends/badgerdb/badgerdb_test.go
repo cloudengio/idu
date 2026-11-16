@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"cloudeng.io/cmd/idu/internal/database"
-	"cloudeng.io/cmd/idu/internal/database/badgerdb"
+	"cloudeng.io/cmd/idu/idudb"
+	"cloudeng.io/cmd/idu/idudb/backends/badgerdb"
 	"github.com/dgraph-io/badger/v4"
 )
 
@@ -32,7 +32,7 @@ func TestBatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bdb := db.(*badgerdb.Database).BadgerDB()
+	bdb := db.BadgerDB()
 	mc := bdb.MaxBatchCount()
 	t.Logf("max batch count: %v", mc)
 	for i := int64(0); i < (mc*2)+3; i++ {
@@ -149,7 +149,7 @@ func TestCompactAndEmptyLastLog(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := db.(*badgerdb.Database).Compact(ctx); err != nil {
+	if err := db.Compact(ctx); err != nil {
 		t.Fatal(err)
 	}
 	// Writes after Compact still succeed before Close.
@@ -166,12 +166,12 @@ func TestCompactAndEmptyLastLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rdb.Close(ctx)
-	if err := rdb.(*badgerdb.Database).Compact(ctx); !errors.Is(err, badger.ErrReadOnlyTxn) {
+	if err := rdb.Compact(ctx); !errors.Is(err, badger.ErrReadOnlyTxn) {
 		t.Fatalf("expected badger.ErrReadOnlyTxn, got %v", err)
 	}
 }
 
-func openTestBadger(t *testing.T, dir string, opts ...badgerdb.Option) database.DB {
+func openTestBadger(t *testing.T, dir string, opts ...badgerdb.Option) idudb.Database {
 	t.Helper()
 	bopts := badger.DefaultOptions(dir).WithLogger(nil)
 	allOpts := append([]badgerdb.Option{badgerdb.WithBadgerOptions(bopts)}, opts...)
@@ -182,7 +182,7 @@ func openTestBadger(t *testing.T, dir string, opts ...badgerdb.Option) database.
 	return db
 }
 
-func seedClearDB(ctx context.Context, t *testing.T, db database.DB, base time.Time) {
+func seedClearDB(ctx context.Context, t *testing.T, db idudb.Database, base time.Time) {
 	t.Helper()
 	if err := db.Set(ctx, "/keep", []byte("val"), false); err != nil {
 		t.Fatal(err)
@@ -201,7 +201,7 @@ func seedClearDB(ctx context.Context, t *testing.T, db database.DB, base time.Ti
 	}
 }
 
-func assertLogAndErrCounts(ctx context.Context, t *testing.T, db database.DB, end time.Time, wantLogs, wantErrs int) {
+func assertLogAndErrCounts(ctx context.Context, t *testing.T, db idudb.Database, end time.Time, wantLogs, wantErrs int) {
 	t.Helper()
 	var logs, errsCount int
 	if err := db.VisitLogs(ctx, time.Time{}, end, func(context.Context, time.Time, time.Time, []byte) bool {
@@ -377,7 +377,7 @@ func TestDeletePrefixMultiBatch(t *testing.T) {
 	}
 	defer db.Close(ctx)
 
-	mc := db.(*badgerdb.Database).BadgerDB().MaxBatchCount()
+	mc := db.BadgerDB().MaxBatchCount()
 	total := int(mc)*2 + 10
 	for i := range total {
 		if err := db.Set(ctx, fmt.Sprintf("/big/%06d", i), []byte("v"), true); err != nil {
@@ -574,7 +574,7 @@ func TestDeleteSummaryAndMutationErrors(t *testing.T) {
 	}
 }
 
-func seedScanVisitDB(ctx context.Context, t *testing.T, base time.Time) database.DB {
+func seedScanVisitDB(ctx context.Context, t *testing.T, base time.Time) idudb.Database {
 	t.Helper()
 	db := openTestBadger(t, t.TempDir())
 	for i := range 10 {
@@ -692,15 +692,6 @@ func TestVisitLogsAndErrorsEdgeCases(t *testing.T) {
 func TestOpenErrorsAndOptions(t *testing.T) {
 	t.Parallel()
 
-	t.Run("WithTimeout option sets Timeout", func(t *testing.T) {
-		t.Parallel()
-		var opts database.Options[badgerdb.Options]
-		badgerdb.WithTimeout(5 * time.Second)(&opts)
-		if opts.Timeout != 5*time.Second {
-			t.Errorf("Timeout = %v, want 5s", opts.Timeout)
-		}
-	})
-
 	t.Run("Open fails on file path", func(t *testing.T) {
 		t.Parallel()
 		f := filepath.Join(t.TempDir(), "notadir")
@@ -789,7 +780,7 @@ func TestOpenWithTimeoutHeldLock(t *testing.T) {
 	}()
 
 	type result struct {
-		db  database.DB
+		db  idudb.Database
 		err error
 	}
 	ch := make(chan result, 1)
@@ -815,7 +806,7 @@ func TestOpenWithTimeoutHeldLock(t *testing.T) {
 	}
 }
 
-func collectLogs(t *testing.T, db database.DB, start, stop time.Time) string {
+func collectLogs(t *testing.T, db idudb.Database, start, stop time.Time) string {
 	t.Helper()
 	var got []byte
 	if err := db.VisitLogs(context.Background(), start, stop, func(_ context.Context, _, _ time.Time, detail []byte) bool {
@@ -827,7 +818,7 @@ func collectLogs(t *testing.T, db database.DB, start, stop time.Time) string {
 	return string(got)
 }
 
-func assertLastLogDetail(t *testing.T, db database.DB, want string) {
+func assertLastLogDetail(t *testing.T, db idudb.Database, want string) {
 	t.Helper()
 	_, _, last, err := db.LastLog(context.Background())
 	if err != nil {
@@ -905,3 +896,5 @@ func TestLogSubsecondAndTimezoneOrdering(t *testing.T) {
 		assertLastLogDetail(t, db, "3")
 	})
 }
+
+var _ idudb.Database = (*badgerdb.Database)(nil)

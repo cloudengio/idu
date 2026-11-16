@@ -1,44 +1,28 @@
-# Package [cloudeng.io/cmd/idu/internal/database/badgerdb](https://pkg.go.dev/cloudeng.io/cmd/idu/internal/database/badgerdb?tab=doc)
+# Package [cloudeng.io/cmd/idu/idudb/backends/badgerdb](https://pkg.go.dev/cloudeng.io/cmd/idu/idudb/backends/badgerdb?tab=doc)
 
 ```go
-import cloudeng.io/cmd/idu/internal/database/badgerdb
+import cloudeng.io/cmd/idu/idudb/backends/badgerdb
 ```
-
-
-## Variables
-### ReadOnly
-```go
-ReadOnly = database.ReadOnly[Options]
-
-```
-
-### WithTimeout
-```go
-WithTimeout = database.WithTimeout[Options]
-
-```
-
-
-
-## Functions
-### Func Open
-```go
-func Open[T Options](location string, opts ...Option) (database.DB, error)
-```
-Open opens the specified database. If the database does not exist it will be
-created.
-
 
 
 ## Types
 ### Type Database
 ```go
 type Database struct {
-	database.Options[Options]
 	// contains filtered or unexported fields
 }
 ```
 Database represents a badger database.
+
+### Functions
+
+```go
+func Open(location string, opts ...Option) (*Database, error)
+```
+Open opens the specified database. If the database does not exist it will be
+created unless opened read-only.
+
+
 
 ### Methods
 
@@ -48,7 +32,7 @@ func (db *Database) BadgerDB() *badger.DB
 
 
 ```go
-func (db *Database) Clear(_ context.Context, logs, errors bool) error
+func (db *Database) Clear(ctx context.Context, logs, errors bool) error
 ```
 
 
@@ -191,11 +175,17 @@ func (db *Database) VisitLogs(ctx context.Context, start, stop time.Time, visito
 
 ### Type Option
 ```go
-type Option func(o *database.Options[Options])
+type Option func(o *options)
 ```
 Option represents a specific option accepted by Open.
 
 ### Functions
+
+```go
+func ReadOnly() Option
+```
+ReadOnly requests that the database is opened in read-only mode.
+
 
 ```go
 func WithBadgerOptions(opts badger.Options) Option
@@ -203,6 +193,12 @@ func WithBadgerOptions(opts badger.Options) Option
 WithBadgerOptions specifies the options to be used when opening the
 database. Note, that it overrides all other badger specific options when
 used.
+
+
+```go
+func WithTimeout(t time.Duration) Option
+```
+WithTimeout requests that the database be opened with the specified timeout.
 
 
 

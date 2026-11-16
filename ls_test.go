@@ -12,14 +12,14 @@ import (
 	"testing"
 	"time"
 
+	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/file/localfs"
 )
 
 func countLogsAndErrors(ctx context.Context, t *testing.T, target string) (int, int) {
 	t.Helper()
-	_, _, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, target, true)
+	_, _, _, db, err := openPrefixReadOnly(ctx, globalConfig, target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestListerLogsAndErrors(t *testing.T) {
 	tmpDir, cfgFile, target, _ := setupAnalyze(t)
 	defer os.RemoveAll(tmpDir)
 
-	cfg, err := config.ReadConfig(cfgFile)
+	cfg, err := iduconfig.ReadConfig(cfgFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func setupSiblingErrorsDB(ctx context.Context, t *testing.T) (targetA, subDir st
 		t.Fatal(err)
 	}
 	cfgText := "filesystems:\n  - name: tree\n    prefix: " + root + "\n    database: " + dbDir + "\n"
-	cfg, err := config.ParseConfig([]byte(cfgText))
+	cfg, err := iduconfig.ParseConfig([]byte(cfgText))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func setupSiblingErrorsDB(ctx context.Context, t *testing.T) (targetA, subDir st
 	t.Cleanup(func() { globalConfig = origCfg })
 	setTempLogDir(t)
 
-	_, _, _, db, err := internal.OpenPrefixAndDatabase(ctx, cfg, root, false)
+	_, _, _, db, err := openPrefixRaw(ctx, cfg, root)
 	if err != nil {
 		t.Fatal(err)
 	}

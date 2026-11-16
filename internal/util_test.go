@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmdutil/flags"
 	"cloudeng.io/file"
@@ -61,7 +61,7 @@ const simple = `filesystems:
 
 func TestPrefixLookup(t *testing.T) {
 	ctx := context.Background()
-	cfg, err := config.ParseConfig([]byte(simple))
+	cfg, err := iduconfig.ParseConfig([]byte(simple))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestPrefixLookupRelative(t *testing.T) {
 
 	for _, tc := range []string{".", "", "./"} {
 		here := "filesystems:\n  - prefix: " + pwd + "\n"
-		cfg, err := config.ParseConfig([]byte(here))
+		cfg, err := iduconfig.ParseConfig([]byte(here))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -187,7 +187,7 @@ func TestTimeRangeEdgesAndErrors(t *testing.T) {
 
 	t.Run("LookupPrefix missing config returns error", func(t *testing.T) {
 		t.Parallel()
-		cfg, err := config.ParseConfig([]byte("filesystems:\n  - name: mytmp\n    prefix: /tmp\n"))
+		cfg, err := iduconfig.ParseConfig([]byte("filesystems:\n  - name: mytmp\n    prefix: /tmp\n"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -203,7 +203,7 @@ func TestLookupPrefixCleanAndNegativeSince(t *testing.T) {
 	t.Run("LookupPrefix cleans trailing slash", func(t *testing.T) {
 		t.Parallel()
 		root := filepath.Join(t.TempDir(), "tree")
-		cfg, err := config.ParseConfig([]byte(
+		cfg, err := iduconfig.ParseConfig([]byte(
 			"filesystems:\n" +
 				"  - name: mytree\n    prefix: " + root + string(filepath.Separator) + "\n" +
 				"  - name: posix\n    prefix: /fs/a\n",

@@ -97,7 +97,7 @@ func (fc *findCmds) findFS(ctx context.Context, fwfs filewalk.FS, ff *findFlags,
 		return err
 	}
 
-	ctx, cfg, target, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
+	ctx, cfg, target, db, err := openPrefixReadOnly(ctx, globalConfig, args[0])
 	if err != nil {
 		return err
 	}

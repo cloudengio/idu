@@ -1,7 +1,7 @@
-# Package [cloudeng.io/cmd/idu/internal/database/types](https://pkg.go.dev/cloudeng.io/cmd/idu/internal/database/types?tab=doc)
+# Package [cloudeng.io/cmd/idu/idudb/backends/badgerdb/internal/types](https://pkg.go.dev/cloudeng.io/cmd/idu/idudb/backends/badgerdb/internal/types?tab=doc)
 
 ```go
-import cloudeng.io/cmd/idu/internal/database/types
+import cloudeng.io/cmd/idu/idudb/backends/badgerdb/internal/types
 ```
 
 

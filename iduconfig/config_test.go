@@ -2,7 +2,7 @@
 // Use of this source code is governed by the Apache-2.0
 // license that can be found in the LICENSE file.
 
-package config_test
+package iduconfig_test
 
 import (
 	"bytes"
@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"cloudeng.io/cmd/idu/internal/config"
+	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmdutil/cmdconfig"
 	"cloudeng.io/file/diskusage"
 )
@@ -51,7 +51,7 @@ filesystems:
 `
 
 func TestSimple(t *testing.T) {
-	cfg, err := config.ParseConfig([]byte(simple))
+	cfg, err := iduconfig.ParseConfig([]byte(simple))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,14 +103,14 @@ filesystems:
 `
 
 func init() {
-	config.DefaultConcurrentStats = 1
-	config.DefaultConcurrentStatsThreshold = 2
-	config.DefaultConcurrentScans = 3
-	config.DefaultScanSize = 4
+	iduconfig.DefaultConcurrentStats = 1
+	iduconfig.DefaultConcurrentStatsThreshold = 2
+	iduconfig.DefaultConcurrentScans = 3
+	iduconfig.DefaultScanSize = 4
 }
 
 func TestDefaults(t *testing.T) {
-	cfg, err := config.ParseConfig([]byte(defaults))
+	cfg, err := iduconfig.ParseConfig([]byte(defaults))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestDefaults(t *testing.T) {
 }
 
 func TestPrefixMatch(t *testing.T) {
-	cfg, err := config.ParseConfig([]byte(simple))
+	cfg, err := iduconfig.ParseConfig([]byte(simple))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ filesystems:
       parameters:
         size: 8192
 `
-	cfg, err := config.ParseConfigSpecs([]byte(shared), []byte(fs1), []byte(fs2))
+	cfg, err := iduconfig.ParseConfigSpecs([]byte(shared), []byte(fs1), []byte(fs2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func TestStrictAndErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := config.ParseConfig([]byte(tc.yaml)); err == nil {
+			if _, err := iduconfig.ParseConfig([]byte(tc.yaml)); err == nil {
 				t.Fatalf("expected error for %s, got nil", tc.name)
 			}
 		})
@@ -325,10 +325,10 @@ func TestLoadConfigYAML(t *testing.T) {
 	// On Windows the configuration search path uses os.UserConfigDir,
 	// i.e. %APPDATA%, rather than $HOME/.config.
 	t.Setenv("APPDATA", filepath.Join(home, ".config"))
-	t.Setenv(config.EnvConfig, "")
-	t.Setenv(config.EnvVars, "")
+	t.Setenv(iduconfig.EnvConfig, "")
+	t.Setenv(iduconfig.EnvVars, "")
 
-	confDir := filepath.Join(home, ".config", config.AppName)
+	confDir := filepath.Join(home, ".config", iduconfig.AppName)
 	if err := os.MkdirAll(confDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ filesystems:
 
 	ctx := context.Background()
 	var ff cmdconfig.FilesFlag
-	cfg, loc, err := config.Load(ctx, &ff)
+	cfg, loc, err := iduconfig.Load(ctx, &ff)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +411,7 @@ filesystems:
   - fs-one.yaml
   - not-present
 `)
-	_, loc, err = config.Load(ctx, &ff)
+	_, loc, err = iduconfig.Load(ctx, &ff)
 	assertErrorContainsAll(t, err, cfgPath, filepath.Join(confDir, "fs-one.yaml"), "not-present")
 	if loc == nil || len(loc.YAML) != 2 {
 		t.Fatalf("expected 2 located YAML files before missing error, got %v", loc)
@@ -426,10 +426,10 @@ func TestLoadConfigOverrides(t *testing.T) {
 	// On Windows the configuration search path uses os.UserConfigDir,
 	// i.e. %APPDATA%, rather than $HOME/.config.
 	t.Setenv("APPDATA", filepath.Join(home, ".config"))
-	t.Setenv(config.EnvConfig, "")
-	t.Setenv(config.EnvVars, "")
+	t.Setenv(iduconfig.EnvConfig, "")
+	t.Setenv(iduconfig.EnvVars, "")
 
-	confDir := filepath.Join(home, ".config", config.AppName)
+	confDir := filepath.Join(home, ".config", iduconfig.AppName)
 	if err := os.MkdirAll(confDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -443,7 +443,7 @@ func TestLoadConfigOverrides(t *testing.T) {
 	write(workDir, "config.yaml", "filesystems:\n  - name: cwd-only\n    prefix: /cwd\n    database: ./cwd-db\n")
 
 	ctx := context.Background()
-	cfg, loc, err := config.Load(ctx, &cmdconfig.FilesFlag{})
+	cfg, loc, err := iduconfig.Load(ctx, &cmdconfig.FilesFlag{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -455,8 +455,8 @@ func TestLoadConfigOverrides(t *testing.T) {
 	}
 
 	// IDU_CONFIG overrides config.yaml discovery.
-	t.Setenv(config.EnvConfig, "fs-one.yaml")
-	cfg, loc, err = config.Load(ctx, &cmdconfig.FilesFlag{})
+	t.Setenv(iduconfig.EnvConfig, "fs-one.yaml")
+	cfg, loc, err = iduconfig.Load(ctx, &cmdconfig.FilesFlag{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -476,10 +476,10 @@ func TestLoadSearchPathFallback(t *testing.T) {
 	// On Windows the configuration search path uses os.UserConfigDir,
 	// i.e. %APPDATA%, rather than $HOME/.config.
 	t.Setenv("APPDATA", filepath.Join(home, ".config"))
-	t.Setenv(config.EnvConfig, "")
-	t.Setenv(config.EnvVars, "")
+	t.Setenv(iduconfig.EnvConfig, "")
+	t.Setenv(iduconfig.EnvVars, "")
 
-	confDir := filepath.Join(home, ".config", config.AppName)
+	confDir := filepath.Join(home, ".config", iduconfig.AppName)
 	if err := os.MkdirAll(confDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -499,7 +499,7 @@ func TestLoadSearchPathFallback(t *testing.T) {
 
 	ctx := context.Background()
 	var ff cmdconfig.FilesFlag
-	cfg, loc, err := config.Load(ctx, &ff)
+	cfg, loc, err := iduconfig.Load(ctx, &ff)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -520,7 +520,7 @@ func TestLoadSearchPathFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("ENV_DB_ROOT", "/env-override")
-	cfg, loc, err = config.Load(ctx, &explicit)
+	cfg, loc, err = iduconfig.Load(ctx, &explicit)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -539,7 +539,7 @@ func TestLoadSearchPathFallback(t *testing.T) {
 }
 
 func TestExampleConfig(t *testing.T) {
-	cfg, err := config.ReadConfig(filepath.Join("..", "..", "example-config.yml"))
+	cfg, err := iduconfig.ReadConfig(filepath.Join("..", "example-config.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -558,7 +558,7 @@ func TestExampleConfig(t *testing.T) {
 }
 
 func TestDocumentation(t *testing.T) {
-	got := config.Documentation()
+	got := iduconfig.Documentation()
 	for _, expected := range []string{
 		"raid0",
 		"filesystems:",
@@ -601,10 +601,10 @@ func TestLoadAndReadConfigErrorsShowFilesRead(t *testing.T) {
 	// On Windows the configuration search path uses os.UserConfigDir,
 	// i.e. %APPDATA%, rather than $HOME/.config.
 	t.Setenv("APPDATA", filepath.Join(home, ".config"))
-	t.Setenv(config.EnvConfig, "")
-	t.Setenv(config.EnvVars, "")
+	t.Setenv(iduconfig.EnvConfig, "")
+	t.Setenv(iduconfig.EnvVars, "")
 
-	confDir := filepath.Join(home, ".config", config.AppName)
+	confDir := filepath.Join(home, ".config", iduconfig.AppName)
 	if err := os.MkdirAll(confDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -624,11 +624,11 @@ func TestLoadAndReadConfigErrorsShowFilesRead(t *testing.T) {
 
 	ctx := context.Background()
 	var ff cmdconfig.FilesFlag
-	_, loc, err := config.Load(ctx, &ff)
+	_, loc, err := iduconfig.Load(ctx, &ff)
 	assertErrorContainsAll(t, err, mainFile, fsA, fsBad, envFile)
 
 	var buf bytes.Buffer
-	config.PrintLocated(&buf, loc)
+	iduconfig.PrintLocated(&buf, loc)
 	for _, want := range []string{
 		"# Configuration file: " + mainFile,
 		"# Configuration file: " + fsA,
@@ -644,27 +644,27 @@ func TestLoadAndReadConfigErrorsShowFilesRead(t *testing.T) {
 	if err := os.WriteFile(fsBad, []byte("filesystems:\n  - name: a\n    prefix: /b\n    database: /db/b\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, loc, err = config.Load(ctx, &ff)
+	_, loc, err = iduconfig.Load(ctx, &ff)
 	if loc == nil {
 		t.Fatalf("expected non-nil Located on validation error")
 	}
 	assertErrorContainsAll(t, err, mainFile, fsA, fsBad)
 
 	// ReadConfig lists all supplied files on error.
-	_, err = config.ReadConfig(fsA, fsBad)
+	_, err = iduconfig.ReadConfig(fsA, fsBad)
 	assertErrorContainsAll(t, err, fsA, fsBad)
 }
 
 func TestPrintLocatedNone(t *testing.T) {
 	var buf bytes.Buffer
-	config.PrintLocated(&buf, &cmdconfig.Located{})
+	iduconfig.PrintLocated(&buf, &cmdconfig.Located{})
 	if !strings.Contains(buf.String(), "# Configuration file: none") {
 		t.Errorf("expected '# Configuration file: none', got %q", buf.String())
 	}
 }
 
 func TestCompactIntervals(t *testing.T) {
-	cfg, err := config.ParseConfig([]byte(`
+	cfg, err := iduconfig.ParseConfig([]byte(`
 filesystems:
   - name: default
     prefix: /default
@@ -700,7 +700,7 @@ filesystems:
 }
 
 func TestHardlinkDedup(t *testing.T) {
-	cfg, err := config.ParseConfig([]byte(`
+	cfg, err := iduconfig.ParseConfig([]byte(`
 filesystems:
   - name: default
     prefix: /default
@@ -715,12 +715,12 @@ filesystems:
 		t.Fatal(err)
 	}
 	for name, want := range map[string]struct {
-		dedup  config.HardlinkDedup
+		dedup  iduconfig.HardlinkDedup
 		record bool
 	}{
-		"default": {config.HardlinkDedupSummaries, true},
-		"rescan":  {config.HardlinkDedupRescan, false},
-		"counted": {config.HardlinkDedupSummaries, false},
+		"default": {iduconfig.HardlinkDedupSummaries, true},
+		"rescan":  {iduconfig.HardlinkDedupRescan, false},
+		"counted": {iduconfig.HardlinkDedupSummaries, false},
 	} {
 		p, _ := cfg.ForName(name)
 		if p.HardlinkDedup != want.dedup || p.RecordHardlinks() != want.record {
@@ -728,7 +728,7 @@ filesystems:
 		}
 	}
 
-	_, err = config.ParseConfig([]byte(`
+	_, err = iduconfig.ParseConfig([]byte(`
 filesystems:
   - prefix: /bad
     hardlink_dedup: sometimes

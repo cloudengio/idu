@@ -2,7 +2,7 @@
 // Use of this source code is governed by the Apache-2.0
 // license that can be found in the LICENSE file.
 
-package internal
+package idudb
 
 import (
 	"bytes"
@@ -10,13 +10,11 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"testing"
-	"testing/synctest"
 	"time"
 
-	"cloudeng.io/cmd/idu/internal/config"
-	"cloudeng.io/cmd/idu/internal/database"
+	"cloudeng.io/cmd/idu/iduconfig"
+	"cloudeng.io/cmd/idu/idudb/backends/badgerdb"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/file"
@@ -24,13 +22,13 @@ import (
 )
 
 type compactSpyDB struct {
-	database.DB
+	Database
 	compacted int
 }
 
 func (s *compactSpyDB) Compact(ctx context.Context) error {
 	s.compacted++
-	if c, ok := s.DB.(compactor); ok {
+	if c, ok := s.Database.(compactor); ok {
 		return c.Compact(ctx)
 	}
 	return nil
@@ -40,12 +38,12 @@ func TestScanDBCompactionInterval(t *testing.T) {
 	ctx := context.Background()
 	origFactory := databaseFactory
 	var latestSpy *compactSpyDB
-	databaseFactory = func(ctx context.Context, cfg config.Prefix, readonly bool) (database.DB, error) {
-		db, err := origFactory(ctx, cfg, readonly)
+	databaseFactory = func(ctx context.Context, path string, readonly bool) (Database, error) {
+		db, err := origFactory(ctx, path, readonly)
 		if err != nil {
 			return nil, err
 		}
-		latestSpy = &compactSpyDB{DB: db}
+		latestSpy = &compactSpyDB{Database: db}
 		return latestSpy, nil
 	}
 	defer func() {
@@ -53,8 +51,7 @@ func TestScanDBCompactionInterval(t *testing.T) {
 	}()
 
 	seedLog := func(dbPath string, when time.Time) {
-		cfg := config.Prefix{Prefix: "/seed", Database: dbPath}
-		db, err := origFactory(ctx, cfg, false)
+		db, err := origFactory(ctx, dbPath, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -67,9 +64,9 @@ func TestScanDBCompactionInterval(t *testing.T) {
 		}
 	}
 
-	runScan := func(cfg config.Prefix) int {
+	runScan := func(cfg iduconfig.Prefix) int {
 		latestSpy = nil
-		sdb, err := NewScanDB(ctx, cfg)
+		sdb, err := newTestDB(ctx, cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -83,20 +80,20 @@ func TestScanDBCompactionInterval(t *testing.T) {
 	// 1. Zero interval: never compacts even with an old write log.
 	dbZero := filepath.Join(t.TempDir(), "db-zero")
 	seedLog(dbZero, time.Now().Add(-10*24*time.Hour))
-	if got := runScan(config.Prefix{Prefix: "/a", Database: dbZero}); got != 0 {
+	if got := runScan(iduconfig.Prefix{Prefix: "/a", Database: dbZero}); got != 0 {
 		t.Fatalf("zero interval: compacted=%d, want 0", got)
 	}
 
 	// 2. Non-zero interval on a new DB with no prior writes: does not compact.
 	dbFresh := filepath.Join(t.TempDir(), "db-fresh")
-	if got := runScan(config.Prefix{Prefix: "/b", Database: dbFresh, CompactInterval: time.Millisecond}); got != 0 {
+	if got := runScan(iduconfig.Prefix{Prefix: "/b", Database: dbFresh, CompactInterval: time.Millisecond}); got != 0 {
 		t.Fatalf("fresh db: compacted=%d, want 0", got)
 	}
 
 	// 3. Recent write within combined interval (1d + 2h = 26h, last write 25h ago): does not compact.
 	dbRecent := filepath.Join(t.TempDir(), "db-recent")
 	seedLog(dbRecent, time.Now().Add(-25*time.Hour))
-	if got := runScan(config.Prefix{
+	if got := runScan(iduconfig.Prefix{
 		Prefix:              "/c",
 		Database:            dbRecent,
 		CompactIntervalDays: 1,
@@ -108,7 +105,7 @@ func TestScanDBCompactionInterval(t *testing.T) {
 	// 4. Stale write beyond combined interval (1d + 2h = 26h, last write 27h ago): compacts.
 	dbStale := filepath.Join(t.TempDir(), "db-stale")
 	seedLog(dbStale, time.Now().Add(-27*time.Hour))
-	if got := runScan(config.Prefix{
+	if got := runScan(iduconfig.Prefix{
 		Prefix:              "/d",
 		Database:            dbStale,
 		CompactIntervalDays: 1,
@@ -127,9 +124,9 @@ func makeTestPrefixInfo(size int64) prefixinfo.T {
 	return pi
 }
 
-func readSummaryKeys(ctx context.Context, t *testing.T, cfg config.Prefix) ([]string, database.DB) {
+func readSummaryKeys(ctx context.Context, t *testing.T, cfg iduconfig.Prefix) ([]string, Database) {
 	t.Helper()
-	rodb, err := OpenDatabase(ctx, cfg, true)
+	rodb, err := openDatabase(ctx, cfg.Database, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,9 +144,9 @@ func readSummaryKeys(ctx context.Context, t *testing.T, cfg config.Prefix) ([]st
 func TestScanDBSummariesAndMeta(t *testing.T) {
 	ctx := context.Background()
 	dbDir := filepath.Join(t.TempDir(), "db-fresh")
-	cfg := config.Prefix{Prefix: "/a", Database: dbDir, Separator: "/"}
+	cfg := iduconfig.Prefix{Prefix: "/a", Database: dbDir, Separator: "/"}
 
-	sdb, err := NewScanDB(ctx, cfg)
+	sdb, err := newTestDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +159,7 @@ func TestScanDBSummariesAndMeta(t *testing.T) {
 		{"/a-sib", 300},
 	} {
 		pi := makeTestPrefixInfo(entry.size)
-		if err := sdb.SetPrefixInfo(ctx, entry.key, false, &pi); err != nil {
+		if err := sdb.setPrefixInfo(ctx, entry.key, false, &pi); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -180,11 +177,11 @@ func TestScanDBSummariesAndMeta(t *testing.T) {
 	}
 	_ = rodb.Close(ctx)
 
-	sdb2, err := NewScanDB(ctx, cfg)
+	sdb2, err := newTestDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sdb2.DeletePrefix(ctx, "/a/b"); err != nil {
+	if err := sdb2.deletePrefix(ctx, "/a/b"); err != nil {
 		t.Fatal(err)
 	}
 	_ = sdb2.Close(ctx)
@@ -199,15 +196,15 @@ func TestScanDBSummariesAndMeta(t *testing.T) {
 func TestScanDBCalculatorChange(t *testing.T) {
 	ctx := context.Background()
 	dbDir := filepath.Join(t.TempDir(), "db-calc")
-	cfg := config.Prefix{Prefix: "/a", Database: dbDir, Separator: "/"}
+	cfg := iduconfig.Prefix{Prefix: "/a", Database: dbDir, Separator: "/"}
 	calcID := diskusage.NewIdentity().String()
 
-	sdb, err := NewScanDB(ctx, cfg)
+	sdb, err := newTestDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	pi := makeTestPrefixInfo(100)
-	if err := sdb.SetPrefixInfo(ctx, "/a", false, &pi); err != nil {
+	if err := sdb.setPrefixInfo(ctx, "/a", false, &pi); err != nil {
 		t.Fatal(err)
 	}
 	_ = sdb.Close(ctx)
@@ -220,12 +217,12 @@ func TestScanDBCalculatorChange(t *testing.T) {
 
 	// An unchanged prefix must have its summary recomputed from the stored
 	// prefix info, but the summaries are not valid until marked complete.
-	sdb2, err := NewScanDB(ctx, cfg)
+	sdb2, err := newTestDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dirsOnly := prefixinfo.T{}
-	if err := sdb2.SetPrefixInfo(ctx, "/a", true, &dirsOnly); err != nil {
+	if err := sdb2.setPrefixInfo(ctx, "/a", true, &dirsOnly); err != nil {
 		t.Fatal(err)
 	}
 	_ = sdb2.Close(ctx)
@@ -237,11 +234,11 @@ func TestScanDBCalculatorChange(t *testing.T) {
 		t.Fatalf("calc ids = %v, want %v", ids, want)
 	}
 
-	sdb3, err := NewScanDB(ctx, cfg)
+	sdb3, err := newTestDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sdb3.MarkSummariesComplete(ctx); err != nil {
+	if err := sdb3.markSummariesComplete(ctx); err != nil {
 		t.Fatal(err)
 	}
 	_ = sdb3.Close(ctx)
@@ -252,22 +249,22 @@ func TestScanDBCalculatorChange(t *testing.T) {
 
 func TestScanDBSummaryFormatChange(t *testing.T) {
 	ctx := context.Background()
-	cfg := config.Prefix{Prefix: "/a", Database: filepath.Join(t.TempDir(), "db-format"), Separator: "/"}
+	cfg := iduconfig.Prefix{Prefix: "/a", Database: filepath.Join(t.TempDir(), "db-format"), Separator: "/"}
 	calcID := diskusage.NewIdentity().String()
 
-	sdb, err := NewScanDB(ctx, cfg)
+	sdb, err := newTestDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	pi := makeTestPrefixInfo(100)
-	if err := sdb.SetPrefixInfo(ctx, "/a", false, &pi); err != nil {
+	if err := sdb.setPrefixInfo(ctx, "/a", false, &pi); err != nil {
 		t.Fatal(err)
 	}
 	_ = sdb.Close(ctx)
 
 	// Simulate summaries written using the previous encoding, whose
 	// specification did not include the encoding's version.
-	rawDB, err := OpenDatabase(ctx, cfg, false)
+	rawDB, err := openDatabase(ctx, cfg.Database, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,14 +278,14 @@ func TestScanDBSummaryFormatChange(t *testing.T) {
 
 	// The next analyze rewrites the summaries, including for unchanged
 	// prefixes, after which they are valid.
-	sdb, err = NewScanDB(ctx, cfg)
+	sdb, err = newTestDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sdb.SetPrefixInfo(ctx, "/a", true, &pi); err != nil {
+	if err := sdb.setPrefixInfo(ctx, "/a", true, &pi); err != nil {
 		t.Fatal(err)
 	}
-	if err := sdb.MarkSummariesComplete(ctx); err != nil {
+	if err := sdb.markSummariesComplete(ctx); err != nil {
 		t.Fatal(err)
 	}
 	_ = sdb.Close(ctx)
@@ -297,9 +294,9 @@ func TestScanDBSummaryFormatChange(t *testing.T) {
 	}
 }
 
-func stampStaleSummary(ctx context.Context, t *testing.T, cfg config.Prefix, key, staleCalcID string) {
+func stampStaleSummary(ctx context.Context, t *testing.T, cfg iduconfig.Prefix, key, staleCalcID string) {
 	t.Helper()
-	rawDB, err := OpenDatabase(ctx, cfg, false)
+	rawDB, err := openDatabase(ctx, cfg.Database, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,9 +311,9 @@ func stampStaleSummary(ctx context.Context, t *testing.T, cfg config.Prefix, key
 	}
 }
 
-func readSummaryCalcIDs(ctx context.Context, t *testing.T, cfg config.Prefix, calcID string) (bool, []string) {
+func readSummaryCalcIDs(ctx context.Context, t *testing.T, cfg iduconfig.Prefix, calcID string) (bool, []string) {
 	t.Helper()
-	rodb, err := OpenDatabase(ctx, cfg, true)
+	rodb, err := openDatabase(ctx, cfg.Database, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,8 +334,8 @@ func readSummaryCalcIDs(ctx context.Context, t *testing.T, cfg config.Prefix, ca
 
 func TestLegacyDatabaseRejected(t *testing.T) {
 	ctx := context.Background()
-	cfg := config.Prefix{Prefix: "/legacy", Database: filepath.Join(t.TempDir(), "db-legacy")}
-	rawDB, err := OpenDatabase(ctx, cfg, false)
+	cfg := iduconfig.Prefix{Prefix: "/legacy", Database: filepath.Join(t.TempDir(), "db-legacy")}
+	rawDB, err := openDatabase(ctx, cfg.Database, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,52 +346,52 @@ func TestLegacyDatabaseRejected(t *testing.T) {
 	_ = rawDB.Close(ctx)
 
 	for _, readonly := range []bool{true, false} {
-		if _, err := OpenDatabase(ctx, cfg, readonly); !errors.Is(err, ErrLegacyDatabase) {
+		if _, err := openDatabase(ctx, cfg.Database, readonly); !errors.Is(err, ErrLegacyDatabase) {
 			t.Errorf("readonly=%v: got %v, want %v", readonly, err, ErrLegacyDatabase)
 		}
 	}
-	if _, err := NewScanDB(ctx, cfg); !errors.Is(err, ErrLegacyDatabase) {
+	if _, err := newTestDB(ctx, cfg); !errors.Is(err, ErrLegacyDatabase) {
 		t.Errorf("NewScanDB: got %v, want %v", err, ErrLegacyDatabase)
 	}
 }
 
 func TestScanDBDeletePrefixSiblings(t *testing.T) {
 	ctx := context.Background()
-	cfg := config.Prefix{Prefix: "/", Database: filepath.Join(t.TempDir(), "db"), Separator: "/"}
-	sdb, err := NewScanDB(ctx, cfg)
+	cfg := iduconfig.Prefix{Prefix: "/", Database: filepath.Join(t.TempDir(), "db"), Separator: "/"}
+	sdb, err := newTestDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, key := range []string{"/a", "/a/b", "/a-b", "/ab"} {
 		pi := makeTestPrefixInfo(10)
-		if err := sdb.SetPrefixInfo(ctx, key, false, &pi); err != nil {
+		if err := sdb.setPrefixInfo(ctx, key, false, &pi); err != nil {
 			t.Fatal(err)
 		}
 	}
 	_ = sdb.Close(ctx)
 
-	sdb, err = NewScanDB(ctx, cfg)
+	sdb, err = newTestDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, key := range []string{"/a", "/a/b", "/a-b", "/ab"} {
-		if err := sdb.LogError(ctx, key, time.Now(), []byte("oops")); err != nil {
+		if err := sdb.logError(ctx, key, time.Now(), []byte("oops")); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := sdb.DeletePrefix(ctx, "/a"); err != nil {
+	if err := sdb.deletePrefix(ctx, "/a"); err != nil {
 		t.Fatal(err)
 	}
-	if err := sdb.DeleteErrors(ctx, "/a"); err != nil {
+	if err := sdb.deleteErrors(ctx, "/a"); err != nil {
 		t.Fatal(err)
 	}
 	// A delete must not be undone by a batched write that is still
 	// pending when it is issued.
 	pi := makeTestPrefixInfo(10)
-	if err := sdb.SetPrefixInfo(ctx, "/c", false, &pi); err != nil {
+	if err := sdb.setPrefixInfo(ctx, "/c", false, &pi); err != nil {
 		t.Fatal(err)
 	}
-	if err := sdb.DeletePrefix(ctx, "/c"); err != nil {
+	if err := sdb.deletePrefix(ctx, "/c"); err != nil {
 		t.Fatal(err)
 	}
 	_ = sdb.Close(ctx)
@@ -407,7 +404,7 @@ func TestScanDBDeletePrefixSiblings(t *testing.T) {
 }
 
 // readAllKeys returns the keys in the summary, prefix and error buckets.
-func readAllKeys(ctx context.Context, t *testing.T, cfg config.Prefix) (summaries, prefixes, errs []string) {
+func readAllKeys(ctx context.Context, t *testing.T, cfg iduconfig.Prefix) (summaries, prefixes, errs []string) {
 	t.Helper()
 	summaries, rodb := readSummaryKeys(ctx, t, cfg)
 	defer rodb.Close(ctx)
@@ -427,7 +424,7 @@ func readAllKeys(ctx context.Context, t *testing.T, cfg config.Prefix) (summarie
 }
 
 type faultDB struct {
-	database.DB
+	Database
 	setErr           error
 	getErr           error
 	setSummaryErr    error
@@ -449,84 +446,84 @@ func (f *faultDB) Set(ctx context.Context, prefix string, value []byte, batch bo
 	if f.setErr != nil {
 		return f.setErr
 	}
-	return f.DB.Set(ctx, prefix, value, batch)
+	return f.Database.Set(ctx, prefix, value, batch)
 }
 
 func (f *faultDB) Get(ctx context.Context, prefix string, buf *bytes.Buffer) error {
 	if f.getErr != nil {
 		return f.getErr
 	}
-	return f.DB.Get(ctx, prefix, buf)
+	return f.Database.Get(ctx, prefix, buf)
 }
 
 func (f *faultDB) SetSummary(ctx context.Context, key string, value []byte, batch bool) error {
 	if f.setSummaryErr != nil {
 		return f.setSummaryErr
 	}
-	return f.DB.SetSummary(ctx, key, value, batch)
+	return f.Database.SetSummary(ctx, key, value, batch)
 }
 
 func (f *faultDB) SetMeta(ctx context.Context, key string, value []byte) error {
 	if f.setMetaErr != nil {
 		return f.setMetaErr
 	}
-	return f.DB.SetMeta(ctx, key, value)
+	return f.Database.SetMeta(ctx, key, value)
 }
 
 func (f *faultDB) Flush(ctx context.Context) error {
 	if f.flushErr != nil {
 		return f.flushErr
 	}
-	return f.DB.Flush(ctx)
+	return f.Database.Flush(ctx)
 }
 
 func (f *faultDB) Delete(ctx context.Context, prefix string) error {
 	if f.deleteErr != nil {
 		return f.deleteErr
 	}
-	return f.DB.Delete(ctx, prefix)
+	return f.Database.Delete(ctx, prefix)
 }
 
 func (f *faultDB) DeletePrefix(ctx context.Context, prefix string) error {
 	if f.deletePrefixErr != nil {
 		return f.deletePrefixErr
 	}
-	return f.DB.DeletePrefix(ctx, prefix)
+	return f.Database.DeletePrefix(ctx, prefix)
 }
 
 func (f *faultDB) DeleteSummary(ctx context.Context, exactKey, childPrefix string) error {
 	if f.deleteSummaryErr != nil {
 		return f.deleteSummaryErr
 	}
-	return f.DB.DeleteSummary(ctx, exactKey, childPrefix)
+	return f.Database.DeleteSummary(ctx, exactKey, childPrefix)
 }
 
 func (f *faultDB) DeleteError(ctx context.Context, key string) error {
 	if f.deleteErrorErr != nil {
 		return f.deleteErrorErr
 	}
-	return f.DB.DeleteError(ctx, key)
+	return f.Database.DeleteError(ctx, key)
 }
 
 func (f *faultDB) DeleteErrors(ctx context.Context, prefix string) error {
 	if f.deleteErrorsErr != nil {
 		return f.deleteErrorsErr
 	}
-	return f.DB.DeleteErrors(ctx, prefix)
+	return f.Database.DeleteErrors(ctx, prefix)
 }
 
 func (f *faultDB) Log(ctx context.Context, start, stop time.Time, detail []byte) error {
 	if f.logErr != nil {
 		return f.logErr
 	}
-	return f.DB.Log(ctx, start, stop, detail)
+	return f.Database.Log(ctx, start, stop, detail)
 }
 
 func (f *faultDB) Compact(ctx context.Context) error {
 	if f.compactErr != nil {
 		return f.compactErr
 	}
-	if c, ok := f.DB.(compactor); ok {
+	if c, ok := f.Database.(compactor); ok {
 		return c.Compact(ctx)
 	}
 	return nil
@@ -536,7 +533,7 @@ func (f *faultDB) RunValueLogGC(discardRatio float64) error {
 	if f.gcErr != nil {
 		return f.gcErr
 	}
-	if gc, ok := f.DB.(valueLogGCRunner); ok {
+	if gc, ok := f.Database.(valueLogGCRunner); ok {
 		return gc.RunValueLogGC(discardRatio)
 	}
 	return nil
@@ -545,116 +542,22 @@ func (f *faultDB) RunValueLogGC(discardRatio float64) error {
 func (f *faultDB) Close(ctx context.Context) error {
 	f.closed++
 	if f.closeErr != nil {
-		_ = f.DB.Close(ctx)
+		_ = f.Database.Close(ctx)
 		return f.closeErr
 	}
-	return f.DB.Close(ctx)
-}
-
-func TestOpenDatabaseErrorsAndSlowOpen(t *testing.T) {
-	origFactory := databaseFactory
-	t.Cleanup(func() {
-		databaseFactory = origFactory
-	})
-
-	t.Run("factory error", func(t *testing.T) {
-		wantErr := errors.New("open failed")
-		databaseFactory = func(context.Context, config.Prefix, bool) (database.DB, error) {
-			return nil, wantErr
-		}
-		if _, err := OpenDatabase(context.Background(), config.Prefix{Database: "/tmp/x"}, false); !errors.Is(err, wantErr) {
-			t.Fatalf("got %v, want %v", err, wantErr)
-		}
-	})
-
-	t.Run("canceled while opening", func(t *testing.T) {
-		release := make(chan struct{})
-		returned := make(chan struct{})
-		databaseFactory = func(context.Context, config.Prefix, bool) (database.DB, error) {
-			defer close(returned)
-			<-release
-			return nil, errors.New("canceled")
-		}
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		if _, err := OpenDatabase(ctx, config.Prefix{Database: "/tmp/x"}, false); !errors.Is(err, context.Canceled) {
-			close(release)
-			<-returned
-			t.Fatalf("got %v, want context.Canceled", err)
-		}
-		close(release)
-		<-returned
-	})
-
-	t.Run("slow open prints waiting message", func(t *testing.T) {
-		synctest.Test(t, func(t *testing.T) {
-			dbDir := filepath.Join(t.TempDir(), "slow-db")
-			databaseFactory = func(ctx context.Context, cfg config.Prefix, readonly bool) (database.DB, error) {
-				time.Sleep(1100 * time.Millisecond)
-				return origFactory(ctx, cfg, readonly)
-			}
-			db, err := OpenDatabase(context.Background(), config.Prefix{Database: dbDir}, false)
-			if err != nil {
-				t.Fatalf("OpenDatabase: %v", err)
-			}
-			_ = db.Close(context.Background())
-		})
-	})
-}
-
-func TestOpenPrefixAndDatabase(t *testing.T) {
-	ctx := context.Background()
-	dbDir := filepath.Join(t.TempDir(), "db")
-	allCfg, err := config.ParseConfig([]byte("filesystems:\n  - name: testfs\n    prefix: /test/root\n    database: " + dbDir + "\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, cfg, target, db, err := OpenPrefixAndDatabase(ctx, allCfg, "testfs", false)
-	if err != nil {
-		t.Fatalf("OpenPrefixAndDatabase rw: %v", err)
-	}
-	if cfg.Name != "testfs" || target != "/test/root" {
-		_ = db.Close(ctx)
-		t.Fatalf("got (%q, %q), want (testfs, /test/root)", cfg.Name, target)
-	}
-	_ = db.Close(ctx)
-
-	_, _, target, rdb, err := OpenPrefixAndDatabase(ctx, allCfg, "/test/root/sub", true)
-	if err != nil {
-		t.Fatalf("OpenPrefixAndDatabase ro: %v", err)
-	}
-	if target != "/test/root/sub" {
-		_ = rdb.Close(ctx)
-		t.Fatalf("target = %q, want /test/root/sub", target)
-	}
-	_ = rdb.Close(ctx)
-
-	if _, _, _, _, err := OpenPrefixAndDatabase(ctx, allCfg, "/other/path", true); err == nil {
-		t.Fatal("expected error for unknown prefix")
-	}
-	if runtime.GOOS != "windows" {
-		badCfg, err := config.ParseConfig([]byte("filesystems:\n  - name: bad\n    prefix: /bad\n    database: " + filepath.Join(t.TempDir(), "missing") + "\n"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, _, _, db, err := OpenPrefixAndDatabase(ctx, badCfg, "bad", true); err == nil {
-			_ = db.Close(ctx)
-			t.Fatal("expected error opening missing readonly database")
-		}
-	}
+	return f.Database.Close(ctx)
 }
 
 func newFaultScanDBFactory(t *testing.T) **faultDB {
 	t.Helper()
 	origFactory := databaseFactory
 	var fdb *faultDB
-	databaseFactory = func(ctx context.Context, cfg config.Prefix, readonly bool) (database.DB, error) {
-		db, err := origFactory(ctx, cfg, readonly)
+	databaseFactory = func(ctx context.Context, path string, readonly bool) (Database, error) {
+		db, err := origFactory(ctx, path, readonly)
 		if err != nil {
 			return nil, err
 		}
-		fdb = &faultDB{DB: db}
+		fdb = &faultDB{Database: db}
 		return fdb, nil
 	}
 	t.Cleanup(func() {
@@ -667,8 +570,8 @@ func TestScanDBSummaryInvalidation(t *testing.T) {
 	ctx := context.Background()
 	fdbPtr := newFaultScanDBFactory(t)
 
-	cfg := config.Prefix{Prefix: "/a", Database: filepath.Join(t.TempDir(), "db-inv"), Separator: "/"}
-	sdb, err := NewScanDB(ctx, cfg)
+	cfg := iduconfig.Prefix{Prefix: "/a", Database: filepath.Join(t.TempDir(), "db-inv"), Separator: "/"}
+	sdb, err := newTestDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -678,7 +581,7 @@ func TestScanDBSummaryInvalidation(t *testing.T) {
 	pi := makeTestPrefixInfo(100)
 	errSummary := errors.New("summary write failed")
 	fdb.setSummaryErr = errSummary
-	if err := sdb.SetPrefixInfo(ctx, "/a", false, &pi); !errors.Is(err, errSummary) {
+	if err := sdb.setPrefixInfo(ctx, "/a", false, &pi); !errors.Is(err, errSummary) {
 		t.Fatalf("SetPrefixInfo = %v, want %v", err, errSummary)
 	}
 	fdb.setSummaryErr = nil
@@ -695,8 +598,8 @@ func TestScanDBGetSetPrefixInfoErrors(t *testing.T) {
 	ctx := context.Background()
 	fdbPtr := newFaultScanDBFactory(t)
 
-	cfg := config.Prefix{Prefix: "/a", Database: filepath.Join(t.TempDir(), "db-gs"), Separator: "/"}
-	sdb, err := NewScanDB(ctx, cfg)
+	cfg := iduconfig.Prefix{Prefix: "/a", Database: filepath.Join(t.TempDir(), "db-gs"), Separator: "/"}
+	sdb, err := newTestDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -704,36 +607,36 @@ func TestScanDBGetSetPrefixInfoErrors(t *testing.T) {
 	fdb := *fdbPtr
 
 	var out prefixinfo.T
-	if ok, err := sdb.GetPrefixInfo(ctx, "/missing", &out); ok || err != nil {
+	if ok, err := sdb.getPrefixInfo(ctx, "/missing", &out); ok || err != nil {
 		t.Errorf("missing GetPrefixInfo = (%v, %v), want (false, nil)", ok, err)
 	}
-	if err := fdb.DB.Set(ctx, "/corrupt", []byte{0xff}, false); err != nil {
+	if err := fdb.Database.Set(ctx, "/corrupt", []byte{0xff}, false); err != nil {
 		t.Fatal(err)
 	}
-	if ok, err := sdb.GetPrefixInfo(ctx, "/corrupt", &out); !ok || err == nil {
+	if ok, err := sdb.getPrefixInfo(ctx, "/corrupt", &out); !ok || err == nil {
 		t.Errorf("corrupt GetPrefixInfo = (%v, %v), want (true, err)", ok, err)
 	}
 
 	errGet := errors.New("get failed")
 	fdb.getErr = errGet
-	if ok, err := sdb.GetPrefixInfo(ctx, "/a", &out); ok || !errors.Is(err, errGet) {
+	if ok, err := sdb.getPrefixInfo(ctx, "/a", &out); ok || !errors.Is(err, errGet) {
 		t.Errorf("error GetPrefixInfo = (%v, %v), want (false, %v)", ok, err, errGet)
 	}
 	fdb.getErr = nil
 
 	cctx, cancel := context.WithCancel(ctx)
 	cancel()
-	if ok, err := sdb.GetPrefixInfo(cctx, "/a", &out); ok || !errors.Is(err, context.Canceled) {
+	if ok, err := sdb.getPrefixInfo(cctx, "/a", &out); ok || !errors.Is(err, context.Canceled) {
 		t.Errorf("canceled GetPrefixInfo = (%v, %v), want (false, context.Canceled)", ok, err)
 	}
 	pi := makeTestPrefixInfo(100)
-	if err := sdb.SetPrefixInfo(cctx, "/a", false, &pi); !errors.Is(err, context.Canceled) {
+	if err := sdb.setPrefixInfo(cctx, "/a", false, &pi); !errors.Is(err, context.Canceled) {
 		t.Errorf("canceled SetPrefixInfo = %v, want context.Canceled", err)
 	}
 
 	errSet := errors.New("set failed")
 	fdb.setErr = errSet
-	if err := sdb.SetPrefixInfo(ctx, "/a", false, &pi); !errors.Is(err, errSet) {
+	if err := sdb.setPrefixInfo(ctx, "/a", false, &pi); !errors.Is(err, errSet) {
 		t.Errorf("SetPrefixInfo set err = %v, want %v", err, errSet)
 	}
 }
@@ -742,8 +645,8 @@ func TestScanDBDeletePrefixAndErrorsPropagation(t *testing.T) {
 	ctx := context.Background()
 	fdbPtr := newFaultScanDBFactory(t)
 
-	cfg := config.Prefix{Prefix: "/", Database: filepath.Join(t.TempDir(), "db"), Separator: "/"}
-	sdb, err := NewScanDB(ctx, cfg)
+	cfg := iduconfig.Prefix{Prefix: "/", Database: filepath.Join(t.TempDir(), "db"), Separator: "/"}
+	sdb, err := newTestDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -751,37 +654,37 @@ func TestScanDBDeletePrefixAndErrorsPropagation(t *testing.T) {
 	fdb := *fdbPtr
 
 	pi := makeTestPrefixInfo(50)
-	if err := sdb.SetPrefixInfo(ctx, "/", false, &pi); err != nil {
+	if err := sdb.setPrefixInfo(ctx, "/", false, &pi); err != nil {
 		t.Fatal(err)
 	}
-	if err := sdb.SetPrefixInfo(ctx, "/sub", false, &pi); err != nil {
+	if err := sdb.setPrefixInfo(ctx, "/sub", false, &pi); err != nil {
 		t.Fatal(err)
 	}
-	if err := sdb.DeletePrefix(ctx, "/"); err != nil {
+	if err := sdb.deletePrefix(ctx, "/"); err != nil {
 		t.Fatalf("DeletePrefix(/): %v", err)
 	}
 
 	wantErr := errors.New("op failed")
 	fdb.flushErr = wantErr
-	if err := sdb.DeletePrefix(ctx, "/x"); !errors.Is(err, wantErr) {
+	if err := sdb.deletePrefix(ctx, "/x"); !errors.Is(err, wantErr) {
 		t.Errorf("Flush err = %v, want %v", err, wantErr)
 	}
 	fdb.flushErr = nil
 
 	fdb.deleteErr = wantErr
-	if err := sdb.DeletePrefix(ctx, "/x"); !errors.Is(err, wantErr) {
+	if err := sdb.deletePrefix(ctx, "/x"); !errors.Is(err, wantErr) {
 		t.Errorf("Delete err = %v, want %v", err, wantErr)
 	}
 	fdb.deleteErr = nil
 
 	fdb.deletePrefixErr = wantErr
-	if err := sdb.DeletePrefix(ctx, "/x"); !errors.Is(err, wantErr) {
+	if err := sdb.deletePrefix(ctx, "/x"); !errors.Is(err, wantErr) {
 		t.Errorf("DeletePrefix err = %v, want %v", err, wantErr)
 	}
 	fdb.deletePrefixErr = nil
 
 	fdb.deleteErrorErr = wantErr
-	if err := sdb.DeleteErrors(ctx, "/x"); !errors.Is(err, wantErr) {
+	if err := sdb.deleteErrors(ctx, "/x"); !errors.Is(err, wantErr) {
 		t.Errorf("DeleteError err = %v, want %v", err, wantErr)
 	}
 }
@@ -791,20 +694,20 @@ func TestScanDBMarkCompleteAndLogCloseErrors(t *testing.T) {
 	fdbPtr := newFaultScanDBFactory(t)
 
 	dbDir := filepath.Join(t.TempDir(), "db-close")
-	cfg := config.Prefix{Prefix: "/a", Database: dbDir, Separator: "/"}
-	sdb, err := NewScanDB(ctx, cfg)
+	cfg := iduconfig.Prefix{Prefix: "/a", Database: dbDir, Separator: "/"}
+	sdb, err := newTestDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sdb.MarkSummariesComplete(ctx); err != nil {
+	if err := sdb.markSummariesComplete(ctx); err != nil {
 		t.Fatalf("MarkSummariesComplete no-op: %v", err)
 	}
-	if err := (*fdbPtr).DB.SetMeta(ctx, metaKeySummaries, []byte("other")); err != nil {
+	if err := (*fdbPtr).Database.SetMeta(ctx, metaKeySummaries, []byte("other")); err != nil {
 		t.Fatal(err)
 	}
 	_ = sdb.Close(ctx)
 
-	sdb2, err := NewScanDB(ctx, cfg)
+	sdb2, err := newTestDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -813,18 +716,18 @@ func TestScanDBMarkCompleteAndLogCloseErrors(t *testing.T) {
 
 	wantErr := errors.New("boom")
 	fdb.flushErr = wantErr
-	if err := sdb2.MarkSummariesComplete(ctx); !errors.Is(err, wantErr) {
+	if err := sdb2.markSummariesComplete(ctx); !errors.Is(err, wantErr) {
 		t.Errorf("MarkSummariesComplete Flush err = %v, want %v", err, wantErr)
 	}
 	fdb.flushErr = nil
 
 	fdb.setMetaErr = wantErr
-	if err := sdb2.MarkSummariesComplete(ctx); !errors.Is(err, wantErr) {
+	if err := sdb2.markSummariesComplete(ctx); !errors.Is(err, wantErr) {
 		t.Errorf("MarkSummariesComplete SetMeta err = %v, want %v", err, wantErr)
 	}
 	fdb.setMetaErr = nil
 
-	if err := sdb2.MarkSummariesComplete(ctx); err != nil {
+	if err := sdb2.markSummariesComplete(ctx); err != nil {
 		t.Fatalf("MarkSummariesComplete: %v", err)
 	}
 
@@ -844,7 +747,7 @@ func TestScanDBMarkCompleteAndLogCloseErrors(t *testing.T) {
 		{name: "close", set: func(f *faultDB) { f.closeErr = wantErr }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s, err := NewScanDB(ctx, cfg)
+			s, err := newTestDB(ctx, cfg)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -860,62 +763,11 @@ func TestScanDBMarkCompleteAndLogCloseErrors(t *testing.T) {
 	}
 }
 
-func TestOpenDatabaseCanceledClosesDB(t *testing.T) {
-	origFactory := databaseFactory
-	t.Cleanup(func() { databaseFactory = origFactory })
-
-	dbDir := t.TempDir()
-	raw, err := origFactory(context.Background(), config.Prefix{Prefix: "/a", Database: dbDir}, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	closedCh := make(chan struct{})
-	fdb := &closeNotifyDB{DB: raw, closedCh: closedCh}
-
-	unblock := make(chan struct{})
-	started := make(chan struct{})
-	databaseFactory = func(context.Context, config.Prefix, bool) (database.DB, error) {
-		close(started)
-		<-unblock
-		return fdb, nil
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		<-started
-		cancel()
-	}()
-
-	_, err = OpenDatabase(ctx, config.Prefix{Database: dbDir}, false)
-	close(unblock)
-	if !errors.Is(err, context.Canceled) {
-		_ = raw.Close(context.Background())
-		t.Fatalf("OpenDatabase err = %v, want context.Canceled", err)
-	}
-	select {
-	case <-closedCh:
-	case <-time.After(2 * time.Second):
-		_ = raw.Close(context.Background())
-		t.Fatal("leaked opened DB after OpenDatabase context cancellation")
-	}
-}
-
-type closeNotifyDB struct {
-	database.DB
-	closedCh chan struct{}
-}
-
-func (c *closeNotifyDB) Close(ctx context.Context) error {
-	err := c.DB.Close(ctx)
-	close(c.closedCh)
-	return err
-}
-
 func TestScanDBCompactError(t *testing.T) {
 	ctx := context.Background()
 	origFactory := databaseFactory
 	dbDir := filepath.Join(t.TempDir(), "db-compact-err")
-	raw, err := origFactory(ctx, config.Prefix{Prefix: "/a", Database: dbDir}, false)
+	raw, err := origFactory(ctx, dbDir, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -926,8 +778,8 @@ func TestScanDBCompactError(t *testing.T) {
 	_ = raw.Close(ctx)
 
 	fdbPtr := newFaultScanDBFactory(t)
-	cfg := config.Prefix{Prefix: "/a", Database: dbDir, CompactInterval: time.Hour}
-	sdb, err := NewScanDB(ctx, cfg)
+	cfg := iduconfig.Prefix{Prefix: "/a", Database: dbDir, CompactInterval: time.Hour}
+	sdb, err := newTestDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -943,20 +795,20 @@ func TestScanDBCompactError(t *testing.T) {
 	}
 }
 
-func writeScanDBPrefixes(ctx context.Context, t *testing.T, cfg config.Prefix, unchanged bool, complete bool, keys ...string) {
+func writeScanDBPrefixes(ctx context.Context, t *testing.T, cfg iduconfig.Prefix, unchanged bool, complete bool, keys ...string) {
 	t.Helper()
-	sdb, err := NewScanDB(ctx, cfg)
+	sdb, err := newTestDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, k := range keys {
 		pi := makeTestPrefixInfo(100)
-		if err := sdb.SetPrefixInfo(ctx, k, unchanged, &pi); err != nil {
+		if err := sdb.setPrefixInfo(ctx, k, unchanged, &pi); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if complete {
-		if err := sdb.MarkSummariesComplete(ctx); err != nil {
+		if err := sdb.markSummariesComplete(ctx); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -969,17 +821,17 @@ func TestScanDBPartialRewriteInvalidatesOldSpec(t *testing.T) {
 	calcID := diskusage.NewIdentity().String()
 
 	// 1. Build a complete DB recording hardlinks.
-	cfgOld := config.Prefix{Prefix: "/a", Database: dbDir, Separator: "/", CountHardlinkAsFiles: false}
+	cfgOld := iduconfig.Prefix{Prefix: "/a", Database: dbDir, Separator: "/", CountHardlinkAsFiles: false}
 	writeScanDBPrefixes(ctx, t, cfgOld, false, true, "/a", "/a/sub")
 
 	// 2. Switch to CountHardlinkAsFiles: true and rewrite only /a/sub
 	// (simulating a sub-prefix analyze or an interrupted full analyze).
-	cfgNew := config.Prefix{Prefix: "/a", Database: dbDir, Separator: "/", CountHardlinkAsFiles: true}
+	cfgNew := iduconfig.Prefix{Prefix: "/a", Database: dbDir, Separator: "/", CountHardlinkAsFiles: true}
 	writeScanDBPrefixes(ctx, t, cfgNew, false, false, "/a/sub")
 
 	// 3. The old spec (needLinks=true) and new spec must both be rejected
 	// because summaries are now mixed and incomplete.
-	rodb, err := OpenDatabase(ctx, cfgNew, true)
+	rodb, err := openDatabase(ctx, cfgNew.Database, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -997,7 +849,7 @@ func TestScanDBPartialRewriteInvalidatesOldSpec(t *testing.T) {
 	// 4. Completing a full scan with cfgNew restores valid summaries.
 	writeScanDBPrefixes(ctx, t, cfgNew, true, true, "/a", "/a/sub")
 
-	rodb2, err := OpenDatabase(ctx, cfgNew, true)
+	rodb2, err := openDatabase(ctx, cfgNew.Database, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1008,4 +860,43 @@ func TestScanDBPartialRewriteInvalidatesOldSpec(t *testing.T) {
 	if err := CheckSummaries(ctx, rodb2, calcID, true); !errors.Is(err, ErrStaleSummaries) {
 		t.Errorf("CheckSummaries(needLinks=true) after non-hardlink complete = %v, want ErrStaleSummaries", err)
 	}
+}
+
+// newTestDB opens the database specified by cfg using the options
+// derived from cfg.
+func newTestDB(ctx context.Context, cfg iduconfig.Prefix) (*DB, error) {
+	raw, err := databaseFactory(ctx, cfg.Database, false)
+	if err != nil {
+		return nil, err
+	}
+	db, err := New(ctx, raw, OptionsFromConfig(cfg)...)
+	if err != nil {
+		_ = raw.Close(ctx)
+		return nil, err
+	}
+	return db, nil
+}
+
+// databaseFactory creates the database backend used by tests and may be
+// overridden to inject faults.
+var databaseFactory = func(_ context.Context, path string, readonly bool) (Database, error) {
+	var opts []badgerdb.Option
+	if readonly {
+		opts = append(opts, badgerdb.ReadOnly())
+	}
+	return badgerdb.Open(path, opts...)
+}
+
+// openDatabase opens a database backend via databaseFactory and checks
+// its format.
+func openDatabase(ctx context.Context, path string, readonly bool) (Database, error) {
+	db, err := databaseFactory(ctx, path, readonly)
+	if err != nil {
+		return nil, err
+	}
+	if err := CheckFormat(ctx, db); err != nil {
+		_ = db.Close(ctx)
+		return nil, err
+	}
+	return db, nil
 }

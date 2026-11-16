@@ -1,7 +1,7 @@
-# Package [cloudeng.io/cmd/idu/internal/config](https://pkg.go.dev/cloudeng.io/cmd/idu/internal/config?tab=doc)
+# Package [cloudeng.io/cmd/idu/iduconfig](https://pkg.go.dev/cloudeng.io/cmd/idu/iduconfig?tab=doc)
 
 ```go
-import cloudeng.io/cmd/idu/internal/config
+import cloudeng.io/cmd/idu/iduconfig
 ```
 
 

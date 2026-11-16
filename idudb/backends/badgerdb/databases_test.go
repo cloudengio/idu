@@ -2,7 +2,7 @@
 // Use of this source code is governed by the Apache-2.0
 // license that can be found in the LICENSE file.
 
-package database_test
+package badgerdb_test
 
 import (
 	"bytes"
@@ -16,12 +16,12 @@ import (
 	"testing"
 	"time"
 
-	"cloudeng.io/cmd/idu/internal/database"
-	"cloudeng.io/cmd/idu/internal/database/badgerdb"
+	"cloudeng.io/cmd/idu/idudb"
+	"cloudeng.io/cmd/idu/idudb/backends/badgerdb"
 	"github.com/dgraph-io/badger/v4"
 )
 
-func badgerFactory(t *testing.T, dir, _ string, readonly bool) database.DB {
+func badgerFactory(t *testing.T, dir, _ string, readonly bool) idudb.Database {
 	t.Helper()
 	dbname := filepath.Join(dir, "db")
 	opts := []badgerdb.Option{}
@@ -38,9 +38,9 @@ func badgerFactory(t *testing.T, dir, _ string, readonly bool) database.DB {
 	return db
 }
 
-type databaseFactory func(t *testing.T, dir, prefix string, readonly bool) database.DB
+type databaseFactory func(t *testing.T, dir, prefix string, readonly bool) idudb.Database
 
-func populateDatabase(t *testing.T, db database.DB, nItems int) {
+func populateDatabase(t *testing.T, db idudb.Database, nItems int) {
 	ctx := context.Background()
 	defer db.Close(ctx)
 	for i := 0; i < nItems; i++ {
@@ -272,7 +272,7 @@ func testErrors(t *testing.T, factory databaseFactory) {
 	}
 }
 
-func visitAllErrors(ctx context.Context, t *testing.T, db database.DB) []string {
+func visitAllErrors(ctx context.Context, t *testing.T, db idudb.Database) []string {
 	keys := map[string]struct{}{}
 	err := db.VisitErrors(ctx, "",
 		func(_ context.Context, key string, _ time.Time, _ []byte) bool {
@@ -335,7 +335,7 @@ func testErrorsDelete(t *testing.T, factory databaseFactory) {
 	}
 }
 
-func TestDelete(t *testing.T) {
+func TestDBDelete(t *testing.T) {
 	testDelete(t, badgerFactory)
 }
 

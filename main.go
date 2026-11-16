@@ -20,8 +20,8 @@ import (
 	"runtime"
 	debugpkg "runtime/debug"
 
+	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/cmdutil"
 	"cloudeng.io/cmdutil/cmdconfig"
 	"cloudeng.io/cmdutil/flags"
@@ -36,7 +36,7 @@ import (
 
 var (
 	globalFlags  GlobalFlags
-	globalConfig config.T
+	globalConfig iduconfig.T
 )
 
 var (
@@ -141,10 +141,10 @@ type GlobalFlags struct {
 }
 
 func init() {
-	config.DefaultConcurrentStats = asyncstat.DefaultAsyncStats
-	config.DefaultConcurrentStatsThreshold = asyncstat.DefaultAsyncThreshold
-	config.DefaultConcurrentScans = filewalk.DefaultConcurrentScans
-	config.DefaultScanSize = filewalk.DefaultScanSize
+	iduconfig.DefaultConcurrentStats = asyncstat.DefaultAsyncStats
+	iduconfig.DefaultConcurrentStatsThreshold = asyncstat.DefaultAsyncThreshold
+	iduconfig.DefaultConcurrentScans = filewalk.DefaultConcurrentScans
+	iduconfig.DefaultScanSize = filewalk.DefaultScanSize
 }
 
 func requireConfig(runner subcmd.Runner) subcmd.Runner {
@@ -226,7 +226,7 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 		}
 	}()
 
-	cfg, loc, err := config.Load(ctx, &globalFlags.Config)
+	cfg, loc, err := iduconfig.Load(ctx, &globalFlags.Config)
 	globalConfig = cfg
 	ctx = cmdutil.ContextWithValue(ctx, cfg)
 	ctx = cmdutil.ContextWithValue(ctx, loc)
@@ -240,8 +240,6 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 		// gosec G114
 		go http.Serve(ln, nil) //nolint:gosec,errcheck
 	}
-
-	internal.UseBadgerDB()
 
 	internal.Verbosity = slog.Level(globalFlags.Verbose)
 	internal.LogDir = globalFlags.LogDir

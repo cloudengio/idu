@@ -4,7 +4,7 @@
 
 //go:build unix
 
-package config
+package iduconfig
 
 import "golang.org/x/sys/unix"
 

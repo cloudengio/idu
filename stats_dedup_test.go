@@ -13,9 +13,10 @@ import (
 	"reflect"
 	"testing"
 
+	"cloudeng.io/cmd/idu/iduconfig"
+	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/boolexpr"
-	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/file/localfs"
@@ -42,7 +43,7 @@ func createHardlinkTree(t *testing.T, root string) {
 	}
 }
 
-func writeHardlinkConfig(t *testing.T, dir, root string, dedup config.HardlinkDedup) config.T {
+func writeHardlinkConfig(t *testing.T, dir, root string, dedup iduconfig.HardlinkDedup) iduconfig.T {
 	t.Helper()
 	cfgFile := filepath.Join(dir, fmt.Sprintf("config-%v.yaml", dedup))
 	yaml := fmt.Sprintf("filesystems:\n  - prefix: %s\n    database: %s\n    count_hardlinks_as_files: false\n    hardlink_dedup: %s\n",
@@ -50,14 +51,14 @@ func writeHardlinkConfig(t *testing.T, dir, root string, dedup config.HardlinkDe
 	if err := os.WriteFile(cfgFile, []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := config.ReadConfig(cfgFile)
+	cfg, err := iduconfig.ReadConfig(cfgFile)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return cfg
 }
 
-func analyzeWithConfig(ctx context.Context, t *testing.T, cfg config.T, root string) {
+func analyzeWithConfig(ctx context.Context, t *testing.T, cfg iduconfig.T, root string) {
 	t.Helper()
 	globalConfig = cfg
 	alz := &analyzeCmd{}
@@ -106,9 +107,9 @@ func hardlinkMatcher(ctx context.Context, t testing.TB) boolexpr.Matcher {
 
 // computeBoth computes stats for target using both the summaries and a
 // rescan of all of the file metadata.
-func computeBoth(ctx context.Context, t *testing.T, cfg config.T, target string) (fromSummaries *reports.AllStats, fromPrefixes *reports.AllStats, summaryErr error) {
+func computeBoth(ctx context.Context, t *testing.T, cfg iduconfig.T, target string) (fromSummaries *reports.AllStats, fromPrefixes *reports.AllStats, summaryErr error) {
 	t.Helper()
-	_, pcfg, _, db, err := internal.OpenPrefixAndDatabase(ctx, cfg, target, true)
+	_, pcfg, _, db, err := openPrefixReadOnly(ctx, cfg, target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +137,7 @@ func TestHardlinkDedupSummariesMatchRescan(t *testing.T) {
 	root = filepath.Join(root, "tree")
 	createHardlinkTree(t, root)
 
-	verify := func(cfg config.T, rootFiles, rootHardlinks, aFiles int64) {
+	verify := func(cfg iduconfig.T, rootFiles, rootHardlinks, aFiles int64) {
 		t.Helper()
 		for _, tc := range []struct {
 			target           string
@@ -171,7 +172,7 @@ func TestHardlinkDedupSummariesMatchRescan(t *testing.T) {
 	}
 
 	// Freshly analyzed, potential hardlinks are recorded using their link counts.
-	summariesCfg := writeHardlinkConfig(t, tmpDir, root, config.HardlinkDedupSummaries)
+	summariesCfg := writeHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupSummaries)
 	analyzeWithConfig(ctx, t, summariesCfg, root)
 	// f1, f2, g, h are counted once, l1, l2, l3 are hardlinks.
 	verify(summariesCfg, 4, 3, 2)
@@ -187,15 +188,15 @@ func TestHardlinkDedupSummariesMatchRescan(t *testing.T) {
 	verify(summariesCfg, 4, 4, 3)
 
 	// Switching to rescan rewrites the summaries without hardlink information.
-	rescanCfg := writeHardlinkConfig(t, tmpDir, root, config.HardlinkDedupRescan)
+	rescanCfg := writeHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupRescan)
 	analyzeWithConfig(ctx, t, rescanCfg, root)
-	if _, _, err := computeBoth(ctx, t, rescanCfg, root); !errors.Is(err, internal.ErrStaleSummaries) {
-		t.Fatalf("expected %v when summaries lack hardlinks, got %v", internal.ErrStaleSummaries, err)
+	if _, _, err := computeBoth(ctx, t, rescanCfg, root); !errors.Is(err, idudb.ErrStaleSummaries) {
+		t.Fatalf("expected %v when summaries lack hardlinks, got %v", idudb.ErrStaleSummaries, err)
 	}
 
 	// Switching back without analyzing again is an error.
-	if _, _, err := computeBoth(ctx, t, summariesCfg, root); !errors.Is(err, internal.ErrStaleSummaries) {
-		t.Fatalf("expected %v before reanalyzing, got %v", internal.ErrStaleSummaries, err)
+	if _, _, err := computeBoth(ctx, t, summariesCfg, root); !errors.Is(err, idudb.ErrStaleSummaries) {
+		t.Fatalf("expected %v before reanalyzing, got %v", idudb.ErrStaleSummaries, err)
 	}
 
 	// Reanalyzing rewrites the summaries for the unchanged prefixes from the
@@ -275,7 +276,7 @@ func TestSparseFilesSummariesMatchRescan(t *testing.T) {
 		wantFiles = 1
 	}
 
-	cfg := writeHardlinkConfig(t, tmpDir, root, config.HardlinkDedupSummaries)
+	cfg := writeHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupSummaries)
 	analyzeWithConfig(ctx, t, cfg, root)
 	fromSummaries, fromPrefixes, err := computeBoth(ctx, t, cfg, root)
 	if err != nil {

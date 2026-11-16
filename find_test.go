@@ -13,8 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/cmd/idu/internal/config"
+	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmdutil/flags"
 	"cloudeng.io/file/localfs"
 )
@@ -42,7 +41,7 @@ func TestFindFS(t *testing.T) {
 	tmpDir, cfgFile, target, _ := setupAnalyze(t)
 	defer os.RemoveAll(tmpDir)
 
-	cfg, err := config.ReadConfig(cfgFile)
+	cfg, err := iduconfig.ReadConfig(cfgFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +88,7 @@ func TestFindFS(t *testing.T) {
 	})
 
 	t.Run("corrupt prefix entry returns error", func(t *testing.T) {
-		_, pcfg, _, db, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, target, false)
+		_, pcfg, _, db, err := openPrefixRaw(ctx, globalConfig, target)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -128,7 +127,7 @@ func TestFindNoSiblingBleedAndPrefixFlag(t *testing.T) {
 
 	dbDir := filepath.Join(tmpDir, "db")
 	cfgText := "filesystems:\n  - name: tree\n    prefix: " + root + "\n    database: " + dbDir + "\n"
-	cfg, err := config.ParseConfig([]byte(cfgText))
+	cfg, err := iduconfig.ParseConfig([]byte(cfgText))
 	if err != nil {
 		t.Fatal(err)
 	}

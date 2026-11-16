@@ -17,10 +17,10 @@ import (
 	"time"
 
 	"cloudeng.io/algo/container/heap"
+	"cloudeng.io/cmd/idu/iduconfig"
+	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/boolexpr"
-	"cloudeng.io/cmd/idu/internal/config"
-	"cloudeng.io/cmd/idu/internal/database"
 	"cloudeng.io/cmd/idu/internal/hardlinks"
 	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/cmd/idu/internal/usernames"
@@ -138,7 +138,7 @@ func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *comput
 
 	parser := boolexpr.NewParser(ctx, fwfs)
 
-	ctx, cfg, target, rdb, err := internal.OpenPrefixAndDatabase(ctx, globalConfig, args[0], true)
+	ctx, cfg, target, rdb, err := openPrefixReadOnly(ctx, globalConfig, args[0])
 	if err != nil {
 		return err
 	}
@@ -173,17 +173,17 @@ func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *comput
 // unless they cannot be used, in which case all of the file metadata is
 // rescanned: summaries are computed without any filter expression and only
 // record what's needed to deduplicate hardlinks if configured to do so.
-func (st *statsCmds) computeStats(ctx context.Context, db database.DB, cfg config.Prefix, match boolexpr.Matcher, prefix string, topN int, progress bool) (*reports.AllStats, error) {
+func (st *statsCmds) computeStats(ctx context.Context, db idudb.Reader, cfg iduconfig.Prefix, match boolexpr.Matcher, prefix string, topN int, progress bool) (*reports.AllStats, error) {
 	if match.HasExpression() || !cfg.CountHardlinkAsFiles && !cfg.RecordHardlinks() {
 		return st.computeFromPrefixes(ctx, db, &cfg, match, prefix, topN, progress)
 	}
 	return st.computeFromSummaries(ctx, db, &cfg, prefix, topN, progress)
 }
 
-func (st *statsCmds) computeFromSummaries(ctx context.Context, db database.DB, cfg *config.Prefix, prefix string, topN int, progress bool) (*reports.AllStats, error) {
+func (st *statsCmds) computeFromSummaries(ctx context.Context, db idudb.Reader, cfg *iduconfig.Prefix, prefix string, topN int, progress bool) (*reports.AllStats, error) {
 	calcID, sep := cfg.CalculatorOrDefault().String(), cfg.SeparatorOrDefault()
 	dedup := !cfg.CountHardlinkAsFiles
-	if err := internal.CheckSummaries(ctx, db, calcID, dedup); err != nil {
+	if err := idudb.CheckSummaries(ctx, db, calcID, dedup); err != nil {
 		return nil, err
 	}
 	var hl *hardlinks.Incremental
@@ -207,7 +207,7 @@ func (st *statsCmds) computeFromSummaries(ctx context.Context, db database.DB, c
 			return false
 		}
 		if ps.CalcID != calcID || dedup && !ps.HardlinkInfo {
-			summaryErr = fmt.Errorf("%v: %w", path, internal.ErrStaleSummaries)
+			summaryErr = fmt.Errorf("%v: %w", path, idudb.ErrStaleSummaries)
 			return false
 		}
 		if dedup {
@@ -241,8 +241,8 @@ func (st *statsCmds) computeFromSummaries(ctx context.Context, db database.DB, c
 // the depth of the tree and hardlinks are attributed to the same prefixes as
 // when using the summaries. The metadata is read and decoded concurrently,
 // but the stats, including hardlink deduplication, are computed in order.
-func (st *statsCmds) computeFromPrefixes(ctx context.Context, db database.DB, cfg *config.Prefix, match boolexpr.Matcher, prefix string, topN int, progress bool) (*reports.AllStats, error) {
-	if err := internal.CheckSummaryKeys(ctx, db); err != nil {
+func (st *statsCmds) computeFromPrefixes(ctx context.Context, db idudb.Reader, cfg *iduconfig.Prefix, match boolexpr.Matcher, prefix string, topN int, progress bool) (*reports.AllStats, error) {
+	if err := idudb.CheckSummaryKeys(ctx, db); err != nil {
 		return nil, err
 	}
 	calc, sep := cfg.CalculatorOrDefault(), cfg.SeparatorOrDefault()
@@ -313,7 +313,7 @@ func resolveDirectStatsFile(statsDirFlag, arg string) (string, bool) {
 	return "", false
 }
 
-func resolveStatsFilename(ctx context.Context, cfg config.T, statsDirFlag string, args []string) (string, error) {
+func resolveStatsFilename(ctx context.Context, cfg iduconfig.T, statsDirFlag string, args []string) (string, error) {
 	if len(args) == 0 {
 		return "", fmt.Errorf("missing prefix or stats filename")
 	}

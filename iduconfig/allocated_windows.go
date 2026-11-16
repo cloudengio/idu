@@ -4,7 +4,7 @@
 
 //go:build windows
 
-package config
+package iduconfig
 
 import (
 	"unsafe"

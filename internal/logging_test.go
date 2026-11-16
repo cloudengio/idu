@@ -83,7 +83,7 @@ func TestLogAndBadgerLogger(t *testing.T) {
 	Log(ctx, LogProgress, "progress-msg", "n", 1)
 	Log(ctx, LogError, "error-msg", "err", "boom")
 
-	bl := &badgerLogger{}
+	bl := &BadgerLogger{}
 	bl.Errorf("err %d", 1)
 	bl.Warningf("warn %d", 2)
 	bl.Infof("info %d", 3)

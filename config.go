@@ -9,7 +9,7 @@ import (
 	"io"
 	"os"
 
-	"cloudeng.io/cmd/idu/internal/config"
+	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmdutil"
 	"cloudeng.io/cmdutil/cmdconfig"
 	"cloudeng.io/cmdutil/subcmd"
@@ -19,10 +19,10 @@ type configLoadError struct {
 	err error
 }
 
-func configCommands() cmdconfig.ConfigCommands[config.T] {
-	return cmdconfig.ConfigCommands[config.T]{
+func configCommands() cmdconfig.ConfigCommands[iduconfig.T] {
+	return cmdconfig.ConfigCommands[iduconfig.T]{
 		Summary:    "YAML configuration file options\n",
-		Describers: []func(io.Writer) error{config.DescribeLayouts, config.DescribeHardlinkDedup},
+		Describers: []func(io.Writer) error{iduconfig.DescribeLayouts, iduconfig.DescribeHardlinkDedup},
 	}
 }
 
@@ -33,7 +33,7 @@ func newConfigExtension() subcmd.Extension {
 func configShow(ctx context.Context, flagValues any, args []string) error {
 	if loadErr, ok := cmdutil.ContextValue[configLoadError](ctx); ok && loadErr.err != nil {
 		if loc, ok := cmdutil.ContextValue[*cmdconfig.Located](ctx); ok {
-			config.PrintLocated(os.Stdout, loc)
+			iduconfig.PrintLocated(os.Stdout, loc)
 		}
 		return loadErr.err
 	}

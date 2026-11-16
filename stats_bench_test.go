@@ -13,10 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"cloudeng.io/cmd/idu/internal"
+	"cloudeng.io/cmd/idu/iduconfig"
+	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/internal/boolexpr"
-	"cloudeng.io/cmd/idu/internal/config"
-	"cloudeng.io/cmd/idu/internal/database"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/cmd/idu/stats"
@@ -25,13 +24,23 @@ import (
 
 // createPrefixTreeDB creates a database containing a two level tree of
 // fanout*fanout directories, each with nfiles files.
-func createPrefixTreeDB(ctx context.Context, b testing.TB, fanout, nfiles int) config.Prefix {
+func createPrefixTreeDB(ctx context.Context, b testing.TB, fanout, nfiles int) iduconfig.Prefix {
 	b.Helper()
-	cfg := config.Prefix{Prefix: "/root", Database: filepath.Join(b.TempDir(), "db"), Separator: "/"}
-	sdb, err := internal.NewScanDB(ctx, cfg)
+	cfg := iduconfig.Prefix{Prefix: "/root", Database: filepath.Join(b.TempDir(), "db"), Separator: "/"}
+	// Create the database via idudb so that it contains the summary
+	// metadata and then write the prefixes and their summaries directly.
+	idb, err := openWritableDB(ctx, cfg)
 	if err != nil {
 		b.Fatal(err)
 	}
+	if err := idb.Close(ctx); err != nil {
+		b.Fatal(err)
+	}
+	sdb, err := openRawDB(ctx, cfg.Database)
+	if err != nil {
+		b.Fatal(err)
+	}
+	var buf bytes.Buffer
 	now := time.Now()
 	ino := uint64(1)
 	newPrefix := func(path string, files int) prefixinfo.T {
@@ -49,7 +58,16 @@ func createPrefixTreeDB(ctx context.Context, b testing.TB, fanout, nfiles int) c
 	}
 	set := func(path string, files int) {
 		pi := newPrefix(path, files)
-		if err := sdb.SetPrefixInfo(ctx, path, false, &pi); err != nil {
+		buf.Reset()
+		if err := pi.AppendBinary(&buf); err != nil {
+			b.Fatal(err)
+		}
+		if err := sdb.Set(ctx, path, buf.Bytes(), true); err != nil {
+			b.Fatal(err)
+		}
+		summary := stats.ComputeSummary(path, &pi, cfg.CalculatorOrDefault(), boolexpr.AlwaysMatch(nil), cfg.RecordHardlinks())
+		exactKey, _ := stats.SummaryKeys(cfg.SeparatorOrDefault(), path)
+		if err := sdb.SetSummary(ctx, exactKey, summary.AppendBinary(nil), true); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -71,7 +89,7 @@ func BenchmarkComputeFromPrefixes(b *testing.B) {
 	ctx := context.Background()
 	for _, nfiles := range []int{10, 100} {
 		cfg := createPrefixTreeDB(ctx, b, 100, nfiles)
-		db, err := internal.OpenDatabase(ctx, cfg, true)
+		db, err := openReadOnlyDB(ctx, cfg.Database)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -101,7 +119,7 @@ func BenchmarkComputeFromSummaries(b *testing.B) {
 	ctx := context.Background()
 	for _, nfiles := range []int{10, 100} {
 		cfg := createPrefixTreeDB(ctx, b, 100, nfiles)
-		db, err := internal.OpenDatabase(ctx, cfg, true)
+		db, err := openReadOnlyDB(ctx, cfg.Database)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -120,7 +138,7 @@ func BenchmarkComputeFromSummaries(b *testing.B) {
 // computeFromPrefixesPerGet is the previous, serial, implementation of
 // computeFromPrefixes that uses a database transaction per prefix and is
 // retained for comparison.
-func computeFromPrefixesPerGet(ctx context.Context, db database.DB, cfg *config.Prefix, match boolexpr.Matcher, prefix string, topN int) (*reports.AllStats, error) {
+func computeFromPrefixesPerGet(ctx context.Context, db idudb.Reader, cfg *iduconfig.Prefix, match boolexpr.Matcher, prefix string, topN int) (*reports.AllStats, error) {
 	calc, sep := cfg.CalculatorOrDefault(), cfg.SeparatorOrDefault()
 	sdb := reports.NewAllStats(prefix, topN)
 	agg := reports.NewSubtreeAggregator(prefix, topN)

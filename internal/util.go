@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"cloudeng.io/cmd/idu/internal/config"
+	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmdutil/flags"
 )
@@ -64,7 +64,7 @@ func trimTrailingSep(path string) string {
 // path) to the matching Prefix configuration and the filesystem path to operate
 // on (Prefix.Prefix when matched by name, or the resolved path when matched
 // by prefix).
-func LookupPrefix(ctx context.Context, all config.T, target string) (context.Context, config.Prefix, string, error) {
+func LookupPrefix(ctx context.Context, all iduconfig.T, target string) (context.Context, iduconfig.Prefix, string, error) {
 	if cfg, ok := all.ForName(target); ok {
 		return ctx, cfg, trimTrailingSep(cfg.Prefix), nil
 	}
