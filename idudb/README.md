@@ -310,7 +310,7 @@ hardlinks so that they can be deduplicated without rescanning the database.
 ```go
 func WithSeparator(sep string) Option
 ```
-WithSeparator sets the filename separator, it defaults to "/".
+WithSeparator sets the filename separator, it defaults to filepath.Separator.
 
 
 

@@ -111,7 +111,9 @@ type compactor interface {
 }
 
 func (sdb *DB) logAndMaintain(ctx context.Context, start, stop time.Time, detail []byte) error {
-	if err := sdb.db.Log(ctx, start, stop, detail); err != nil {
+	// Always attempt to persist the run log entry even if ctx was canceled,
+	// so interrupted analyze runs leave an audit trail before closing.
+	if err := sdb.db.Log(context.WithoutCancel(ctx), start, stop, detail); err != nil {
 		return err
 	}
 	if ctx.Err() != nil {

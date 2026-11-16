@@ -20,10 +20,15 @@ import (
 )
 
 // openBadgerDB opens the badger database backend at path.
-func openBadgerDB(_ context.Context, path string, readonly bool) (idudb.Database, error) {
+func openBadgerDB(ctx context.Context, path string, readonly bool) (idudb.Database, error) {
 	var opts []badgerdb.Option
 	if readonly {
 		opts = append(opts, badgerdb.ReadOnly())
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		if timeout := time.Until(deadline); timeout > 0 {
+			opts = append(opts, badgerdb.WithTimeout(timeout))
+		}
 	}
 	bopts := badger.DefaultOptions(path).
 		WithLogger(&internal.BadgerLogger{}).
@@ -61,6 +66,8 @@ func openDatabase(ctx context.Context, path string, readonly bool) (idudb.Databa
 	}()
 	start := time.Now()
 	delayed := false
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -77,7 +84,7 @@ func openDatabase(ctx context.Context, path string, readonly bool) (idudb.Databa
 				fmt.Fprintln(openProgress)
 			}
 			return res.db, res.err
-		case <-time.After(time.Second):
+		case <-ticker.C:
 			fmt.Fprintf(openProgress, "waiting for database to open: %v: %s\t\t\r", path, time.Since(start).Truncate(time.Second))
 			delayed = true
 		}
@@ -91,7 +98,7 @@ func openReadOnlyDB(ctx context.Context, path string) (idudb.Reader, error) {
 		return nil, err
 	}
 	if err := idudb.CheckFormat(ctx, db); err != nil {
-		_ = db.Close(ctx)
+		_ = db.Close(context.WithoutCancel(ctx))
 		return nil, fmt.Errorf("%v: %w", path, err)
 	}
 	return db, nil
@@ -105,7 +112,7 @@ func openWritableDB(ctx context.Context, cfg iduconfig.Prefix) (*idudb.DB, error
 	}
 	db, err := idudb.New(ctx, raw, idudb.OptionsFromConfig(cfg)...)
 	if err != nil {
-		_ = raw.Close(ctx)
+		_ = raw.Close(context.WithoutCancel(ctx))
 		return nil, fmt.Errorf("%v: %w", cfg.Database, err)
 	}
 	return db, nil
@@ -120,7 +127,7 @@ func openPrefixReadOnly(ctx context.Context, all iduconfig.T, prefix string) (co
 	}
 	db, err := openReadOnlyDB(ctx, cfg.Database)
 	if err != nil {
-		return ctx, iduconfig.Prefix{}, "", nil, fmt.Errorf("failed to open database for %v in %v: %v", cfg.Prefix, cfg.Database, err)
+		return ctx, iduconfig.Prefix{}, "", nil, fmt.Errorf("failed to open database for %v in %v: %w", cfg.Prefix, cfg.Database, err)
 	}
 	return ctx, cfg, target, db, nil
 }
@@ -133,11 +140,11 @@ func eraseEntries(ctx context.Context, prefix string, erase func(context.Context
 	}
 	db, err := openDatabase(ctx, cfg.Database, false)
 	if err != nil {
-		return fmt.Errorf("failed to open database for %v in %v: %v", cfg.Prefix, cfg.Database, err)
+		return fmt.Errorf("failed to open database for %v in %v: %w", cfg.Prefix, cfg.Database, err)
 	}
 	if err := erase(ctx, db); err != nil {
-		_ = db.Close(ctx)
-		return fmt.Errorf("failed to erase entries in the database for %v in %v: %v", cfg.Prefix, cfg.Database, err)
+		_ = db.Close(context.WithoutCancel(ctx))
+		return fmt.Errorf("failed to erase entries in the database for %v in %v: %w", cfg.Prefix, cfg.Database, err)
 	}
 	return db.Close(ctx)
 }

@@ -865,16 +865,7 @@ func TestScanDBPartialRewriteInvalidatesOldSpec(t *testing.T) {
 // newTestDB opens the database specified by cfg using the options
 // derived from cfg.
 func newTestDB(ctx context.Context, cfg iduconfig.Prefix) (*DB, error) {
-	raw, err := databaseFactory(ctx, cfg.Database, false)
-	if err != nil {
-		return nil, err
-	}
-	db, err := New(ctx, raw, OptionsFromConfig(cfg)...)
-	if err != nil {
-		_ = raw.Close(ctx)
-		return nil, err
-	}
-	return db, nil
+	return openTestDB(ctx, cfg.Database, OptionsFromConfig(cfg)...)
 }
 
 // databaseFactory creates the database backend used by tests and may be

@@ -5,6 +5,7 @@
 package idudb
 
 import (
+	"path/filepath"
 	"time"
 
 	"cloudeng.io/cmd/idu/iduconfig"
@@ -25,7 +26,7 @@ type options struct {
 func newOptions(opts []Option) options {
 	o := options{
 		calc: diskusage.NewIdentity(),
-		sep:  "/",
+		sep:  string(filepath.Separator),
 	}
 	for _, fn := range opts {
 		fn(&o)
@@ -43,7 +44,7 @@ func WithCalculator(calc diskusage.Calculator) Option {
 	}
 }
 
-// WithSeparator sets the filename separator, it defaults to "/".
+// WithSeparator sets the filename separator, it defaults to filepath.Separator.
 func WithSeparator(sep string) Option {
 	return func(o *options) {
 		if sep != "" {

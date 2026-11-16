@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -108,7 +109,7 @@ func verifyAnalyzed(ctx context.Context, t *testing.T, dbDir, root, sub string) 
 	if err := CheckSummaries(ctx, rdb, newOptions(nil).calc.String(), false); err != nil {
 		t.Errorf("CheckSummaries: %v", err)
 	}
-	exactKey, childPrefix := stats.SummaryKeys("/", root)
+	exactKey, childPrefix := stats.SummaryKeys(string(filepath.Separator), root)
 	nsummaries := 0
 	if err := rdb.ScanSummaries(ctx, exactKey, childPrefix, func(context.Context, string, []byte) bool {
 		nsummaries++
@@ -237,6 +238,7 @@ func TestEraseLogsAndErrors(t *testing.T) {
 			return err
 		}
 		if err := fn(ctx, db); err != nil {
+			_ = db.Close(ctx)
 			return err
 		}
 		return db.Close(ctx)
@@ -369,14 +371,59 @@ func TestHandleDeletedOrChangedPrefixes(t *testing.T) {
 }
 
 func openTestDB(ctx context.Context, path string, opts ...Option) (*DB, error) {
-	raw, err := openDatabase(ctx, path, false)
+	raw, err := databaseFactory(ctx, path, false)
 	if err != nil {
 		return nil, err
 	}
 	db, err := New(ctx, raw, opts...)
 	if err != nil {
-		_ = raw.Close(ctx)
+		_ = raw.Close(context.WithoutCancel(ctx))
 		return nil, err
 	}
 	return db, nil
+}
+
+func TestLogAndCloseCanceledContextPersistsLog(t *testing.T) {
+	ctx := context.Background()
+	dbDir := filepath.Join(t.TempDir(), "db")
+	db, err := openTestDB(ctx, dbDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+
+	if err := db.LogAndClose(cctx, time.Now().Add(-time.Second), time.Now(), []byte(`{"op":"interrupted"}`)); err != nil {
+		t.Fatalf("LogAndClose(canceled) = %v", err)
+	}
+
+	rdb, err := openDatabase(ctx, dbDir, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rdb.Close(ctx)
+	_, _, detail, err := rdb.LastLog(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(detail) != `{"op":"interrupted"}` {
+		t.Errorf("LastLog detail = %q, want %q", detail, `{"op":"interrupted"}`)
+	}
+}
+
+func TestDefaultSeparatorAndSameRoot(t *testing.T) {
+	if got, want := newOptions(nil).sep, string(filepath.Separator); got != want {
+		t.Errorf("default sep = %q, want %q", got, want)
+	}
+	if !sameRoot("windows", `c:\Tree`, `C:\tree`) {
+		t.Error("expected case-insensitive root match on windows")
+	}
+	if sameRoot("linux", "/tmp/Tree", "/tmp/tree") {
+		t.Error("expected case-sensitive root mismatch on linux")
+	}
+	sub := filepath.Join(t.TempDir(), "sub")
+	if !sameRoot(runtime.GOOS, sub+string(filepath.Separator), sub) {
+		t.Error("expected cleaned root match on host OS")
+	}
 }

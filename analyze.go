@@ -78,8 +78,14 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *anal
 	}
 	db, err := openDB(ctx, cfg)
 	if err != nil {
-		return fmt.Errorf("open/create database: %v: %v", cfg.Database, err)
+		return fmt.Errorf("open/create database: %v: %w", cfg.Database, err)
 	}
+	dbClosed := false
+	defer func() {
+		if !dbClosed {
+			_ = db.Close(context.WithoutCancel(ctx))
+		}
+	}()
 
 	// Cancel the walk on interrupt/termination so active filesystem and
 	// database operations finish cleanly before the database is closed.
@@ -125,6 +131,7 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *anal
 		alz.beforeClose()
 	}
 	errs.Append(summarizeAndLog(ctx, db, pt, start))
+	dbClosed = true
 	if errs.Err() == nil {
 		return nil
 	}

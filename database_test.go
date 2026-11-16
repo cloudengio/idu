@@ -10,10 +10,12 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
 )
 
@@ -117,11 +119,42 @@ func TestOpenDatabaseCanceledClosesDB(t *testing.T) {
 
 type closeNotifyDB struct {
 	idudb.Database
-	closedCh chan struct{}
+	closedCh  chan struct{}
+	closeOnce sync.Once
 }
 
 func (c *closeNotifyDB) Close(ctx context.Context) error {
 	err := c.Database.Close(ctx)
-	close(c.closedCh)
+	c.closeOnce.Do(func() {
+		close(c.closedCh)
+	})
 	return err
+}
+
+func TestOpenPrefixReadOnlyPreservesErrorChain(t *testing.T) {
+	ctx := context.Background()
+	dbDir := filepath.Join(t.TempDir(), "legacy-db")
+	raw, err := openDatabase(ctx, dbDir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Set(ctx, "/p", []byte("val"), false); err != nil {
+		_ = raw.Close(ctx)
+		t.Fatal(err)
+	}
+	if err := raw.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := iduconfig.ParseConfig([]byte("filesystems:\n  - name: legacy\n    prefix: /p\n    database: " + dbDir + "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, rdb, err := openPrefixReadOnly(ctx, cfg, "legacy")
+	if !errors.Is(err, idudb.ErrLegacyDatabase) {
+		if rdb != nil {
+			_ = rdb.Close(ctx)
+		}
+		t.Fatalf("openPrefixReadOnly err = %v, want wrapped idudb.ErrLegacyDatabase", err)
+	}
 }

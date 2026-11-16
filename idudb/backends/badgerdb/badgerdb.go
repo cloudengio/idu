@@ -75,7 +75,7 @@ type Database struct {
 	closeErr  error
 }
 
-// The database is paritioned into 6 'buckets':
+// The database is partitioned into 6 'buckets':
 // 1. inode bucket, keyed by inode and device numbers. This is by far
 //    the largest since it has an entry for every file.
 // 2. the prefix bucket, keyed by prefix. This contains an entry for

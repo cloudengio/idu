@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"cloudeng.io/cmd/idu/internal"
@@ -125,6 +127,14 @@ func (a *Analyzer) newAsyncStat(w *walker) *asyncstat.T {
 		asyncstat.WithLatencyTracker(a.opts.progress))
 }
 
+func sameRoot(goos, a, b string) bool {
+	ca, cb := filepath.Clean(a), filepath.Clean(b)
+	if goos == "windows" {
+		return strings.EqualFold(ca, cb)
+	}
+	return ca == cb
+}
+
 // Analyze scans target, which must be the root or a prefix beneath it,
 // and updates the database accordingly. Any errors previously recorded for
 // target and its descendants are deleted before the scan starts. The
@@ -152,7 +162,7 @@ func (a *Analyzer) Analyze(ctx context.Context, target string) error {
 	errs.Append(w.fw.Walk(ctx, target))
 	// Summaries are only known to be consistent with the current configuration
 	// once the entire prefix has been scanned without interruption.
-	if errs.Err() == nil && ctx.Err() == nil && filepath.Clean(target) == filepath.Clean(a.root) {
+	if errs.Err() == nil && ctx.Err() == nil && sameRoot(runtime.GOOS, target, a.root) {
 		errs.Append(a.db.markSummariesComplete(ctx))
 	}
 	return errs.Err()
@@ -243,7 +253,7 @@ func (w *walker) handlePrefix(ctx context.Context, state *prefixState, prefix st
 	}
 
 	if !w.reAnalyze && state.existing.Unchanged(state.current) {
-		// Cam reuse all file entries, but will need to restat all
+		// Can reuse all file entries, but will need to restat all
 		// prefixes/directories in any case.
 		state.current.SetInfoList(state.existing.FilesOnly())
 		w.pt.ParentUnchanged()
