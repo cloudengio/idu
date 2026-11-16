@@ -615,6 +615,7 @@ func TestOpenPrefixAndDatabase(t *testing.T) {
 		t.Fatalf("OpenPrefixAndDatabase rw: %v", err)
 	}
 	if cfg.Name != "testfs" || target != "/test/root" {
+		_ = db.Close(ctx)
 		t.Fatalf("got (%q, %q), want (testfs, /test/root)", cfg.Name, target)
 	}
 	_ = db.Close(ctx)
@@ -624,6 +625,7 @@ func TestOpenPrefixAndDatabase(t *testing.T) {
 		t.Fatalf("OpenPrefixAndDatabase ro: %v", err)
 	}
 	if target != "/test/root/sub" {
+		_ = rdb.Close(ctx)
 		t.Fatalf("target = %q, want /test/root/sub", target)
 	}
 	_ = rdb.Close(ctx)
