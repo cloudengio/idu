@@ -5,6 +5,8 @@
 package prefixinfo_test
 
 import (
+	"bytes"
+	"encoding/binary"
 	"reflect"
 	"testing"
 
@@ -51,5 +53,41 @@ func TestStatsBinaryRoundTrip(t *testing.T) {
 	}
 	if out != in {
 		t.Errorf("got %+v, want %+v", out, in)
+	}
+}
+
+func TestStatsDecodeErrors(t *testing.T) {
+	t.Parallel()
+	overflow := bytes.Repeat([]byte{0xff}, 12)
+	hugeList := binary.AppendUvarint(nil, 100_000)
+
+	for _, bad := range [][]byte{nil, {0x01, 0x02}, overflow} {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("Stats.UnmarshalBinary(%x) panicked: %v", bad, r)
+				}
+			}()
+			var s prefixinfo.Stats
+			if err := s.UnmarshalBinary(bad); err == nil {
+				t.Errorf("Stats.UnmarshalBinary(%x) = nil, want error", bad)
+			}
+			_ = s.DecodeBinary(bad)
+		}()
+	}
+
+	for _, bad := range [][]byte{nil, {0x02, 0x01}, overflow, hugeList} {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("StatsList.UnmarshalBinary(%x) panicked: %v", bad, r)
+				}
+			}()
+			var sl prefixinfo.StatsList
+			if err := sl.UnmarshalBinary(bad); err == nil {
+				t.Errorf("StatsList.UnmarshalBinary(%x) = nil, want error", bad)
+			}
+			_ = sl.DecodeBinary(bad)
+		}()
 	}
 }

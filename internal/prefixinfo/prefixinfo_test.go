@@ -5,6 +5,8 @@
 package prefixinfo_test
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io/fs"
 	"reflect"
@@ -230,5 +232,95 @@ func TestAccessorsAndErrors(t *testing.T) {
 	}
 	if err := empty.UnmarshalBinary([]byte{0x03}); err == nil {
 		t.Error("expected error unmarshaling unsupported version")
+	}
+}
+
+func assertUnmarshalFailsNoPanic(t *testing.T, name string, data []byte) {
+	t.Helper()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("%s: UnmarshalBinary panicked: %v", name, r)
+		}
+	}()
+	var pi prefixinfo.T
+	if err := pi.UnmarshalBinary(data); err == nil {
+		t.Errorf("%s: expected error from UnmarshalBinary, got nil", name)
+	}
+}
+
+func TestCorruptUnmarshalBinary(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	pi := testutil.TestdataNewPrefixInfo("dir", 1, 2, 0700, now, 10, 20, 1, 100)
+	pi.AppendInfoList(file.InfoList{
+		testutil.TestdataNewInfo("f1", 10, 3, 0600, now, 10, 20, 1, 101),
+		testutil.TestdataNewInfo("f2", 20, 4, 0600, now, 11, 21, 1, 102),
+	})
+	raw, err := pi.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for trunc := 1; trunc < len(raw); trunc++ {
+		assertUnmarshalFailsNoPanic(t, fmt.Sprintf("truncated-%d", trunc), raw[:trunc])
+	}
+
+	// Overflowed varint right after version byte.
+	overflow := append([]byte{0x02}, bytes.Repeat([]byte{0xff}, 12)...)
+	assertUnmarshalFailsNoPanic(t, "overflow-varint", overflow)
+
+	// Negative / oversized modTime length.
+	hdr := []byte{0x02, 0, 0, 0, 0, 0, 0, 0, 0} // ver + 4 zero varints + 4 zero mode bytes
+	negTS := binary.AppendVarint(append([]byte(nil), hdr...), -1)
+	assertUnmarshalFailsNoPanic(t, "negative-ts", negTS)
+	hugeTS := binary.AppendVarint(append([]byte(nil), hdr...), 99999)
+	assertUnmarshalFailsNoPanic(t, "huge-ts", hugeTS)
+
+	// Reusing a populated T when unmarshaling a prefix whose idMaps are empty
+	// must clear previous idMaps.
+	uniform := testutil.TestdataNewPrefixInfo("dir2", 1, 2, 0700, now, 10, 20, 1, 200)
+	uniform.AppendInfo(testutil.TestdataNewInfo("u1", 5, 1, 0600, now, 10, 20, 1, 201))
+	uniformRaw, err := uniform.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reused prefixinfo.T
+	if err := reused.UnmarshalBinary(raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := reused.UnmarshalBinary(uniformRaw); err != nil {
+		t.Fatalf("reused UnmarshalBinary: %v", err)
+	}
+	if prefixinfo.NumUserIDs(reused) != 0 || prefixinfo.NumGroupIDs(reused) != 0 {
+		t.Errorf("stale idMaps after reuse: users=%d groups=%d", prefixinfo.NumUserIDs(reused), prefixinfo.NumGroupIDs(reused))
+	}
+}
+
+func TestMutateAfterMarshal(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	pi := testutil.TestdataNewPrefixInfo("dir", 1, 2, 0700, now, 10, 20, 1, 100)
+	pi.AppendInfo(testutil.TestdataNewInfo("f1", 10, 2, 0600, now, 10, 20, 1, 101))
+	if _, err := pi.MarshalBinary(); err != nil {
+		t.Fatal(err)
+	}
+
+	pi.AppendInfo(testutil.TestdataNewInfo("f2", 20, 4, 0600, now, 99, 20, 1, 102))
+	round1 := prefixinfo.BinaryRoundTrip(t, &pi)
+	if got := scanUsers(t, &round1, 99); !reflect.DeepEqual(got, []string{"f2"}) {
+		t.Errorf("after AppendInfo, UserIDScan(99) = %v, want [f2]", got)
+	}
+	if xa := round1.XAttrInfo(round1.InfoList()[1]); xa.FileID != 102 || xa.Blocks != 4 {
+		t.Errorf("after AppendInfo, f2 xattr = %+v, want FileID=102 Blocks=4", xa)
+	}
+
+	pi.SetInfoList(file.InfoList{testutil.TestdataNewInfo("f3", 30, 6, 0600, now, 88, 20, 1, 103)})
+	pi.AppendInfoList(file.InfoList{testutil.TestdataNewInfo("f4", 40, 8, 0600, now, 10, 20, 1, 104)})
+	round2 := prefixinfo.BinaryRoundTrip(t, &pi)
+	if got := scanUsers(t, &round2, 88); !reflect.DeepEqual(got, []string{"f3"}) {
+		t.Errorf("after SetInfoList+AppendInfoList, UserIDScan(88) = %v, want [f3]", got)
+	}
+	if xa := round2.XAttrInfo(round2.InfoList()[0]); xa.FileID != 103 || xa.Blocks != 6 {
+		t.Errorf("after SetInfoList, f3 xattr = %+v, want FileID=103 Blocks=6", xa)
 	}
 }

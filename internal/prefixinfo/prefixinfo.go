@@ -52,16 +52,27 @@ func New(_ string, info file.Info) T {
 	return pi
 }
 
+func (pi *T) resetDerived() {
+	pi.finalized = false
+	pi.inodes = nil
+	pi.blocks = nil
+	pi.userIDMap = nil
+	pi.groupIDMap = nil
+}
+
 func (pi *T) SetInfoList(entries file.InfoList) {
 	pi.entries = entries
+	pi.resetDerived()
 }
 
 func (pi *T) AppendInfoList(entries file.InfoList) {
 	pi.entries = append(pi.entries, entries...)
+	pi.resetDerived()
 }
 
 func (pi *T) AppendInfo(entry file.Info) {
 	pi.entries = append(pi.entries, entry)
+	pi.resetDerived()
 }
 
 func (pi T) Size() int64 {
@@ -188,66 +199,98 @@ func (pi *T) AppendBinary(buf *bytes.Buffer) error {
 	return err
 }
 
-func (pi *T) UnmarshalBinary(data []byte) error {
+func decodeBinaryInfoListSafe(data []byte) (entries file.InfoList, rest []byte, err error) {
+	l, rem, err := readVarint(data)
+	if err != nil {
+		return nil, nil, fmt.Errorf("PrefixInfo: entries count: %w", err)
+	}
+	// Each encoded file.Info requires at least 8 bytes (version, name len, size, mode, modTime len).
+	if l < 0 || uint64(l) > uint64(len(rem))/8 {
+		return nil, nil, fmt.Errorf("PrefixInfo: invalid entries count %d (remaining %d)", l, len(rem))
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			entries, rest, err = nil, nil, fmt.Errorf("PrefixInfo: corrupt entry list: %v", r)
+		}
+	}()
+	return file.DecodeBinaryInfoList(data)
+}
+
+func (pi *T) decodeHeader(data []byte) ([]byte, error) {
 	if len(data) == 0 {
-		return fmt.Errorf("PrefixInfo: insufficient data")
+		return nil, fmt.Errorf("PrefixInfo: insufficient data")
 	}
 	version := data[0]
-
 	if version != 0x1 && version != 0x2 {
-		return fmt.Errorf("PrefixInfo: invalid version of binary encoding: got %x, want %x..%x", data[0], 01, 02)
+		return nil, fmt.Errorf("PrefixInfo: invalid version of binary encoding: got %x, want %x..%x", data[0], 01, 02)
 	}
-	var n int
-	data = data[1:]                  // version
-	pi.size, n = binary.Varint(data) // size
-	data = data[n:]
-
-	pi.xattr.Blocks, n = binary.Varint(data) // nblocks
-	data = data[n:]
-
-	uid, n := binary.Varint(data) // userid
-	data = data[n:]
-
-	gid, n := binary.Varint(data) // groupid
-	data = data[n:]
-	pi.xattr.UID, pi.xattr.GID = uid, gid
-
-	pi.mode = fs.FileMode(binary.LittleEndian.Uint32(data)) // filemode
-	data = data[4:]
-	ts, n := binary.Varint(data) // modtime
-	data = data[n:]
-	if err := pi.modTime.UnmarshalBinary(data[0:ts]); err != nil { // time
-		return err
-	}
-	data = data[ts:]
+	data = data[1:]
 
 	var err error
+	for _, dst := range []*int64{&pi.size, &pi.xattr.Blocks, &pi.xattr.UID, &pi.xattr.GID} {
+		if *dst, data, err = readVarint(data); err != nil {
+			return nil, fmt.Errorf("PrefixInfo: header: %w", err)
+		}
+	}
+	if len(data) < 4 {
+		return nil, fmt.Errorf("PrefixInfo: insufficient data for mode")
+	}
+	pi.mode = fs.FileMode(binary.LittleEndian.Uint32(data))
+	data = data[4:]
 
-	data, err = pi.userIDMap.decodeBinary(data) // user id maps
+	ts, data, err := readVarint(data)
 	if err != nil {
+		return nil, fmt.Errorf("PrefixInfo: modTime length: %w", err)
+	}
+	if ts < 0 || ts > int64(len(data)) {
+		return nil, fmt.Errorf("PrefixInfo: invalid modTime length %d (remaining %d)", ts, len(data))
+	}
+	if err := pi.modTime.UnmarshalBinary(data[:ts]); err != nil {
+		return nil, err
+	}
+	return data[ts:], nil
+}
+
+func (pi *T) decodeEntriesAndInodes(data []byte) error {
+	var err error
+	if data, err = pi.userIDMap.decodeBinary(data); err != nil {
 		return err
 	}
-	data, err = pi.groupIDMap.decodeBinary(data) // group id maps
-	if err != nil {
+	if data, err = pi.groupIDMap.decodeBinary(data); err != nil {
 		return err
 	}
-	pi.entries, data, err = file.DecodeBinaryInfoList(data) // files
-	if err != nil {
+	if pi.entries, data, err = decodeBinaryInfoListSafe(data); err != nil {
 		return err
 	}
-	pi.xattr.Device, n = binary.Uvarint(data)
-	data = data[n:]
-	pi.xattr.FileID, n = binary.Uvarint(data)
-	data = data[n:]
+	if pi.xattr.Device, data, err = readUvarint(data); err != nil {
+		return fmt.Errorf("PrefixInfo: device: %w", err)
+	}
+	if pi.xattr.FileID, data, err = readUvarint(data); err != nil {
+		return fmt.Errorf("PrefixInfo: fileID: %w", err)
+	}
 	pi.inodes = make([]uint64, len(pi.entries))
 	for i := range pi.inodes {
-		pi.inodes[i], n = binary.Uvarint(data)
-		data = data[n:]
+		if pi.inodes[i], data, err = readUvarint(data); err != nil {
+			return fmt.Errorf("PrefixInfo: inode[%d]: %w", i, err)
+		}
 	}
 	pi.blocks = make([]int64, len(pi.entries))
 	for i := range pi.blocks {
-		pi.blocks[i], n = binary.Varint(data)
-		data = data[n:]
+		if pi.blocks[i], data, err = readVarint(data); err != nil {
+			return fmt.Errorf("PrefixInfo: block[%d]: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func (pi *T) UnmarshalBinary(data []byte) error {
+	pi.resetDerived()
+	data, err := pi.decodeHeader(data)
+	if err != nil {
+		return err
+	}
+	if err := pi.decodeEntriesAndInodes(data); err != nil {
+		return err
 	}
 	return pi.finalizeOnUnmarshal()
 }

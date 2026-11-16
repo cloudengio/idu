@@ -6,6 +6,7 @@ package prefixinfo
 
 import (
 	"bytes"
+	"encoding/binary"
 	"reflect"
 	"strings"
 	"testing"
@@ -96,5 +97,49 @@ func TestIDMaps(t *testing.T) {
 	}
 	if id, ok := idms.idForPos(5); ok || id != 0 {
 		t.Errorf("idForPos(5) = (%d, %v), want (0, false)", id, ok)
+	}
+}
+
+func TestIDMapScannerExhaustionAndCorruptDecode(t *testing.T) {
+	t.Parallel()
+
+	idm := newIDMap(7, 64)
+	idm.set(2)
+	idm.set(10)
+	sc := newIDMapScanner(idm)
+	for sc.next() {
+	}
+	if sc.next() {
+		t.Fatal("idMapScanner.next() restarted iteration after exhaustion")
+	}
+
+	// idMap.isSet must not panic on out-of-range position or empty Pos.
+	var empty idMap
+	if empty.isSet(0) || empty.isSet(-1) {
+		t.Error("empty idMap.isSet returned true")
+	}
+
+	// Empty / truncated / overflowed / forged-length inputs must return error without panicking.
+	cases := [][]byte{
+		nil,
+		{0x80},                             // truncated varint
+		bytes.Repeat([]byte{0xff}, 12),     // overflowed varint
+		binary.AppendUvarint(nil, 100_000), // forged length with no remaining bytes
+		{0x01, 0x00, 0x05},                 // idms count=1, uid=0, Pos len=5, truncated Pos words
+	}
+	for i, c := range cases {
+		var dec idMaps
+		if _, err := dec.decodeBinary(c); err == nil {
+			t.Errorf("case %d (%x): expected decodeBinary error, got nil", i, c)
+		}
+	}
+
+	// l == 0 must reset an existing non-empty idMaps slice.
+	existing := idMaps{newIDMap(1, 64)}
+	if _, err := existing.decodeBinary([]byte{0x00}); err != nil {
+		t.Fatal(err)
+	}
+	if len(existing) != 0 {
+		t.Errorf("expected empty idMaps after decoding l=0, got %d", len(existing))
 	}
 }
