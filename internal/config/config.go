@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -300,7 +301,7 @@ func (t T) ForPrefix(path string) (Prefix, bool) {
 		if p.Prefix == "" {
 			continue
 		}
-		if strings.HasPrefix(path, p.Prefix) && (longest == nil || len(p.Prefix) > len(longest.Prefix)) {
+		if hasPathPrefix(path, p.Prefix, caseInsensitivePaths) && (longest == nil || len(p.Prefix) > len(longest.Prefix)) {
 			longest = p
 		}
 	}
@@ -308,6 +309,19 @@ func (t T) ForPrefix(path string) (Prefix, bool) {
 		return Prefix{}, false
 	}
 	return *longest, true
+}
+
+// caseInsensitivePaths is true on Windows, whose filenames are not case
+// sensitive.
+var caseInsensitivePaths = runtime.GOOS == "windows"
+
+// hasPathPrefix reports whether path starts with prefix, ignoring case
+// if caseInsensitive is true.
+func hasPathPrefix(path, prefix string, caseInsensitive bool) bool {
+	if caseInsensitive {
+		return len(path) >= len(prefix) && strings.EqualFold(path[:len(prefix)], prefix)
+	}
+	return strings.HasPrefix(path, prefix)
 }
 
 // Exclude returns true if path should be excluded/ignored.

@@ -13,6 +13,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"time"
 
@@ -119,7 +120,13 @@ func (rc *reportCmds) generateReports(_ context.Context, rf *generateReportsFlag
 		return err
 	}
 	if err := os.Symlink(src, dst); err != nil {
-		return err
+		if runtime.GOOS != "windows" {
+			return err
+		}
+		// Creating symlinks on Windows requires developer mode or
+		// administrator privileges, the reports can still be found
+		// using reports locate.
+		fmt.Fprintf(os.Stderr, "failed to link %v to %v: %v\n", dst, src, err)
 	}
 	return nil
 }
@@ -145,15 +152,15 @@ func newReportFilenames(root string, when time.Time, ext string) (*reportFilenam
 }
 
 func (rf *reportFilenames) rootDir() string {
-	return filepath.Join(rf.root, rf.when.Format(time.RFC3339))
+	return filepath.Join(rf.root, rf.when.Format(reportDirLayout))
 }
 
 func (rf *reportFilenames) usersDir() string {
-	return filepath.Join(rf.root, rf.when.Format(time.RFC3339), "users")
+	return filepath.Join(rf.root, rf.when.Format(reportDirLayout), "users")
 }
 
 func (rf *reportFilenames) groupsDir() string {
-	return filepath.Join(rf.root, rf.when.Format(time.RFC3339), "groups")
+	return filepath.Join(rf.root, rf.when.Format(reportDirLayout), "groups")
 }
 
 func (rf *reportFilenames) summary(file string) string {
@@ -171,7 +178,7 @@ func (rf *reportFilenames) group(gid int64) string {
 }
 
 func (rf *reportFilenames) latest() (src, dst string) {
-	return rf.when.Format(time.RFC3339), filepath.Join(rf.root, "latest")
+	return rf.when.Format(reportDirLayout), filepath.Join(rf.root, "latest")
 }
 
 func writeReportFiles(sdb *reports.AllStats,
@@ -281,7 +288,7 @@ func (rc *reportCmds) locate(_ context.Context, values interface{}, args []strin
 		if !d.IsDir() {
 			continue
 		}
-		when, err := time.Parse(time.RFC3339, d.Name())
+		when, err := time.Parse(reportDirLayout, d.Name())
 		if err != nil {
 			continue
 		}

@@ -19,10 +19,16 @@
 /reports/
 .*.swp
 
+go.work
+go.work.sum
+
+idu.code-workspace
+.claude
 .gograph/
 .graphifyignore
 graphify-out/
 code_review.md
+improvements.md
 .agents/
 .mcp.json
 CLAUDE.md

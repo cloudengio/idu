@@ -1,0 +1,19 @@
+name: go-windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test-lint:
+    uses: cloudengio/.github/.github/workflows/go-test-multimod.yml@main
+    with:
+      runner: |
+        [ "windows-latest" ]
+      go-versions: |
+        [ "1.27.x" ]
