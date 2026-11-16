@@ -25,6 +25,7 @@ import (
 	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/cmd/idu/internal/usernames"
 	"cloudeng.io/cmd/idu/stats"
+	"cloudeng.io/cmdutil"
 	"cloudeng.io/cmdutil/flags"
 	"cloudeng.io/file/filewalk"
 	"cloudeng.io/file/localfs"
@@ -121,9 +122,10 @@ type computeFlags struct {
 
 type viewFlags struct {
 	StatsFlags
-	User  string `subcmd:"user,,display stats for the specified user"`
-	Group string `subcmd:"group,,display stats for the specified group"`
-	Info  bool   `subcmd:"info,false,display metadata for the stats file"`
+	StatsDir string `subcmd:"stats-dir,,'directory that stats files are read from, defaults to stats_dir from the configuration or stats'"`
+	User     string `subcmd:"user,,display stats for the specified user"`
+	Group    string `subcmd:"group,,display stats for the specified group"`
+	Info     bool   `subcmd:"info,false,display metadata for the stats file"`
 }
 
 func (st *statsCmds) compute(ctx context.Context, values interface{}, args []string) error {
@@ -164,14 +166,7 @@ func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *comput
 		Expression: match.String(),
 		Stats:      sdb,
 	}
-	statsDir := cf.StatsDir
-	if len(statsDir) == 0 {
-		statsDir = cfg.StatsDir
-	}
-	if len(statsDir) == 0 {
-		statsDir = "stats"
-	}
-	return saveStats(statsDir, cf.StatsFile, stats)
+	return saveStats(selectStatsDir(cf.StatsDir, cfg.StatsDir), cf.StatsFile, stats)
 }
 
 // computeStats computes stats for prefix using the precomputed summaries
@@ -292,13 +287,73 @@ func (st *statsCmds) computeFromPrefixes(ctx context.Context, db database.DB, cf
 	return sdb, nil
 }
 
-func (st *statsCmds) view(_ context.Context, values interface{}, args []string) error {
+func selectStatsDir(statsDirFlag, cfgStatsDir string) string {
+	if len(statsDirFlag) > 0 {
+		return statsDirFlag
+	}
+	if len(cfgStatsDir) > 0 {
+		return cfgStatsDir
+	}
+	return "stats"
+}
+
+func resolveDirectStatsFile(statsDirFlag, arg string) (string, bool) {
+	if arg == "-" {
+		return "-", true
+	}
+	if info, err := os.Stat(arg); err == nil && !info.IsDir() {
+		return arg, true
+	}
+	if len(statsDirFlag) > 0 && !filepath.IsAbs(arg) {
+		candidate := filepath.Join(statsDirFlag, arg)
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate, true
+		}
+	}
+	return "", false
+}
+
+func resolveStatsFilename(ctx context.Context, cfg config.T, statsDirFlag string, args []string) (string, error) {
+	if len(args) == 0 {
+		return "", fmt.Errorf("missing prefix or stats filename")
+	}
+	if len(args) > 2 {
+		return "", fmt.Errorf("too many arguments: expected <prefix> [<filename>] or <filename>")
+	}
+	if len(args) == 1 {
+		if f, ok := resolveDirectStatsFile(statsDirFlag, args[0]); ok {
+			return f, nil
+		}
+	}
+	_, pcfg, _, err := internal.LookupPrefix(ctx, cfg, args[0])
+	if err != nil {
+		if loadErr, ok := cmdutil.ContextValue[configLoadError](ctx); ok && loadErr.err != nil {
+			return "", loadErr.err
+		}
+		return "", err
+	}
+	dir := selectStatsDir(statsDirFlag, pcfg.StatsDir)
+	if len(args) == 1 {
+		return filepath.Join(dir, "latest.idustats"), nil
+	}
+	name := args[1]
+	if name == "-" || filepath.IsAbs(name) {
+		return name, nil
+	}
+	return filepath.Join(dir, name), nil
+}
+
+func (st *statsCmds) view(ctx context.Context, values interface{}, args []string) error {
 	af := values.(*viewFlags)
 	if len(af.User) != 0 && len(af.Group) != 0 {
 		return fmt.Errorf("only one of --user or --group may be specified")
 	}
 
-	stats, err := loadStats(args[0])
+	filename, err := resolveStatsFilename(ctx, globalConfig, af.StatsDir, args)
+	if err != nil {
+		return err
+	}
+	stats, err := loadStats(filename)
 	if err != nil {
 		return err
 	}
