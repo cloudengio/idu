@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -22,6 +23,7 @@ import (
 	"cloudeng.io/cmd/idu/internal/config"
 	"cloudeng.io/cmd/idu/internal/database"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
+	"cloudeng.io/file"
 	"cloudeng.io/file/filewalk"
 	"cloudeng.io/file/localfs"
 )
@@ -377,4 +379,237 @@ func TestAnalyzeByName(t *testing.T) {
 	if got, want := scanned, scannable; !slices.Equal(got, want) {
 		t.Errorf("got %d entries, want %d", len(got), len(want))
 	}
+}
+
+type faultAnalyzeFS struct {
+	filewalk.FS
+	scanErrPath  string
+	scanErr      error
+	lstatErrPath string
+	lstatErr     error
+	xattrErrPath string
+	xattrErr     error
+}
+
+type faultLevelScanner struct {
+	err error
+}
+
+func (s *faultLevelScanner) Scan(context.Context, int) bool { return false }
+func (s *faultLevelScanner) Contents() []filewalk.Entry     { return nil }
+func (s *faultLevelScanner) Err() error                     { return s.err }
+
+func (f *faultAnalyzeFS) LevelScanner(path string) filewalk.LevelScanner {
+	if f.scanErrPath != "" && path == f.scanErrPath {
+		return &faultLevelScanner{err: f.scanErr}
+	}
+	return f.FS.LevelScanner(path)
+}
+
+func (f *faultAnalyzeFS) Lstat(ctx context.Context, path string) (file.Info, error) {
+	if f.lstatErrPath != "" && path == f.lstatErrPath {
+		return file.Info{}, f.lstatErr
+	}
+	return f.FS.Lstat(ctx, path)
+}
+
+func (f *faultAnalyzeFS) XAttr(ctx context.Context, path string, info file.Info) (file.XAttr, error) {
+	if f.xattrErrPath != "" && path == f.xattrErrPath {
+		return file.XAttr{}, f.xattrErr
+	}
+	return f.FS.XAttr(ctx, path, info)
+}
+
+func TestAnalyzeDefaults(t *testing.T) {
+	alz := &analyzeCmd{}
+	if err := alz.analyzeFS(context.Background(), localfs.New(), &analyzeFlags{Defaults: true}, nil); err != nil {
+		t.Fatalf("analyzeFS defaults: %v", err)
+	}
+}
+
+func setupAnalyzeTestConfig(t *testing.T, root string) config.T {
+	t.Helper()
+	tmpDir := filepath.Dir(root)
+	cfgText := fmt.Sprintf(`filesystems:
+  - name: tree
+    prefix: %s
+    database: %s
+    set_max_threads: 10000
+    concurrent_scans: 2
+    concurrent_stats: 2
+`, root, filepath.Join(tmpDir, "db"))
+	cfg, err := config.ParseConfig([]byte(cfgText))
+	if err != nil {
+		t.Fatal(err)
+	}
+	origCfg := globalConfig
+	origLogDir := internal.LogDir
+	globalConfig = cfg
+	internal.LogDir = filepath.Join(tmpDir, "logs")
+	if err := os.MkdirAll(internal.LogDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		globalConfig = origCfg
+		internal.LogDir = origLogDir
+	})
+	return cfg
+}
+
+func TestAnalyzeForceAndSubtree(t *testing.T) {
+	ctx := context.Background()
+	alz := &analyzeCmd{}
+	tmpDir := t.TempDir()
+	root := filepath.Join(tmpDir, "root")
+	sub := filepath.Join(root, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{filepath.Join(root, "f1"), filepath.Join(sub, "f2")} {
+		if err := os.WriteFile(p, []byte("a"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := setupAnalyzeTestConfig(t, root)
+
+	lfs := localfs.New()
+	if err := alz.analyzeFS(ctx, lfs, &analyzeFlags{}, []string{root}); err != nil {
+		t.Fatalf("initial analyzeFS: %v", err)
+	}
+
+	// Force re-analyzes unchanged prefixes.
+	if err := alz.analyzeFS(ctx, lfs, &analyzeFlags{Force: true}, []string{root}); err != nil {
+		t.Fatalf("force analyzeFS: %v", err)
+	}
+	_, _, _, db, err := internal.OpenPrefixAndDatabase(ctx, cfg, root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, sumForce := getLastLog(ctx, t, db)
+	_ = db.Close(ctx)
+	if sumForce.ParentUnchanged != 0 {
+		t.Errorf("force ParentUnchanged = %d, want 0", sumForce.ParentUnchanged)
+	}
+
+	// Modify subdir without modifying root's mtime -> root is parentUnchanged, childrenUnchanged=false.
+	if err := os.WriteFile(filepath.Join(sub, "f3"), []byte("c"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := alz.analyzeFS(ctx, lfs, &analyzeFlags{}, []string{root}); err != nil {
+		t.Fatalf("analyzeFS after subdir change: %v", err)
+	}
+	_, _, _, db2, err := internal.OpenPrefixAndDatabase(ctx, cfg, root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, sumSub := getLastLog(ctx, t, db2)
+	_ = db2.Close(ctx)
+	if sumSub.ParentUnchanged != 1 || sumSub.ChildrenUnchanged != 0 {
+		t.Errorf("got ParentUnchanged=%d ChildrenUnchanged=%d, want 1, 0", sumSub.ParentUnchanged, sumSub.ChildrenUnchanged)
+	}
+
+	// Sub-prefix scan (target != cfg.Prefix).
+	if err := alz.analyzeFS(ctx, lfs, &analyzeFlags{}, []string{sub}); err != nil {
+		t.Fatalf("sub-prefix analyzeFS: %v", err)
+	}
+}
+
+func TestAnalyzeSymlinkAndFaults(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	root := filepath.Join(tmpDir, "root")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f1 := filepath.Join(root, "f1")
+	if err := os.WriteFile(f1, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sym := filepath.Join(tmpDir, "sym-root")
+	if err := os.Symlink(root, sym); err != nil {
+		t.Fatal(err)
+	}
+
+	dbDir := filepath.Join(tmpDir, "db")
+	cfgText := fmt.Sprintf(`filesystems:
+  - name: tree
+    prefix: %s
+    database: %s
+  - name: sym
+    prefix: %s
+    database: %s
+`, root, dbDir, sym, filepath.Join(tmpDir, "symdb"))
+	cfg, err := config.ParseConfig([]byte(cfgText))
+	if err != nil {
+		t.Fatal(err)
+	}
+	origCfg := globalConfig
+	origLogDir := internal.LogDir
+	globalConfig = cfg
+	internal.LogDir = filepath.Join(tmpDir, "logs")
+	if err := os.MkdirAll(internal.LogDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		globalConfig = origCfg
+		internal.LogDir = origLogDir
+	})
+
+	alz := &analyzeCmd{}
+	lfs := localfs.New()
+
+	t.Run("symlink target ignored cleanly", func(t *testing.T) {
+		if err := alz.analyzeFS(ctx, lfs, &analyzeFlags{}, []string{sym}); err != nil {
+			t.Fatalf("symlink analyzeFS: %v", err)
+		}
+	})
+
+	t.Run("xattr error and lstat error logged", func(t *testing.T) {
+		ffs := &faultAnalyzeFS{
+			FS:           lfs,
+			xattrErrPath: root,
+			xattrErr:     errors.New("xattr failed"),
+			lstatErrPath: f1,
+			lstatErr:     errors.New("lstat failed"),
+		}
+		if err := alz.analyzeFS(ctx, ffs, &analyzeFlags{}, []string{root}); err != nil {
+			t.Fatalf("faulty analyzeFS: %v", err)
+		}
+		_, _, _, db, err := internal.OpenPrefixAndDatabase(ctx, cfg, root, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close(ctx)
+		errs := scanErrors(ctx, t, db, ffs, root)
+		if len(errs) != 2 {
+			t.Errorf("logged errors = %v (len %d), want 2", errs, len(errs))
+		}
+	})
+
+	t.Run("fatal level scanner error logged in Done", func(t *testing.T) {
+		fatalErr := errors.New("io hardware failure")
+		ffs := &faultAnalyzeFS{
+			FS:          lfs,
+			scanErrPath: root,
+			scanErr:     fatalErr,
+		}
+		if err := alz.analyzeFS(ctx, ffs, &analyzeFlags{}, []string{root}); err != nil {
+			t.Fatalf("analyzeFS: %v", err)
+		}
+		_, _, _, db, err := internal.OpenPrefixAndDatabase(ctx, cfg, root, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close(ctx)
+		errs := scanErrors(ctx, t, db, ffs, root)
+		if len(errs) != 1 || !strings.Contains(errs[0], "io hardware failure") {
+			t.Errorf("logged errors = %v, want [root: io hardware failure]", errs)
+		}
+	})
+
+	t.Run("unknown prefix returns error", func(t *testing.T) {
+		if err := alz.analyzeFS(ctx, lfs, &analyzeFlags{}, []string{"/does/not/exist/cfg"}); err == nil {
+			t.Fatal("expected error for unknown prefix")
+		}
+	})
 }

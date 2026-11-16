@@ -11,6 +11,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
+
+	"cloudeng.io/file"
 )
 
 type RoundTripper func(*testing.T, *T) T
@@ -71,4 +74,54 @@ func CompareGroupIDMap(t *testing.T, pi T, ids []int64, pos []int) {
 			t.Errorf("id %v: got %v, want %v", u, got, want)
 		}
 	}
+}
+
+func TestValidateIDMapsAndXAttrPanic(t *testing.T) {
+	t.Parallel()
+
+	t.Run("duplicate ids rejected", func(t *testing.T) {
+		t.Parallel()
+		pi := T{
+			userIDMap: idMaps{newIDMap(1, 1), newIDMap(1, 1)},
+		}
+		if err := pi.validateIDMaps(); err == nil {
+			t.Error("expected duplicate user id error")
+		}
+		pi = T{
+			groupIDMap: idMaps{newIDMap(2, 1), newIDMap(2, 1)},
+		}
+		if err := pi.validateIDMaps(); err == nil {
+			t.Error("expected duplicate group id error")
+		}
+	})
+
+	t.Run("missing pos in id map rejected", func(t *testing.T) {
+		t.Parallel()
+		f := file.NewInfo("f", 0, 0, time.Time{}, nil)
+		pi := T{
+			entries:   file.InfoList{f},
+			userIDMap: idMaps{newIDMap(1, 2)},
+		}
+		if err := pi.validateIDMaps(); err == nil {
+			t.Error("expected missing user id error")
+		}
+		pi = T{
+			entries:    file.InfoList{f},
+			groupIDMap: idMaps{newIDMap(2, 2)},
+		}
+		if err := pi.validateIDMaps(); err == nil {
+			t.Error("expected missing group id error")
+		}
+	})
+
+	t.Run("xAttrFromSys panics on unknown type", func(t *testing.T) {
+		t.Parallel()
+		defer func() {
+			if recover() == nil {
+				t.Error("expected panic for unrecognized sys info type")
+			}
+		}()
+		var pi T
+		pi.xAttrFromSys("invalid")
+	})
 }
