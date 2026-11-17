@@ -18,7 +18,6 @@ import (
 
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
-	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/errors"
 	"cloudeng.io/file/filewalk"
 	"cloudeng.io/file/filewalk/asyncstat"
@@ -65,7 +64,7 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *anal
 		return nil
 	}
 	start := time.Now()
-	ctx, cfg, target, err := internal.LookupPrefix(ctx, globalConfig, args[0])
+	ctx, cfg, target, err := lookupPrefix(ctx, globalConfig, args[0])
 	if err != nil {
 		return err
 	}

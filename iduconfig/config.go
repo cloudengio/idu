@@ -67,6 +67,8 @@ type Prefix struct {
 
 	Layout Layout `yaml:"layout" doc:"the filesystem layout to use for calculating raw bytes used"`
 
+	Logging *cmdutil.LoggingConfig `yaml:"logging,omitempty" doc:"logging configuration for this filesystem, if set it replaces the top-level logging configuration for commands that operate on this filesystem, and may be overridden by the --log-* command line flags"`
+
 	calculator diskusage.Calculator
 }
 

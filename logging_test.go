@@ -90,3 +90,77 @@ filesystems:
 		}
 	}
 }
+
+func hasMsg(recs []map[string]any, msg string) bool {
+	for _, rec := range recs {
+		if rec["msg"] == msg {
+			return true
+		}
+	}
+	return false
+}
+
+func TestPerFilesystemLogging(t *testing.T) {
+	tmpDir := t.TempDir()
+	for _, d := range []string{"one", "two"} {
+		if err := os.MkdirAll(filepath.Join(tmpDir, d, "a"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	globalLog := filepath.Join(tmpDir, "global.log")
+	oneLog := filepath.Join(tmpDir, "one.log")
+	cfgFile := filepath.Join(tmpDir, "config.yaml")
+	cfg := fmt.Sprintf(`logging:
+  level: 3
+  file: %q
+filesystems:
+  - name: one
+    prefix: %q
+    database: %q
+    logging:
+      level: 3
+      file: %q
+  - name: two
+    prefix: %q
+    database: %q
+`, globalLog,
+		filepath.Join(tmpDir, "one"), filepath.Join(tmpDir, "db-one"), oneLog,
+		filepath.Join(tmpDir, "two"), filepath.Join(tmpDir, "db-two"))
+	if err := os.WriteFile(cfgFile, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// The filesystem's own logging configuration is used for one.
+	if _, err := runIDU("--config="+cfgFile, "analyze", "--progress=false", "one"); err != nil {
+		t.Fatal(err)
+	}
+	if !hasMsg(readLogRecords(t, oneLog), "prefix done") {
+		t.Errorf("%v: missing records for filesystem one", oneLog)
+	}
+	if hasMsg(readLogRecords(t, globalLog), "prefix done") {
+		t.Errorf("%v: should not contain records for filesystem one", globalLog)
+	}
+
+	// The top-level configuration is used for two.
+	if _, err := runIDU("--config="+cfgFile, "analyze", "--progress=false", "two"); err != nil {
+		t.Fatal(err)
+	}
+	if !hasMsg(readLogRecords(t, globalLog), "prefix done") {
+		t.Errorf("%v: missing records for filesystem two", globalLog)
+	}
+
+	// Flags override the filesystem's configuration.
+	flagLog := filepath.Join(tmpDir, "flag.log")
+	if err := os.Remove(oneLog); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runIDU("--config="+cfgFile, "--log-file="+flagLog, "analyze", "--progress=false", "one"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(oneLog); !os.IsNotExist(err) {
+		t.Errorf("%v should not have been created: %v", oneLog, err)
+	}
+	if !hasMsg(readLogRecords(t, flagLog), "prefix done") {
+		t.Errorf("%v: missing records for filesystem one", flagLog)
+	}
+}

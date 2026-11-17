@@ -42,6 +42,11 @@ filesystems:
       - <<: *common_exclusions
       - '^/Users/cnicolaou/Library/CloudStorage'
     compact_interval_days: 7
+    # Optional, replaces the top-level logging configuration for this
+    # filesystem; the --log-* flags still override it.
+    # logging:
+    #   level: 2
+    #   file: /tmp/idu-home.log
     compact_interval: 12h
     # The space allocated to each file is determined automatically (the
     # default allocated layout); the block size is only used on systems

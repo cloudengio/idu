@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -183,7 +182,7 @@ func cli() *subcmd.CommandSetYAML {
 	db := &dbCmd{}
 	cmdSet.Set("database", "locate").MustRunner(requireConfig(db.locate), &locateFlags{})
 
-	cmdSet.AppendPreHooks(subcmd.LoggerHook("logging", newLogger))
+	cmdSet.AppendPreHooks(loggingHook)
 
 	globals := subcmd.GlobalFlagSet()
 	globals.MustRegisterFlagStruct(&globalFlags, nil, nil)
@@ -244,18 +243,6 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 	cmdutil.HandleSignals(cancel, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	return cmdRunner(ctx)
-}
-
-// newLogger creates the logger specified by the logging section of the
-// configuration file, overridden by any --log-* flags set on the command line.
-func newLogger(ctx context.Context, fs *flag.FlagSet) (*cmdutil.Logger, error) {
-	cfg, _ := cmdutil.ContextValue[iduconfig.T](ctx)
-	lc := cfg.Logging
-	if lc.Format == "" {
-		// Match the default of the --log-format flag.
-		lc.Format = globalFlags.Format
-	}
-	return lc.WithFlagOverrides(fs, globalFlags.LoggingFlags).NewLogger()
 }
 
 func main() {
