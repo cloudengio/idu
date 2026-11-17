@@ -23,7 +23,9 @@ var ErrFilesystemNameRequired = errors.New("a filesystem name is required when m
 // filesystem is used, otherwise ErrFilesystemNameRequired is returned.
 //
 // For a *Root, an empty prefix refers to the root itself, a relative prefix
-// is interpreted relative to the root and an absolute prefix is used as is.
+// is interpreted relative to the root and an absolute prefix, including one
+// that starts with a separator but has no volume name on Windows, is used
+// as is.
 // In all cases the resulting path is cleaned (see filepath.Clean), and hence
 // has no trailing separator other than for a root such as / or C:\, and
 // must be contained within the root. On Windows, the returned path uses
@@ -49,7 +51,7 @@ func (r *Root) lookup(prefix string) (string, error) {
 	root := cleanPath(r.Root)
 	path := root
 	switch {
-	case filepath.IsAbs(prefix):
+	case isRooted(prefix):
 		path = cleanPath(prefix)
 	case len(prefix) > 0:
 		// filepath.Join cleans its result.
@@ -119,6 +121,15 @@ func pathEqual(a, b string, caseInsensitive bool) bool {
 		return strings.EqualFold(a, b)
 	}
 	return a == b
+}
+
+// isRooted reports whether p is an absolute path or, on Windows, a path that
+// starts with a separator but has no volume name (eg. /tmp or \tmp), which
+// filepath.IsAbs does not consider to be absolute but which must not be
+// interpreted relative to a configured root, which may itself be of that
+// form.
+func isRooted(p string) bool {
+	return filepath.IsAbs(p) || (len(p) > 0 && (p[0] == '/' || p[0] == filepath.Separator))
 }
 
 // cleanPath returns filepath.Clean(p), but on Windows, where filepath.Clean

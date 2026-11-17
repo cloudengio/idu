@@ -55,3 +55,28 @@ func TestCleanPath(t *testing.T) {
 		}
 	}
 }
+
+func TestIsRooted(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		want bool
+	}{
+		{"/tmp", true},
+		{"/", true},
+		{"tmp", false},
+		{"./tmp", false},
+		{"../tmp", false},
+		{"", false},
+	} {
+		if got := isRooted(tc.path); got != tc.want {
+			t.Errorf("isRooted(%q) = %v, want %v", tc.path, got, tc.want)
+		}
+	}
+	if filepath.Separator == '\\' {
+		for _, p := range []string{`\tmp`, `C:\tmp`, "C:/tmp"} {
+			if !isRooted(p) {
+				t.Errorf("isRooted(%q) = false, want true", p)
+			}
+		}
+	}
+}
