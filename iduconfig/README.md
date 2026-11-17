@@ -39,6 +39,14 @@ DefaultScanSize = 0
 
 ```
 
+### ErrFilesystemNameRequired
+```go
+ErrFilesystemNameRequired = errors.New("a filesystem name is required when more than one filesystem is configured")
+
+```
+ErrFilesystemNameRequired is returned by Lookup when no filesystem name is
+supplied and more than one filesystem is configured.
+
 
 
 ## Functions
@@ -62,6 +70,24 @@ func Documentation() string
 ```
 Documentation will return a description of the format of the yaml
 configuration file.
+
+### Func Label
+```go
+func Label(f Filesystem) string
+```
+Label returns a human readable label for f that includes its name, if it has
+one, and its location.
+
+### Func PrefixSuccessor
+```go
+func PrefixSuccessor(prefix string) string
+```
+PrefixSuccessor returns the first key, in lexicographic order, that does not
+start with prefix, ie. such that [prefix, PrefixSuccessor(prefix)) contains
+exactly those keys that start with prefix. It returns the empty string,
+which is to be interpreted as being unbounded, if there is no such key,
+which is the case for the empty prefix and for prefixes that consist solely
+of 0xff bytes.
 
 ### Func PrintLocated
 ```go
@@ -99,12 +125,29 @@ UnmarshalYAML implements yaml.Unmarshaler, appending decoded file names into
 
 
 
+### Type Filesystem
+```go
+type Filesystem interface {
+	// Config returns the settings common to all filesystem configurations.
+	Config() *Settings
+	// Location returns a human readable description of the location of
+	// the filesystem, ie. its root or its range of keys.
+	Location() string
+	// contains filtered or unexported methods
+}
+```
+Filesystem represents a configured filesystem, it is implemented by *Root,
+for hierarchical filesystems, and *KeyRange, for a range of keys in a key
+oriented store such as an object store.
+
+
 ### Type Filesystems
 ```go
-type Filesystems []Prefix
+type Filesystems []Filesystem
 ```
-Filesystems is a list of filesystem Prefix configurations. Unmarshaling
-appends decoded blocks into *fs so multiple config files merge cleanly.
+Filesystems is a list of filesystem configurations, each of which is either
+a *Root or a *KeyRange. Unmarshaling appends decoded blocks into *fs so
+multiple config files merge cleanly.
 
 ### Methods
 
@@ -142,20 +185,85 @@ const (
 
 
 
+### Type KeyRange
+```go
+type KeyRange struct {
+	StartPrefix string `yaml:"start_prefix" doc:"the first key (inclusive) of a range of keys in a key oriented store, such as an object store, to be analyzed"`
+	StopPrefix  string `yaml:"stop_prefix" doc:"the first key, in lexicographic order, that is outside of the range of keys to be analyzed. If omitted it defaults to the first key that does not have start_prefix as a prefix so that the range contains exactly those keys that start with start_prefix; an empty start_prefix and stop_prefix refers to all keys"`
+	Settings    `yaml:",inline"`
+}
+```
+KeyRange represents the configuration for a range of keys in a key
+oriented store such as an object store. The range starts at, and includes,
+StartPrefix and extends up to, but does not include, StopPrefix. That is,
+StopPrefix is the first key, in lexicographic order, that is outside of the
+range. An empty StopPrefix means that the range has no upper bound.
+
+### Methods
+
+```go
+func (kr *KeyRange) Contains(key string) bool
+```
+Contains reports whether key is within the range.
+
+
+```go
+func (kr *KeyRange) ContainsPrefix(prefix string) bool
+```
+ContainsPrefix reports whether all of the keys that start with prefix are
+within the range.
+
+
+```go
+func (kr *KeyRange) Location() string
+```
+Location implements Filesystem.
+
+
+
+
 ### Type Layout
 ```go
 type Layout struct {
-	Calculator string    `yaml:"calculator" doc:"the type of disk usage calculator to use (allocated, bytes, block, raid0), defaults to allocated"`
+	Calculator string    `yaml:"calculator" doc:"the type of disk usage calculator to use (allocated, bytes, block, raid0), defaults to allocated for a root and bytes for a key range"`
 	Parameters yaml.Node `yaml:"parameters,omitempty" doc:"the layout parameters to use for this calculator"`
 }
 ```
 
 
-### Type Prefix
+### Type RAID0
 ```go
-type Prefix struct {
+type RAID0 struct {
+	StripeSize cmdtypes.ByteSize `yaml:"stripe_size" doc:"the size of the raid0 stripes (e.g. 64KiB or 65536)"`
+	NumStripes int               `yaml:"num_stripes" doc:"the number of stripes used"`
+}
+```
+
+
+### Type Root
+```go
+type Root struct {
+	Root     string `yaml:"root" doc:"the root of a hierarchical filesystem to be analyzed, prefix is accepted as a deprecated alias for root"`
+	Settings `yaml:",inline"`
+}
+```
+Root represents the configuration for a hierarchical filesystem rooted at
+Root.
+
+### Methods
+
+```go
+func (r *Root) Location() string
+```
+Location implements Filesystem.
+
+
+
+
+### Type Settings
+```go
+type Settings struct {
 	Name                     string             `yaml:"name" doc:"optional name used to refer to this configuration"`
-	Prefix                   string             `yaml:"prefix" doc:"the prefix to be analyzed"`
 	Database                 string             `yaml:"database" doc:"the location of the database to use for this prefix"`
 	StatsDir                 string             `yaml:"stats_dir" doc:"the directory to use for stats files, defaults to stats"`
 	Separator                string             `yaml:"separator" doc:"filename separator to use, defaults to /"`
@@ -176,23 +284,25 @@ type Prefix struct {
 	// contains filtered or unexported fields
 }
 ```
+Settings contains the configuration settings that are common to all
+filesystem configurations, ie. Root and KeyRange.
 
 ### Methods
 
 ```go
-func (p *Prefix) Calculator() diskusage.Calculator
+func (p *Settings) Calculator() diskusage.Calculator
 ```
 
 
 ```go
-func (p *Prefix) CalculatorOrDefault() diskusage.Calculator
+func (p *Settings) CalculatorOrDefault() diskusage.Calculator
 ```
 CalculatorOrDefault returns the configured disk usage calculator or the
 identity calculator if none is configured.
 
 
 ```go
-func (p *Prefix) CompactionInterval() time.Duration
+func (p *Settings) CompactionInterval() time.Duration
 ```
 CompactionInterval returns the combined compaction interval computed
 by converting CompactIntervalDays to a time.Duration and adding
@@ -200,33 +310,30 @@ CompactInterval.
 
 
 ```go
-func (p *Prefix) Exclude(path string) bool
+func (p *Settings) Config() *Settings
+```
+Config implements Filesystem.
+
+
+```go
+func (p *Settings) Exclude(path string) bool
 ```
 Exclude returns true if path should be excluded/ignored.
 
 
 ```go
-func (p *Prefix) RecordHardlinks() bool
+func (p *Settings) RecordHardlinks() bool
 ```
 RecordHardlinks returns true if analyze should record potential hardlinks in
 the precomputed summaries.
 
 
 ```go
-func (p *Prefix) SeparatorOrDefault() string
+func (p *Settings) SeparatorOrDefault() string
 ```
 SeparatorOrDefault returns the configured separator or "/".
 
 
-
-
-### Type RAID0
-```go
-type RAID0 struct {
-	StripeSize cmdtypes.ByteSize `yaml:"stripe_size" doc:"the size of the raid0 stripes (e.g. 64KiB or 65536)"`
-	NumStripes int               `yaml:"num_stripes" doc:"the number of stripes used"`
-}
-```
 
 
 ### Type T
@@ -279,17 +386,39 @@ ReadConfig reads and merges yaml configs from the specified files.
 ### Methods
 
 ```go
-func (t T) ForName(name string) (Prefix, bool)
+func (t T) ForName(name string) (Filesystem, bool)
 ```
-ForName returns the prefix configuration with the given Name.
+ForName returns the filesystem configuration with the given Name.
 
 
 ```go
-func (t T) ForPrefix(path string) (Prefix, bool)
+func (t T) ForPrefix(path string) (*Root, bool)
 ```
-ForPrefix returns the prefix configuration that corresponds to path.
-The prefix is the longest matching prefix in the configuration. The boolean
-return value is true if a match is found.
+ForPrefix returns the Root configuration that corresponds to path.
+The Root is the one with the longest matching root in the configuration,
+KeyRange configurations are ignored. The boolean return value is true if a
+match is found.
+
+
+```go
+func (t T) Lookup(fsname, prefix string) (Filesystem, string, error)
+```
+Lookup returns the configuration for the filesystem named fsname, which will
+be either a *Root or a *KeyRange, and the location within that filesystem
+that is specified by prefix.
+
+If fsname is empty and exactly one filesystem is configured then that
+filesystem is used, otherwise ErrFilesystemNameRequired is returned.
+
+For a *Root, an empty prefix refers to the root itself, a relative prefix
+is interpreted relative to the root and an absolute prefix is used as is.
+In all cases the resulting path must be contained within the root.
+The returned path is cleaned and has no trailing separator (other than for a
+root such as / or C:\).
+
+For a *KeyRange, an empty prefix refers to the entire range and is returned
+as the empty string. Otherwise prefix is a key prefix that is used as is and
+all of the keys that start with it must be within the range.
 
 
 ```go

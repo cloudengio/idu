@@ -58,12 +58,13 @@ func TestDBLocate(t *testing.T) {
 	}{
 		{name: "non-verbose", flags: locateFlags{Verbose: false}, arg: "present"},
 		{name: "verbose existing", flags: locateFlags{Verbose: true}, arg: "present", wantContains: "5.000 KB"},
-		{name: "verbose missing", flags: locateFlags{Verbose: true}, arg: "absent", wantContains: "database for absent"},
+		{name: "verbose missing", flags: locateFlags{Verbose: true}, arg: "absent", wantContains: "database for /p2"},
 		{name: "unknown prefix", flags: locateFlags{Verbose: false}, arg: "nope", wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			withFS(t, tc.arg)
 			out, err := captureStdout(t, func() error {
-				return cmd.locate(ctx, &tc.flags, []string{tc.arg})
+				return cmd.locate(ctx, &tc.flags, nil)
 			})
 			if (err != nil) != tc.wantErr {
 				t.Errorf("locate(%q) err = %v, wantErr=%v", tc.arg, err, tc.wantErr)
@@ -83,8 +84,8 @@ func TestOpenPrefixReadOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Create the database.
-	cfg, _ := allCfg.ForName("testfs")
-	wdb, err := openWritableDB(ctx, cfg)
+	fs, _ := allCfg.ForName("testfs")
+	wdb, err := openWritableDB(ctx, fs.Config())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +93,7 @@ func TestOpenPrefixReadOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, cfg, target, rdb, err := openPrefixReadOnly(ctx, allCfg, "testfs")
+	_, cfg, target, rdb, err := openPrefixReadOnly(ctx, allCfg, "")
 	if err != nil {
 		t.Fatalf("openPrefixReadOnly by name: %v", err)
 	}

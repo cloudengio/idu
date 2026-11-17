@@ -4,10 +4,14 @@
 
 // Usage of idu
 //
-//	analyze disk usage using a database for incremental updates. Commands that accept
-//	a <prefix> accept either a filesystem prefix path or a configured filesystem
-//	name. Many of the commands accept an expression that is used to restrict which
-//	prefixes/directories and files are processed.
+//	analyze disk usage using a database for incremental updates. The filesystem to
+//	operate on is selected by name using the --fs flag, which may be omitted if only
+//	one filesystem is configured. Commands that accept a <prefix> interpret it
+//	relative to that filesystem's configured root, or as a key prefix for a filesystem
+//	configured as a key range, and it must be contained within that root or range;
+//	an omitted [<prefix>] refers to the entire filesystem. Many of the commands
+//	accept an expression that is used to restrict which prefixes/directories and
+//	files are processed.
 //
 //	expression-syntax - display the syntax for the expression language supported by commands such as analyze, find etc.
 //	          analyze - analyze the file system to build a database of directory and file metadata.
@@ -19,12 +23,18 @@
 //	           config - show the configuration, and its documentation.
 //	         database - database management commands.
 //
-// global flags: [--config= --gcpercent=50 --http= --log-file= --log-format=json --log-level=0 --log-source-code=false --profile= --units=decimal]
+// global flags: [--config= --fs= --gcpercent=50 --http= --log-file= --log-format=json --log-level=0 --log-source-code=false --profile= --units=decimal]
 //
 //	-config value
 //	  configuration files (.yaml, .yml, .env) or comma-separated list; defaults
 //	  to config.yaml (and its filesystem_config_files) in the idu search path
 //	  or all .yaml/.yml files in $HOME/.config/idu
+//	-fs string
+//	  the name of the configured filesystem to operate on, it may be omitted
+//	  if only one filesystem is configured. For a filesystem configured with
+//	  a root, any prefix arguments are interpreted relative to, and must be
+//	  contained within, that root; for one configured with a key range they
+//	  are key prefixes that must be contained within that range
 //	-gcpercent int
 //	  value to use for runtime/debug.SetGCPercent (default 50)
 //	-http string

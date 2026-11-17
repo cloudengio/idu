@@ -58,17 +58,17 @@ func TestSimple(t *testing.T) {
 	if got, want := len(cfg.Filesystems), 3; got != want {
 		t.Fatalf("got %v, want %v", got, want)
 	}
-	if got, want := cfg.Filesystems[0].Prefix, "/tmp"; got != want {
+	if got, want := rootOf(t, cfg.Filesystems[0]).Root, "/tmp"; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	checkAllocated(t, cfg.Filesystems[0].Calculator())
-	checkAllocated(t, cfg.Filesystems[1].Calculator())
-	if got, want := cfg.Filesystems[2].Calculator().Calculate(1, 1), int64(65536*4); got != want {
+	checkAllocated(t, cfg.Filesystems[0].Config().Calculator())
+	checkAllocated(t, cfg.Filesystems[1].Config().Calculator())
+	if got, want := cfg.Filesystems[2].Config().Calculator().Calculate(1, 1), int64(65536*4); got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
-	root := cfg.Filesystems[1]
-	if got, want := root.Prefix, "/"; got != want {
+	root := rootOf(t, cfg.Filesystems[1])
+	if got, want := root.Root, "/"; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 	if got, want := root.Exclude("something"), false; got != want {
@@ -115,7 +115,7 @@ func TestDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dp := cfg.Filesystems[0]
+	dp := cfg.Filesystems[0].Config()
 	if got, want := dp.ConcurrentStats, 1; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
@@ -132,7 +132,7 @@ func TestDefaults(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
-	dp = cfg.Filesystems[1]
+	dp = cfg.Filesystems[1].Config()
 	if got, want := dp.ConcurrentStats, 100; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
@@ -153,19 +153,23 @@ func TestPrefixMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	p, ok := cfg.ForPrefix("/tmp")
-	if got, want := p.Prefix, "/tmp"; !ok || got != want {
+	if got, want := p.Root, "/tmp"; !ok || got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 	p, ok = cfg.ForPrefix("/tmp/xyz")
-	if got, want := p.Prefix, "/tmp"; !ok || got != want {
+	if got, want := p.Root, "/tmp"; !ok || got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	p, ok = cfg.ForName("tmp")
-	if got, want := p.Prefix, "/tmp"; !ok || got != want {
+	// Only whole path components are matched.
+	if p, ok := cfg.ForPrefix("/tmpx"); !ok || p.Root != "/" {
+		t.Errorf("got %v, want /", p.Root)
+	}
+	f, ok := cfg.ForName("tmp")
+	if got, want := rootOf(t, f).Root, "/tmp"; !ok || got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	p, ok = cfg.ForName("raid")
-	if got, want := p.Prefix, "/raid"; !ok || got != want {
+	f, ok = cfg.ForName("raid")
+	if got, want := rootOf(t, f).Root, "/raid"; !ok || got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }
@@ -209,7 +213,7 @@ filesystems:
 	if got, want := len(cfg.ConfigFiles), 2; got != want {
 		t.Fatalf("got %d filesystem_config_files, want %d", got, want)
 	}
-	home, ok := cfg.ForName("home")
+	home, ok := settingsForName(cfg, "home")
 	if !ok {
 		t.Fatal("missing home")
 	}
@@ -222,7 +226,7 @@ filesystems:
 	if !home.Exclude("/home/user/.DS_Store") || !home.Exclude("/home/cache/tmp") {
 		t.Errorf("expected inherited and local exclusions to match")
 	}
-	data, ok := cfg.ForName("data")
+	data, ok := settingsForName(cfg, "data")
 	if !ok {
 		t.Fatal("missing data")
 	}
@@ -390,12 +394,13 @@ filesystems:
 		{"two", "/two", "/srv/idu-db/two"},
 		{"three", "/three", "/srv/idu-db/three"},
 	} {
-		p, ok := cfg.ForName(tc.name)
+		f, ok := cfg.ForName(tc.name)
 		if !ok {
 			t.Fatalf("missing filesystem %q", tc.name)
 		}
-		if p.Prefix != tc.prefix || p.Database != tc.db {
-			t.Errorf("%s: got prefix=%q db=%q, want prefix=%q db=%q", tc.name, p.Prefix, p.Database, tc.prefix, tc.db)
+		p := rootOf(t, f)
+		if p.Root != tc.prefix || p.Database != tc.db {
+			t.Errorf("%s: got root=%q db=%q, want root=%q db=%q", tc.name, p.Root, p.Database, tc.prefix, tc.db)
 		}
 	}
 	if _, ok := cfg.ForName("ignored"); ok {
@@ -506,10 +511,10 @@ func TestLoadSearchPathFallback(t *testing.T) {
 	if got, want := len(loc.YAML), 3; got != want {
 		t.Fatalf("got %d YAML files (%v), want %d", got, loc.YAML, want)
 	}
-	if p, ok := cfg.ForName("one"); !ok || p.Database != "/srv/idu-db/one" {
+	if p, ok := settingsForName(cfg, "one"); !ok || p.Database != "/srv/idu-db/one" {
 		t.Errorf("got %+v, %v", p, ok)
 	}
-	if p, ok := cfg.ForName("two"); !ok || p.Database != "/srv/idu-db/two" {
+	if p, ok := settingsForName(cfg, "two"); !ok || p.Database != "/srv/idu-db/two" {
 		t.Errorf("got %+v, %v", p, ok)
 	}
 
@@ -546,13 +551,13 @@ func TestExampleConfig(t *testing.T) {
 	if _, ok := cfg.ForPrefix("/Users/cnicolaou"); !ok {
 		t.Errorf("expected /Users/cnicolaou in example-config.yml")
 	}
-	if p, ok := cfg.ForName("home"); !ok || p.StatsDir != "./stats/home" || p.CompactionInterval() != 7*24*time.Hour+12*time.Hour {
+	if p, ok := settingsForName(cfg, "home"); !ok || p.StatsDir != "./stats/home" || p.CompactionInterval() != 7*24*time.Hour+12*time.Hour {
 		t.Errorf("expected name home with stats_dir ./stats/home and 7d12h compact interval in example-config.yml, got %+v, %v", p, ok)
 	}
 	if _, ok := cfg.ForPrefix("/labs/asbhatt/data"); !ok {
 		t.Errorf("expected /labs/asbhatt in example-config.yml")
 	}
-	if p, ok := cfg.ForName("asbhatt"); !ok || p.Prefix != "/labs/asbhatt" {
+	if p, ok := cfg.ForName("asbhatt"); !ok || rootOf(t, p).Root != "/labs/asbhatt" {
 		t.Errorf("expected name asbhatt -> /labs/asbhatt in example-config.yml, got %+v, %v", p, ok)
 	}
 }
@@ -689,7 +694,7 @@ filesystems:
 		"combined":  2*24*time.Hour + 6*time.Hour,
 	}
 	for name, want := range wants {
-		p, ok := cfg.ForName(name)
+		p, ok := settingsForName(cfg, name)
 		if !ok {
 			t.Fatalf("missing %q", name)
 		}
@@ -722,7 +727,7 @@ filesystems:
 		"rescan":  {iduconfig.HardlinkDedupRescan, false},
 		"counted": {iduconfig.HardlinkDedupSummaries, false},
 	} {
-		p, _ := cfg.ForName(name)
+		p, _ := settingsForName(cfg, name)
 		if p.HardlinkDedup != want.dedup || p.RecordHardlinks() != want.record {
 			t.Errorf("%s: got %q, %v, want %q, %v", name, p.HardlinkDedup, p.RecordHardlinks(), want.dedup, want.record)
 		}
@@ -736,4 +741,21 @@ filesystems:
 	if err == nil || !strings.Contains(err.Error(), "hardlink_dedup") {
 		t.Errorf("expected hardlink_dedup validation error, got %v", err)
 	}
+}
+
+func rootOf(t *testing.T, f iduconfig.Filesystem) *iduconfig.Root {
+	t.Helper()
+	r, ok := f.(*iduconfig.Root)
+	if !ok {
+		t.Fatalf("%v is not a root filesystem", f)
+	}
+	return r
+}
+
+func settingsForName(cfg iduconfig.T, name string) (*iduconfig.Settings, bool) {
+	f, ok := cfg.ForName(name)
+	if !ok {
+		return nil, false
+	}
+	return f.Config(), true
 }

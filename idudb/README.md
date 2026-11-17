@@ -92,7 +92,7 @@ AnalyzeOption configures an Analyzer.
 ### Functions
 
 ```go
-func AnalyzeOptionsFromConfig(cfg iduconfig.Prefix) []AnalyzeOption
+func AnalyzeOptionsFromConfig(cfg *iduconfig.Settings) []AnalyzeOption
 ```
 AnalyzeOptionsFromConfig returns the analyze options specified by cfg.
 The filesystem (WithFS) and any options not represented in the configuration
@@ -182,7 +182,7 @@ func NewAnalyzer(db *DB, root string, opts ...AnalyzeOption) *Analyzer
 ```
 NewAnalyzer returns a new Analyzer for the filesystem rooted at root that
 records its results in db. AnalyzeOptionsFromConfig can be used to create
-options from an iduconfig.Prefix.
+options from an iduconfig.Settings.
 
 
 
@@ -281,7 +281,7 @@ Option configures a DB created by New.
 ### Functions
 
 ```go
-func OptionsFromConfig(cfg iduconfig.Prefix) []Option
+func OptionsFromConfig(cfg *iduconfig.Settings) []Option
 ```
 OptionsFromConfig returns the database options specified by cfg.
 

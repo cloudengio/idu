@@ -10,8 +10,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-
-	"cloudeng.io/cmd/idu/internal"
 )
 
 type dbCmd struct{}
@@ -39,12 +37,13 @@ func dirSize(path string) (int64, error) {
 	return total, err
 }
 
-func (db *dbCmd) locate(ctx context.Context, values interface{}, args []string) error {
+func (db *dbCmd) locate(_ context.Context, values interface{}, args []string) error {
 	lf := values.(*locateFlags)
-	_, prefix, _, err := internal.LookupPrefix(ctx, globalConfig, args[0])
+	f, _, err := lookupFS(globalConfig, prefixArg(args))
 	if err != nil {
 		return err
 	}
+	prefix := f.Config()
 	if !lf.Verbose {
 		fmt.Printf("%v\n", prefix.Database)
 		return nil
@@ -52,7 +51,7 @@ func (db *dbCmd) locate(ctx context.Context, values interface{}, args []string) 
 	info, err := os.Stat(prefix.Database)
 	if err != nil {
 		if os.IsNotExist(err) {
-			fmt.Printf("database for %v is at: %v\n", args[0], prefix.Database)
+			fmt.Printf("database for %v is at: %v\n", f.Location(), prefix.Database)
 			return nil
 		}
 		return err
@@ -63,6 +62,6 @@ func (db *dbCmd) locate(ctx context.Context, values interface{}, args []string) 
 			size = total
 		}
 	}
-	fmt.Printf("database for %v is at: %v (%v)\n", args[0], prefix.Database, fmtSize(size))
+	fmt.Printf("database for %v is at: %v (%v)\n", f.Location(), prefix.Database, fmtSize(size))
 	return nil
 }

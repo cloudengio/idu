@@ -23,12 +23,12 @@ import (
 
 // createPrefixTreeDB creates a database containing a two level tree of
 // fanout*fanout directories, each with nfiles files.
-func createPrefixTreeDB(ctx context.Context, b testing.TB, fanout, nfiles int) iduconfig.Prefix {
+func createPrefixTreeDB(ctx context.Context, b testing.TB, fanout, nfiles int) iduconfig.Root {
 	b.Helper()
-	cfg := iduconfig.Prefix{Prefix: "/root", Database: filepath.Join(b.TempDir(), "db"), Separator: "/"}
+	cfg := iduconfig.Root{Root: "/root", Settings: iduconfig.Settings{Database: filepath.Join(b.TempDir(), "db"), Separator: "/"}}
 	// Create the database via idudb so that it contains the summary
 	// metadata and then write the prefixes and their summaries directly.
-	idb, err := openWritableDB(ctx, cfg)
+	idb, err := openWritableDB(ctx, &cfg.Settings)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func BenchmarkComputeFromPrefixes(b *testing.B) {
 		name := fmt.Sprintf("dirs=%d/files=%d", 100*100+100+1, nfiles)
 		b.Run("impl=per-get/"+name, func(b *testing.B) {
 			for b.Loop() {
-				if _, err := computeFromPrefixesPerGet(ctx, db, &cfg, hardlinkMatcher(ctx, b), cfg.Prefix, 10); err != nil {
+				if _, err := computeFromPrefixesPerGet(ctx, db, &cfg.Settings, hardlinkMatcher(ctx, b), cfg.Root, 10); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -104,7 +104,7 @@ func BenchmarkComputeFromPrefixes(b *testing.B) {
 			st := &statsCmds{readers: readers}
 			b.Run(fmt.Sprintf("impl=readers-%02d/%s", readers, name), func(b *testing.B) {
 				for b.Loop() {
-					if _, err := st.computeFromPrefixes(ctx, db, &cfg, hardlinkMatcher(ctx, b), cfg.Prefix, 10, false); err != nil {
+					if _, err := st.computeFromPrefixes(ctx, db, &cfg.Settings, hardlinkMatcher(ctx, b), cfg.Root, 10, false); err != nil {
 						b.Fatal(err)
 					}
 				}
@@ -125,7 +125,7 @@ func BenchmarkComputeFromSummaries(b *testing.B) {
 		st := &statsCmds{}
 		b.Run(fmt.Sprintf("dirs=%d/files=%d", 100*100+100+1, nfiles), func(b *testing.B) {
 			for b.Loop() {
-				if _, err := st.computeFromSummaries(ctx, db, &cfg, cfg.Prefix, 10, false); err != nil {
+				if _, err := st.computeFromSummaries(ctx, db, &cfg.Settings, cfg.Root, 10, false); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -137,7 +137,7 @@ func BenchmarkComputeFromSummaries(b *testing.B) {
 // computeFromPrefixesPerGet is the previous, serial, implementation of
 // computeFromPrefixes that uses a database transaction per prefix and is
 // retained for comparison.
-func computeFromPrefixesPerGet(ctx context.Context, db idudb.Reader, cfg *iduconfig.Prefix, match stats.Matcher, prefix string, topN int) (*reports.AllStats, error) {
+func computeFromPrefixesPerGet(ctx context.Context, db idudb.Reader, cfg *iduconfig.Settings, match stats.Matcher, prefix string, topN int) (*reports.AllStats, error) {
 	calc, sep := cfg.CalculatorOrDefault(), cfg.SeparatorOrDefault()
 	sdb := reports.NewAllStats(prefix, topN)
 	agg := reports.NewSubtreeAggregator(prefix, topN)

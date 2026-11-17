@@ -5,15 +5,10 @@
 package internal
 
 import (
-	"context"
 	"fmt"
 	"io/fs"
-	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
-	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmdutil/flags"
 )
@@ -44,41 +39,6 @@ func (tr *TimeRangeFlags) FromTo() (from, to time.Time, set bool, err error) {
 		to = tr.To.Get().(time.Time)
 	}
 	return
-}
-
-// trimTrailingSep strips trailing path separators while preserving root paths
-// such as "/" or "C:\" without altering internal separators (important on
-// Windows when configured prefixes use forward slashes).
-func trimTrailingSep(path string) string {
-	trimmed := strings.TrimRight(path, `/\`)
-	if trimmed == "" && len(path) > 0 {
-		return path[:1]
-	}
-	if len(path) >= 3 && path[1] == ':' && (path[2] == '/' || path[2] == '\\') && len(trimmed) == 2 {
-		return path[:3]
-	}
-	return trimmed
-}
-
-// LookupPrefix resolves target (either a configuration name or a filesystem
-// path) to the matching Prefix configuration and the filesystem path to operate
-// on (Prefix.Prefix when matched by name, or the resolved path when matched
-// by prefix).
-func LookupPrefix(ctx context.Context, all iduconfig.T, target string) (context.Context, iduconfig.Prefix, string, error) {
-	if cfg, ok := all.ForName(target); ok {
-		return ctx, cfg, trimTrailingSep(cfg.Prefix), nil
-	}
-	if filepath.IsLocal(target) || len(target) == 0 {
-		if dir, err := os.Getwd(); err == nil {
-			target = filepath.Join(dir, target)
-		}
-	}
-	target = trimTrailingSep(target)
-	cfg, ok := all.ForPrefix(target)
-	if !ok {
-		return ctx, cfg, "", fmt.Errorf("no configuration for %v", target)
-	}
-	return ctx, cfg, target, nil
 }
 
 type prefixInfo struct {

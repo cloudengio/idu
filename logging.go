@@ -12,7 +12,6 @@ import (
 	"sync"
 
 	"cloudeng.io/cmd/idu/iduconfig"
-	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmdutil"
 	"cloudeng.io/cmdutil/subcmd"
 	"cloudeng.io/logging/ctxlog"
@@ -83,7 +82,8 @@ func loggingHook(ctx context.Context) (context.Context, string, subcmd.PostHook,
 // logging section of the prefix's configuration, if it has one, overridden
 // by any --log-* flags set on the command line. Otherwise ctx is returned
 // unchanged and the global logger continues to be used.
-func withPrefixLogger(ctx context.Context, cfg iduconfig.Prefix) (context.Context, error) {
+func withPrefixLogger(ctx context.Context, f iduconfig.Filesystem) (context.Context, error) {
+	cfg := f.Config()
 	if cfg.Logging == nil {
 		return ctx, nil
 	}
@@ -93,18 +93,38 @@ func withPrefixLogger(ctx context.Context, cfg iduconfig.Prefix) (context.Contex
 	}
 	l, err := ls.newLogger(*cfg.Logging)
 	if err != nil {
-		return ctx, fmt.Errorf("error setting up logger for %v: %w", cfg.Prefix, err)
+		return ctx, fmt.Errorf("error setting up logger for %v: %w", iduconfig.Label(f), err)
 	}
 	return ctxlog.WithLogger(ctx, l.Logger), nil
 }
 
-// lookupPrefix is like internal.LookupPrefix but also arranges for the
-// returned context to use the prefix's logging configuration, if any.
-func lookupPrefix(ctx context.Context, all iduconfig.T, target string) (context.Context, iduconfig.Prefix, string, error) {
-	ctx, cfg, target, err := internal.LookupPrefix(ctx, all, target)
+// lookupPrefix uses iduconfig.T.Lookup to locate the configuration for the
+// filesystem specified by --fs and the location within it specified by
+// prefix. It also arranges for the returned context to use that
+// filesystem's logging configuration, if any.
+func lookupPrefix(ctx context.Context, all iduconfig.T, prefix string) (context.Context, iduconfig.Filesystem, string, error) {
+	f, target, err := lookupFS(all, prefix)
 	if err != nil {
-		return ctx, cfg, target, err
+		return ctx, nil, "", err
 	}
-	ctx, err = withPrefixLogger(ctx, cfg)
-	return ctx, cfg, target, err
+	ctx, err = withPrefixLogger(ctx, f)
+	return ctx, f, target, err
+}
+
+// lookupFS is like lookupPrefix but does not configure logging.
+func lookupFS(all iduconfig.T, prefix string) (iduconfig.Filesystem, string, error) {
+	f, target, err := all.Lookup(globalFlags.FS, prefix)
+	if errors.Is(err, iduconfig.ErrFilesystemNameRequired) {
+		err = fmt.Errorf("%w, use --fs=<name> to specify one", err)
+	}
+	return f, target, err
+}
+
+// prefixArg returns the optional <prefix> argument, or the empty string,
+// which refers to the root of the filesystem, if it was not supplied.
+func prefixArg(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	return args[0]
 }

@@ -6,15 +6,6 @@ import cloudeng.io/cmd/idu/internal
 
 
 ## Functions
-### Func LookupPrefix
-```go
-func LookupPrefix(ctx context.Context, all iduconfig.T, target string) (context.Context, iduconfig.Prefix, string, error)
-```
-LookupPrefix resolves target (either a configuration name or a filesystem
-path) to the matching Prefix configuration and the filesystem path to
-operate on (Prefix.Prefix when matched by name, or the resolved path when
-matched by prefix).
-
 ### Func PrefixInfoAsFSInfo
 ```go
 func PrefixInfoAsFSInfo(pi prefixinfo.T, name string) fs.FileInfo

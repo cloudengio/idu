@@ -31,7 +31,7 @@ common_exclusions: &common_exclusions
 
 filesystems:
   - name: home
-    prefix: /Users/cnicolaou
+    root: /Users/cnicolaou
     database: ${db_root}/cnicolaou
     stats_dir: ./stats/home
     concurrent_scans: 5000
@@ -57,7 +57,7 @@ filesystems:
         size: 4KiB
 
   - name: dropbox
-    prefix: /Users/cnicolaou/Dropbox (Personal)
+    root: /Users/cnicolaou/Dropbox (Personal)
     database: ${db_root}/dropbox
     exclusions:
       - <<: *common_exclusions
@@ -65,18 +65,28 @@ filesystems:
       calculator: bytes
 
   - name: usr-local
-    prefix: /usr/local
+    root: /usr/local
     database: ${db_root}/usr-local
     count_hardlinks_as_files: false
     # summaries (default) or rescan, see hardlink_dedup in iduconfig.
     hardlink_dedup: summaries
 
   - name: tmp
-    prefix: /tmp
+    root: /tmp
     database: ${db_root}/tmp
 
+  # A range of keys in a key oriented store, such as an object store, is
+  # specified using start_prefix and, optionally, stop_prefix instead of root.
+  # The range includes start_prefix and excludes stop_prefix, which is the
+  # first key, in lexicographic order, outside of the range; if omitted the
+  # range contains exactly those keys that start with start_prefix.
+  # - name: alpha-objects
+  #   start_prefix: projects/alpha/
+  #   stop_prefix: projects/alpha0
+  #   database: ${db_root}/alpha-objects
+
   - name: asbhatt
-    prefix: /labs/asbhatt
+    root: /labs/asbhatt
     database: ${db_root}/asbhatt
     concurrent_scans: 5000
     concurrent_stats: 2000

@@ -6,22 +6,26 @@ package iduconfig
 
 import "testing"
 
-func TestHasPathPrefix(t *testing.T) {
+func TestContainsPath(t *testing.T) {
 	for _, tc := range []struct {
-		path, prefix    string
+		root, path      string
 		caseInsensitive bool
 		want            bool
 	}{
-		{"/a/b", "/a", false, true},
-		{"/A/b", "/a", false, false},
-		{"/a", "/a/b", false, false},
-		{`C:\Data\x`, `c:\data`, true, true},
-		{`c:\data`, `C:\Data`, true, true},
-		{`C:\Data\x`, `c:\data`, false, false},
-		{`c:`, `c:\data`, true, false},
+		{"/a", "/a/b", false, true},
+		{"/a", "/a", false, true},
+		{"/a", "/ab", false, false},
+		{"/a", "/A/b", false, false},
+		{"/a/b", "/a", false, false},
+		{"/", "/a", false, true},
+		{`c:/data`, `C:/Data/x`, true, true},
+		{`C:\Data`, `c:\data`, true, true},
+		{`c:/data`, `C:/Data/x`, false, false},
+		{`c:\data`, `c:`, true, false},
+		{`c:/`, `c:/data`, false, true},
 	} {
-		if got := hasPathPrefix(tc.path, tc.prefix, tc.caseInsensitive); got != tc.want {
-			t.Errorf("hasPathPrefix(%q, %q, %v) = %v, want %v", tc.path, tc.prefix, tc.caseInsensitive, got, tc.want)
+		if got := containsPath(tc.root, tc.path, tc.caseInsensitive); got != tc.want {
+			t.Errorf("containsPath(%q, %q, %v) = %v, want %v", tc.root, tc.path, tc.caseInsensitive, got, tc.want)
 		}
 	}
 }

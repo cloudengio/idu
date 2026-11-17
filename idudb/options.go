@@ -72,7 +72,7 @@ func WithCompactionInterval(d time.Duration) Option {
 }
 
 // OptionsFromConfig returns the database options specified by cfg.
-func OptionsFromConfig(cfg iduconfig.Prefix) []Option {
+func OptionsFromConfig(cfg *iduconfig.Settings) []Option {
 	return []Option{
 		WithCalculator(cfg.CalculatorOrDefault()),
 		WithSeparator(cfg.SeparatorOrDefault()),
@@ -178,7 +178,7 @@ func WithProgress(p ScanProgress) AnalyzeOption {
 // AnalyzeOptionsFromConfig returns the analyze options specified by cfg.
 // The filesystem (WithFS) and any options not represented in the
 // configuration (eg. WithForce, WithProgress) must be supplied separately.
-func AnalyzeOptionsFromConfig(cfg iduconfig.Prefix) []AnalyzeOption {
+func AnalyzeOptionsFromConfig(cfg *iduconfig.Settings) []AnalyzeOption {
 	return []AnalyzeOption{
 		WithExclusions(cfg.Exclude),
 		WithConcurrentScans(cfg.ConcurrentScans),
