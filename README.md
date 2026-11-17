@@ -177,6 +177,20 @@ $ idu stats view --user=<user> <idustats-file>
 $ idu stats view --group=<group> <idustats-file>
 ```
 
+The usage of each directory can also be browsed interactively, in the style of
+`ncdu`, directly from the database, without first running `stats compute`:
+
+```sh
+$ idu browse shared-project
+```
+
+Directories are listed with the totals for their entire subtree, which can be
+sorted by storage, bytes, number of files or name (`s`). Use the arrow keys (or
+`h`, `j`, `k`, `l`) to move, open and leave directories, `r` to reload the
+current directory and `q` to quit. The totals for a directory are computed by
+scanning the summaries of every directory below it the first time that it is
+opened, so opening the root of a large tree may take as long as `stats compute`.
+
 ## Anticipated Changes and Improvements
 
 ### Cloud
@@ -198,6 +212,7 @@ Usage of `idu`
                  logs - list the log of past operations stored in the database.
                errors - list the errors stored in the database
                  find - find prefixes/files in the database that match the supplied expression.
+               browse - interactively browse disk usage by directory, ncdu style, using the summaries recorded by analyze.
                 stats - compute and display statistics from the database.
               reports - generate and manage reports.
                config - show the configuration, and its documentation.

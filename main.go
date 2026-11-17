@@ -69,6 +69,11 @@ commands:
      - <prefix>
      - <expression>...
 
+  - name: browse
+    summary: interactively browse disk usage by directory, ncdu style, using the summaries recorded by analyze.
+    arguments:
+      - <prefix>
+
   - name: stats
     summary: compute and display statistics from the database.
     commands:
@@ -178,6 +183,8 @@ func cli() *subcmd.CommandSetYAML {
 
 	findCmds := &findCmds{}
 	cmdSet.Set("find").MustRunner(requireConfig(findCmds.find), &findFlags{})
+
+	cmdSet.Set("browse").MustRunner(requireConfig(browse), &browseFlags{})
 
 	db := &dbCmd{}
 	cmdSet.Set("database", "locate").MustRunner(requireConfig(db.locate), &locateFlags{})
