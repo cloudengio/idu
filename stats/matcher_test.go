@@ -2,7 +2,7 @@
 // Use of this source code is governed by the Apache-2.0
 // license that can be found in the LICENSE file.
 
-package boolexpr_test
+package stats_test
 
 import (
 	"context"
@@ -10,12 +10,16 @@ import (
 	"io/fs"
 	"os/user"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
+	"cloudeng.io/cmd/idu/internal/testutil"
+	"cloudeng.io/cmd/idu/stats"
+	"cloudeng.io/cmdutil/boolexpr"
 	"cloudeng.io/file"
 	"cloudeng.io/file/localfs"
 )
@@ -36,8 +40,8 @@ func TestAlwaysMatch(t *testing.T) {
 	lfs := localfs.New()
 	pi, f1, _ := testMatcherFixture()
 
-	p := boolexpr.NewParserTests(ctx, lfs)
-	m := boolexpr.AlwaysMatch(p)
+	p := testutil.NewParser(ctx, lfs)
+	m := stats.AlwaysMatch()
 	if m.HasExpression() {
 		t.Error("expected HasExpression() == false")
 	}
@@ -48,12 +52,12 @@ func TestAlwaysMatch(t *testing.T) {
 		t.Errorf("unexpected String(): %q", s)
 	}
 
-	mFalse, err := boolexpr.CreateMatcher(p, boolexpr.WithEmptyEntryValue(false))
+	mFalse, err := stats.NewMatcher(p, stats.WithEmptyValue(false))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if mFalse.Prefix("/root/sub", &pi) || mFalse.Entry("/root/sub", &pi, f1) {
-		t.Error("expected false when WithEmptyEntryValue(false)")
+		t.Error("expected false when WithEmptyValue(false)")
 	}
 }
 
@@ -62,7 +66,7 @@ func TestMatcherEntryOperands(t *testing.T) {
 	ctx := context.Background()
 	lfs := localfs.New()
 	pi, f1, f2 := testMatcherFixture()
-	p := boolexpr.NewParserTests(ctx, lfs)
+	p := testutil.NewParser(ctx, lfs)
 	prefix := filepath.Join(string(filepath.Separator)+"root", "sub")
 	fullPath := lfs.Join(prefix, "alpha.txt")
 
@@ -78,15 +82,20 @@ func TestMatcherEntryOperands(t *testing.T) {
 		{name: "regexp path match", expr: `re='sub[/\\]beta'`, entry: f2, want: true},
 		{name: "type regular match", expr: "type=f", entry: f1, want: true},
 		{name: "type dir mismatch", expr: "type=d", entry: f1, want: false},
+		{name: "file larger match", expr: "file-larger=200", entry: f2, want: true},
+		{name: "file larger mismatch", expr: "file-larger=200", entry: f1, want: false},
+		{name: "file smaller match", expr: "file-smaller=200", entry: f1, want: true},
+		{name: "newer match", expr: "newer=2026-01-01", entry: f1, want: true},
+		{name: "newer mismatch", expr: "newer=2026-12-01", entry: f1, want: false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			m, err := boolexpr.CreateMatcher(p,
-				boolexpr.WithFilewalkFS(lfs),
-				boolexpr.WithEntryExpression(tc.expr))
+			m, err := stats.NewMatcher(p,
+				stats.WithFilewalkFS(lfs),
+				stats.WithExpression(tc.expr))
 			if err != nil {
-				t.Fatalf("CreateMatcher(%q): %v", tc.expr, err)
+				t.Fatalf("NewMatcher(%q): %v", tc.expr, err)
 			}
 			if !m.HasExpression() {
 				t.Error("expected HasExpression() == true")
@@ -103,7 +112,7 @@ func TestMatcherPrefixOperands(t *testing.T) {
 	ctx := context.Background()
 	lfs := localfs.New()
 	pi, _, _ := testMatcherFixture()
-	p := boolexpr.NewParserTests(ctx, lfs)
+	p := testutil.NewParser(ctx, lfs)
 
 	for _, tc := range []struct {
 		name string
@@ -117,11 +126,11 @@ func TestMatcherPrefixOperands(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			m, err := boolexpr.CreateMatcher(p,
-				boolexpr.WithFilewalkFS(lfs),
-				boolexpr.WithEntryExpression(tc.expr))
+			m, err := stats.NewMatcher(p,
+				stats.WithFilewalkFS(lfs),
+				stats.WithExpression(tc.expr))
 			if err != nil {
-				t.Fatalf("CreateMatcher(%q): %v", tc.expr, err)
+				t.Fatalf("NewMatcher(%q): %v", tc.expr, err)
 			}
 			if got := m.Prefix("/root/sub", &pi); got != tc.want {
 				t.Errorf("Prefix(%q) = %v, want %v", tc.expr, got, tc.want)
@@ -134,13 +143,13 @@ func TestMatcherHardlinkAndNewParser(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	lfs := localfs.New()
-	p := boolexpr.NewParserTests(ctx, lfs)
+	p := testutil.NewParser(ctx, lfs)
 
-	m, err := boolexpr.CreateMatcher(p, boolexpr.WithHardlinkHandling(true))
+	m, err := stats.NewMatcher(p, stats.WithHardlinkHandling(true))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s := m.String(); !strings.Contains(s, "hardlink handling enabled") {
+	if s := m.String(); !strings.Contains(s, "hardlink handling enabled") || strings.Contains(s, "::") {
 		t.Errorf("unexpected String(): %q", s)
 	}
 	x := file.XAttr{Device: 1, FileID: 101}
@@ -150,16 +159,74 @@ func TestMatcherHardlinkAndNewParser(t *testing.T) {
 	if !m.IsHardlink(x) {
 		t.Error("second reference should be hardlink")
 	}
-	if _, err := boolexpr.CreateMatcher(p, boolexpr.WithEntryExpression("invalid_op=1")); err == nil {
+	if _, err := stats.NewMatcher(p, stats.WithExpression("invalid_op=1")); err == nil {
 		t.Error("expected parse error for unknown operand")
+	}
+	if _, err := stats.NewMatcher(nil, stats.WithExpression("name=alpha")); err == nil {
+		t.Error("expected parse error for nil parser with non-empty expression")
+	}
+	if _, err := stats.NewMatcher(stats.NewParser(ctx, nil), stats.WithExpression("hardlink=missing")); err == nil {
+		t.Error("expected parse error for hardlink operand with nil filesystem")
 	}
 
 	cur, err := user.Current()
 	if err != nil {
 		t.Skipf("user.Current: %v", err)
 	}
-	realParser := boolexpr.NewParser(ctx, lfs)
-	if _, err := boolexpr.CreateMatcher(realParser, boolexpr.WithEntryExpression(fmt.Sprintf("user='%s'", cur.Username))); err != nil {
-		t.Errorf("CreateMatcher(user=%s): %v", cur.Username, err)
+	realParser := stats.NewParser(ctx, lfs)
+	if _, err := stats.NewMatcher(realParser, stats.WithExpression(fmt.Sprintf("user='%s'", cur.Username))); err != nil {
+		t.Errorf("NewMatcher(user=%s): %v", cur.Username, err)
+	}
+}
+
+// sizeOperand is an example of a user-defined operand that matches
+// entries whose size is exactly the operand's value.
+type sizeOperand struct {
+	name, value string
+	size        int64
+}
+
+func (op sizeOperand) Prepare() (boolexpr.Operand, error) {
+	n, err := strconv.ParseInt(op.value, 10, 64)
+	op.size = n
+	return op, err
+}
+
+func (op sizeOperand) Eval(v any) bool {
+	e, ok := v.(stats.MatchEntry)
+	return ok && e.Info().Size() == op.size
+}
+
+func (op sizeOperand) Needs(t reflect.Type) bool {
+	return t == reflect.TypeFor[stats.MatchEntry]()
+}
+
+func (op sizeOperand) Document() string { return op.name + "=<bytes>" }
+
+func (op sizeOperand) String() string { return op.name + "=" + op.value }
+
+func TestMatcherCustomOperand(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pi, f1, f2 := testMatcherFixture()
+	p := stats.NewParser(ctx, nil,
+		stats.WithOperand("exact-size", func(n, v string) boolexpr.Operand {
+			return sizeOperand{name: n, value: v}
+		}))
+	m, err := stats.NewMatcher(p, stats.WithExpression("exact-size=123 && name=alpha.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.Entry("/root/sub", &pi, f1) {
+		t.Errorf("expected %v to match", f1.Name())
+	}
+	if m.Entry("/root/sub", &pi, f2) {
+		t.Errorf("expected %v to not match", f2.Name())
+	}
+	if m.Prefix("/root/sub", &pi) {
+		t.Error("custom entry operand should not match a prefix")
+	}
+	if !p.HasOperand("user") || !p.HasOperand("hardlink") {
+		t.Error("default operands should still be registered")
 	}
 }

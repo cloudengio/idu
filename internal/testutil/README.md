@@ -1,5 +1,4 @@
 # Package [cloudeng.io/cmd/idu/internal/testutil](https://pkg.go.dev/cloudeng.io/cmd/idu/internal/testutil?tab=doc)
-[![CircleCI](https://circleci.com/gh/cloudengio/go.gotools.svg?style=svg)](https://circleci.com/gh/cloudengio/go.gotools) [![Go Report Card](https://goreportcard.com/badge/cloudeng.io/cmd/idu/internal/testutil)](https://goreportcard.com/report/cloudeng.io/cmd/idu/internal/testutil)
 
 ```go
 import cloudeng.io/cmd/idu/internal/testutil
@@ -7,6 +6,13 @@ import cloudeng.io/cmd/idu/internal/testutil
 
 
 ## Functions
+### Func NewParser
+```go
+func NewParser(ctx context.Context, fs filewalk.FS) *boolexpr.Parser
+```
+NewParser returns a stats.NewParser whose user and group operands accept any
+uid/gid rather than requiring that they exist on the local system.
+
 ### Func TestdataIDCombinations
 ```go
 func TestdataIDCombinations(modTime time.Time, mode fs.FileMode, uid, gid int64, inode uint64) (ug00, ug10, ug01, ug11, ugOther []file.Info)

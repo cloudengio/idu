@@ -20,7 +20,6 @@ import (
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/hardlinks"
 	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/cmd/idu/internal/usernames"
@@ -136,19 +135,20 @@ func (st *statsCmds) compute(ctx context.Context, values interface{}, args []str
 
 func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *computeFlags, args []string) error {
 
-	parser := boolexpr.NewParser(ctx, fwfs)
+	parser := stats.NewParser(ctx, fwfs)
 
 	ctx, cfg, target, rdb, err := openPrefixReadOnly(ctx, globalConfig, args[0])
 	if err != nil {
 		return err
 	}
 
-	match, err := boolexpr.CreateMatcher(parser,
-		boolexpr.WithEntryExpression(args[1:]...),
-		boolexpr.WithEmptyEntryValue(true),
-		boolexpr.WithFilewalkFS(fwfs),
-		boolexpr.WithHardlinkHandling(!cfg.CountHardlinkAsFiles))
+	match, err := stats.NewMatcher(parser,
+		stats.WithExpression(args[1:]...),
+		stats.WithEmptyValue(true),
+		stats.WithFilewalkFS(fwfs),
+		stats.WithHardlinkHandling(!cfg.CountHardlinkAsFiles))
 	if err != nil {
+		rdb.Close(ctx)
 		return err
 	}
 
@@ -173,7 +173,7 @@ func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *comput
 // unless they cannot be used, in which case all of the file metadata is
 // rescanned: summaries are computed without any filter expression and only
 // record what's needed to deduplicate hardlinks if configured to do so.
-func (st *statsCmds) computeStats(ctx context.Context, db idudb.Reader, cfg iduconfig.Prefix, match boolexpr.Matcher, prefix string, topN int, progress bool) (*reports.AllStats, error) {
+func (st *statsCmds) computeStats(ctx context.Context, db idudb.Reader, cfg iduconfig.Prefix, match stats.Matcher, prefix string, topN int, progress bool) (*reports.AllStats, error) {
 	if match.HasExpression() || !cfg.CountHardlinkAsFiles && !cfg.RecordHardlinks() {
 		return st.computeFromPrefixes(ctx, db, &cfg, match, prefix, topN, progress)
 	}
@@ -241,7 +241,7 @@ func (st *statsCmds) computeFromSummaries(ctx context.Context, db idudb.Reader, 
 // the depth of the tree and hardlinks are attributed to the same prefixes as
 // when using the summaries. The metadata is read and decoded concurrently,
 // but the stats, including hardlink deduplication, are computed in order.
-func (st *statsCmds) computeFromPrefixes(ctx context.Context, db idudb.Reader, cfg *iduconfig.Prefix, match boolexpr.Matcher, prefix string, topN int, progress bool) (*reports.AllStats, error) {
+func (st *statsCmds) computeFromPrefixes(ctx context.Context, db idudb.Reader, cfg *iduconfig.Prefix, match stats.Matcher, prefix string, topN int, progress bool) (*reports.AllStats, error) {
 	if err := idudb.CheckSummaryKeys(ctx, db); err != nil {
 		return nil, err
 	}

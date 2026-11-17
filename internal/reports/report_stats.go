@@ -6,7 +6,6 @@ package reports
 
 import (
 	"cloudeng.io/algo/container/heap"
-	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/file/diskusage"
@@ -269,7 +268,7 @@ func (s *AllStats) RecordDirect(prefix string, totals stats.Totals, users, group
 	s.PushPerGroupStats(prefix, groups)
 }
 
-func (s *AllStats) Update(prefix string, pi prefixinfo.T, calc diskusage.Calculator, matcher boolexpr.Matcher) error {
+func (s *AllStats) Update(prefix string, pi prefixinfo.T, calc diskusage.Calculator, matcher stats.Matcher) error {
 	totals, users, groups := stats.ComputeTotals(prefix, &pi, calc, matcher)
 	s.RecordDirect(prefix, totals, users, groups)
 	return nil

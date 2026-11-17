@@ -2,10 +2,11 @@
 // Use of this source code is governed by the Apache-2.0
 // license that can be found in the LICENSE file.
 
-package boolexpr
+package stats
 
 import (
 	"context"
+	"fmt"
 
 	"cloudeng.io/cmdutil/boolexpr"
 	"cloudeng.io/file"
@@ -13,6 +14,9 @@ import (
 )
 
 func prepare(ctx context.Context, name string, fs file.FS) (file.XAttr, error) {
+	if fs == nil {
+		return file.XAttr{}, fmt.Errorf("hardlink operand requires a non-nil filesystem")
+	}
 	f, err := fs.Open(name)
 	if err != nil {
 		return file.XAttr{}, err
@@ -33,9 +37,9 @@ func prepare(ctx context.Context, name string, fs file.FS) (file.XAttr, error) {
 	}, nil
 }
 
-// NewHardlink returns an operand that determines if the supplied value is,
+// newHardlink returns an operand that determines if the supplied value is,
 // or is not, a hardlink to the specified file or directory.
-func NewHardlink(ctx context.Context, n, v string, fs file.FS) boolexpr.Operand {
+func newHardlink(ctx context.Context, n, v string, fs file.FS) boolexpr.Operand {
 	return matcher.XAttr(
 		n, v, `=<pathname>. Returns true if the evaluated value refers to the same file or directory as <pathname>, ie. if they share the same device and inode numbers.`,
 		func(text string) (file.XAttr, error) {

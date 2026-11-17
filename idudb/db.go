@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/file/diskusage"
@@ -34,7 +33,7 @@ type DB struct {
 	lastWritten     time.Time
 	calc            diskusage.Calculator
 	sep             string
-	match           boolexpr.Matcher
+	match           stats.Matcher
 	spec            string
 	hardlinkInfo    bool
 	// rewriteSummaries is set when the stored summaries were computed with
@@ -72,7 +71,7 @@ func New(ctx context.Context, db Database, opts ...Option) (*DB, error) {
 		lastWritten:      lastWritten,
 		calc:             o.calc,
 		sep:              o.sep,
-		match:            boolexpr.AlwaysMatch(nil),
+		match:            stats.AlwaysMatch(),
 		spec:             spec,
 		hardlinkInfo:     o.hardlinks,
 		rewriteSummaries: rewrite,

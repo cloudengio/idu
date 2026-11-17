@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/internal/testutil"
 	"cloudeng.io/cmd/idu/stats"
@@ -49,8 +48,6 @@ func TestTotals(t *testing.T) {
 		{{gid, 0, 1, 2, 1, 2, 1, 0, 0, 0, 0}, {gid + 1, 2, 0, 0, 3, 6, 0, 0, 0, 0, 0}},
 	}
 
-	parser := boolexpr.NewParserTests(context.Background(), nil)
-
 	for i, tc := range []struct {
 		fi         []file.Info
 		fd         []file.Info
@@ -70,7 +67,7 @@ func TestTotals(t *testing.T) {
 		pi.AppendInfoList(tc.fi)
 		pi.AppendInfoList(tc.fd)
 
-		totals, us, gs := stats.ComputeTotals("", &pi, sumSizeAndBlocks{}, boolexpr.AlwaysMatch(parser))
+		totals, us, gs := stats.ComputeTotals("", &pi, sumSizeAndBlocks{}, stats.AlwaysMatch())
 
 		sort.Slice(us, func(i, j int) bool { return us[i].ID < us[j].ID })
 		sort.Slice(gs, func(i, j int) bool { return gs[i].ID < gs[j].ID })
@@ -134,9 +131,9 @@ func IDsFromStats(s stats.PerIDTotals) []int64 {
 
 func computeWithExpression(t *testing.T, prefix string, pi *prefixinfo.T, expr string) (totals stats.Totals, perUser, perGroup stats.PerIDTotals) {
 	t.Helper()
-	parser := boolexpr.NewParserTests(context.Background(), nil)
-	matcher, err := boolexpr.CreateMatcher(parser,
-		boolexpr.WithEntryExpression(expr))
+	parser := testutil.NewParser(context.Background(), nil)
+	matcher, err := stats.NewMatcher(parser,
+		stats.WithExpression(expr))
 	if err != nil {
 		t.Fatal(err)
 	}

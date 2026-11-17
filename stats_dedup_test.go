@@ -16,7 +16,6 @@ import (
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/cmd/idu/internal/boolexpr"
 	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/file/localfs"
@@ -92,13 +91,13 @@ func totalsFor(sdb *reports.AllStats) statsTotals {
 	}
 }
 
-func hardlinkMatcher(ctx context.Context, t testing.TB) boolexpr.Matcher {
+func hardlinkMatcher(ctx context.Context, t testing.TB) stats.Matcher {
 	t.Helper()
 	fs := localfs.New()
-	m, err := boolexpr.CreateMatcher(boolexpr.NewParser(ctx, fs),
-		boolexpr.WithEmptyEntryValue(true),
-		boolexpr.WithFilewalkFS(fs),
-		boolexpr.WithHardlinkHandling(true))
+	m, err := stats.NewMatcher(stats.NewParser(ctx, fs),
+		stats.WithEmptyValue(true),
+		stats.WithFilewalkFS(fs),
+		stats.WithHardlinkHandling(true))
 	if err != nil {
 		t.Fatal(err)
 	}
