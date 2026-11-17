@@ -54,7 +54,6 @@ func TestListerLogsAndErrors(t *testing.T) {
 	t.Cleanup(func() {
 		globalConfig = origCfg
 	})
-	setTempLogDir(t)
 
 	lfs := localfs.New()
 	alz := &analyzeCmd{}
@@ -127,7 +126,6 @@ func setupSiblingErrorsDB(ctx context.Context, t *testing.T) (targetA, subDir st
 	origCfg := globalConfig
 	globalConfig = cfg
 	t.Cleanup(func() { globalConfig = origCfg })
-	setTempLogDir(t)
 
 	_, _, _, db, err := openPrefixRaw(ctx, cfg, root)
 	if err != nil {

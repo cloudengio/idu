@@ -8,7 +8,9 @@
 // Reader interfaces, implementations of which (e.g. backends/badgerdb) are
 // created by the caller and passed to New. All operations that modify the
 // database are implemented by this package; other packages should only
-// read the database via the Reader interface.
+// read the database via the Reader interface. Log messages are written to the
+// logger, if any, in the context supplied to each method, see
+// cloudeng.io/logging/ctxlog.
 package idudb
 
 import (
@@ -19,10 +21,10 @@ import (
 	"sync"
 	"time"
 
-	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/file/diskusage"
+	"cloudeng.io/logging/ctxlog"
 )
 
 // DB represents a writable idu database. A DB is not safe for use by
@@ -120,7 +122,7 @@ func (sdb *DB) logAndMaintain(ctx context.Context, start, stop time.Time, detail
 	}
 	if sdb.compactInterval != 0 && !sdb.lastWritten.IsZero() && time.Since(sdb.lastWritten) > sdb.compactInterval {
 		if c, ok := sdb.db.(compactor); ok {
-			internal.Log(ctx, internal.LogProgress, "compacting database", "interval", sdb.compactInterval, "last_written", sdb.lastWritten)
+			ctxlog.Info(ctx, "compacting database", "interval", sdb.compactInterval, "last_written", sdb.lastWritten)
 			return c.Compact(ctx)
 		}
 	}
@@ -235,7 +237,7 @@ func (sdb *DB) setSummary(ctx context.Context, key string, pi *prefixinfo.T) err
 		// recording that the summaries are no longer valid.
 		sdb.invalidateOnce.Do(func() {
 			if ierr := sdb.db.SetMeta(context.WithoutCancel(ctx), metaKeySummaries, []byte(invalidSummariesSpec)); ierr != nil {
-				internal.Log(ctx, internal.LogError, "failed to invalidate summaries", "error", ierr)
+				ctxlog.Error(ctx, "failed to invalidate summaries", "error", ierr)
 			}
 		})
 	}

@@ -9,7 +9,7 @@ package main
 import (
 	"context"
 
-	"cloudeng.io/cmd/idu/internal"
+	"cloudeng.io/logging/ctxlog"
 	"golang.org/x/sys/unix"
 )
 
@@ -19,10 +19,10 @@ func useMaxProcs(ctx context.Context) error {
 		return err
 	}
 	if nproc.Cur == nproc.Max {
-		internal.Log(ctx, internal.LogProgress, "max procs already at max", "nprocs", nproc.Max)
+		ctxlog.Info(ctx, "max procs already at max", "nprocs", nproc.Max)
 		return nil
 	}
-	internal.Log(ctx, internal.LogProgress, "setting max procs", "cur", nproc.Cur, "max", nproc.Max)
+	ctxlog.Info(ctx, "setting max procs", "cur", nproc.Cur, "max", nproc.Max)
 	nproc.Cur = nproc.Max
 	return unix.Setrlimit(unix.RLIMIT_NPROC, &nproc)
 }

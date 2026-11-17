@@ -173,6 +173,52 @@ func (db *Database) VisitLogs(ctx context.Context, start, stop time.Time, visito
 
 
 
+### Type Logger
+```go
+type Logger struct {
+	// contains filtered or unexported fields
+}
+```
+Logger implements badger.Logger by writing to an slog.Logger, with the
+attribute component=badger, subject to that logger's level.
+
+### Functions
+
+```go
+func NewLogger(logger *slog.Logger) *Logger
+```
+NewLogger returns a badger.Logger that writes to logger.
+
+
+
+### Methods
+
+```go
+func (l *Logger) Debugf(format string, args ...any)
+```
+Debugf implements badger.Logger.
+
+
+```go
+func (l *Logger) Errorf(format string, args ...any)
+```
+Errorf implements badger.Logger.
+
+
+```go
+func (l *Logger) Infof(format string, args ...any)
+```
+Infof implements badger.Logger.
+
+
+```go
+func (l *Logger) Warningf(format string, args ...any)
+```
+Warningf implements badger.Logger.
+
+
+
+
 ### Type Option
 ```go
 type Option func(o *options)

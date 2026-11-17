@@ -5,34 +5,7 @@ import cloudeng.io/cmd/idu/internal
 ```
 
 
-## Constants
-### LogPrefix, LogProgress, LogError
-```go
-const (
-	LogPrefix   = slog.Level(-1)
-	LogProgress = slog.LevelInfo
-	LogError    = slog.LevelError
-)
-```
-
-
-
-## Variables
-### Verbosity, LogDir
-```go
-Verbosity = LogError
-LogDir string
-
-```
-
-
-
 ## Functions
-### Func Log
-```go
-func Log(ctx context.Context, level slog.Level, msg string, args ...interface{})
-```
-
 ### Func LookupPrefix
 ```go
 func LookupPrefix(ctx context.Context, all iduconfig.T, target string) (context.Context, iduconfig.Prefix, string, error)
@@ -51,37 +24,6 @@ PrefixInfoAsFSInfo returns a fs.FileInfo for the supplied PrefixInfo.
 
 
 ## Types
-### Type BadgerLogger
-```go
-type BadgerLogger struct{}
-```
-BadgerLogger implements badger.Logger by writing to a dedicated log file
-subject to the configured Verbosity.
-
-### Methods
-
-```go
-func (l *BadgerLogger) Debugf(f string, a ...interface{})
-```
-
-
-```go
-func (l *BadgerLogger) Errorf(f string, a ...interface{})
-```
-
-
-```go
-func (l *BadgerLogger) Infof(f string, a ...interface{})
-```
-
-
-```go
-func (l *BadgerLogger) Warningf(f string, a ...interface{})
-```
-
-
-
-
 ### Type TimeRangeFlags
 ```go
 type TimeRangeFlags struct {

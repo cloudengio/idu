@@ -10,7 +10,8 @@ statistics. The database itself is accessed via the Database and Reader
 interfaces, implementations of which (e.g. backends/badgerdb) are created
 by the caller and passed to New. All operations that modify the database are
 implemented by this package; other packages should only read the database
-via the Reader interface.
+via the Reader interface. Log messages are written to the logger, if any,
+in the context supplied to each method, see cloudeng.io/logging/ctxlog.
 
 ## Constants
 ### DefaultSlowScanThreshold
@@ -310,7 +311,8 @@ hardlinks so that they can be deduplicated without rescanning the database.
 ```go
 func WithSeparator(sep string) Option
 ```
-WithSeparator sets the filename separator, it defaults to filepath.Separator.
+WithSeparator sets the filename separator, it defaults to
+filepath.Separator.
 
 
 

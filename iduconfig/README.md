@@ -171,6 +171,8 @@ type Prefix struct {
 	CompactInterval          time.Duration      `yaml:"compact_interval" doc:"duration after the last database write before running compaction, added to compact_interval_days"`
 
 	Layout Layout `yaml:"layout" doc:"the filesystem layout to use for calculating raw bytes used"`
+
+	Logging *cmdutil.LoggingConfig `yaml:"logging,omitempty" doc:"logging configuration for this filesystem, if set it replaces the top-level logging configuration for commands that operate on this filesystem, and may be overridden by the --log-* command line flags"`
 	// contains filtered or unexported fields
 }
 ```
@@ -230,8 +232,9 @@ type RAID0 struct {
 ### Type T
 ```go
 type T struct {
-	ConfigFiles Files       `yaml:"filesystem_config_files,omitempty" doc:"other configuration files to search for and merge"`
-	Filesystems Filesystems `yaml:"filesystems" doc:"the filesystem configurations to be analyzed"`
+	ConfigFiles Files                 `yaml:"filesystem_config_files,omitempty" doc:"other configuration files to search for and merge"`
+	Filesystems Filesystems           `yaml:"filesystems" doc:"the filesystem configurations to be analyzed"`
+	Logging     cmdutil.LoggingConfig `yaml:"logging,omitempty" doc:"logging configuration, it may be overridden by the --log-* command line flags"`
 }
 ```
 

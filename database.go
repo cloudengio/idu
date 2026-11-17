@@ -14,7 +14,7 @@ import (
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/idudb/backends/badgerdb"
-	"cloudeng.io/cmd/idu/internal"
+	"cloudeng.io/logging/ctxlog"
 	"github.com/dgraph-io/badger/v4"
 	badgeroptions "github.com/dgraph-io/badger/v4/options"
 )
@@ -31,7 +31,7 @@ func openBadgerDB(ctx context.Context, path string, readonly bool) (idudb.Databa
 		}
 	}
 	bopts := badger.DefaultOptions(path).
-		WithLogger(&internal.BadgerLogger{}).
+		WithLogger(badgerdb.NewLogger(ctxlog.Logger(ctx))).
 		WithDetectConflicts(false).
 		WithMetricsEnabled(false).
 		WithIndexCacheSize(64 << 20)
@@ -121,7 +121,7 @@ func openWritableDB(ctx context.Context, cfg iduconfig.Prefix) (*idudb.DB, error
 // openPrefixReadOnly resolves prefix to its configuration and the target
 // path to operate on and opens the corresponding database for reading.
 func openPrefixReadOnly(ctx context.Context, all iduconfig.T, prefix string) (context.Context, iduconfig.Prefix, string, idudb.Reader, error) {
-	ctx, cfg, target, err := internal.LookupPrefix(ctx, all, prefix)
+	ctx, cfg, target, err := lookupPrefix(ctx, all, prefix)
 	if err != nil {
 		return ctx, iduconfig.Prefix{}, "", nil, err
 	}
@@ -134,7 +134,7 @@ func openPrefixReadOnly(ctx context.Context, all iduconfig.T, prefix string) (co
 
 // eraseEntries opens the database for prefix and calls erase on it.
 func eraseEntries(ctx context.Context, prefix string, erase func(context.Context, idudb.Database) error) error {
-	ctx, cfg, _, err := internal.LookupPrefix(ctx, globalConfig, prefix)
+	ctx, cfg, _, err := lookupPrefix(ctx, globalConfig, prefix)
 	if err != nil {
 		return err
 	}

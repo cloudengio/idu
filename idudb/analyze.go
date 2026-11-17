@@ -13,13 +13,13 @@ import (
 	"strings"
 	"time"
 
-	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/errors"
 	"cloudeng.io/file"
 	"cloudeng.io/file/filewalk"
 	"cloudeng.io/file/filewalk/asyncstat"
 	"cloudeng.io/file/localfs"
+	"cloudeng.io/logging/ctxlog"
 )
 
 // ScanProgress is notified of the progress of an analysis. Its methods may
@@ -208,8 +208,7 @@ func (w *walker) dbLogErr(ctx context.Context, prefix string, val []byte) {
 }
 
 func (w *walker) logLStatError(ctx context.Context, filename string, err error) {
-	internal.Log(ctx,
-		internal.LogError, "stat error",
+	ctxlog.Error(ctx, "stat error",
 		"file", filename,
 		"error", err)
 	w.dbLogErr(ctx, filename, []byte(err.Error()))
@@ -220,7 +219,7 @@ func (w *walker) handlePrefix(ctx context.Context, state *prefixState, prefix st
 	if info.Mode()&os.ModeSymlink == os.ModeSymlink {
 		// Ignore symlinks.
 		symlink, _ := w.fs.Readlink(ctx, prefix)
-		internal.Log(ctx, internal.LogPrefix, "symlink prefix ignored",
+		ctxlog.Debug(ctx, "symlink prefix ignored",
 			"prefix", w.root,
 			"path", prefix,
 			"symlink", prefix,
@@ -233,7 +232,7 @@ func (w *walker) handlePrefix(ctx context.Context, state *prefixState, prefix st
 	xattr, err := w.fs.XAttr(ctx, prefix, info)
 	if err != nil {
 		w.dbLogErr(ctx, prefix, []byte(err.Error()))
-		internal.Log(ctx, internal.LogPrefix, "prefix xattr error",
+		ctxlog.Debug(ctx, "prefix xattr error",
 			"prefix", w.root,
 			"path", prefix,
 			"error", err)
@@ -264,7 +263,7 @@ func (w *walker) handlePrefix(ctx context.Context, state *prefixState, prefix st
 
 func (w *walker) Prefix(ctx context.Context, state *prefixState, prefix string, info file.Info, err error) (stop bool, _ file.InfoList, retErr error) {
 	if err != nil {
-		internal.Log(ctx, internal.LogError, "prefix error",
+		ctxlog.Error(ctx, "prefix error",
 			"prefix", w.root,
 			"path", prefix,
 			"error", err)
@@ -277,7 +276,7 @@ func (w *walker) Prefix(ctx context.Context, state *prefixState, prefix string, 
 	}
 
 	if w.exclude(prefix) {
-		internal.Log(ctx, internal.LogPrefix, "prefix exclusion",
+		ctxlog.Debug(ctx, "prefix exclusion",
 			"prefix", w.root,
 			"path", prefix)
 		return true, nil, nil
@@ -285,7 +284,7 @@ func (w *walker) Prefix(ctx context.Context, state *prefixState, prefix string, 
 
 	state.start = time.Now()
 	state.contentsStart = state.start
-	internal.Log(ctx, internal.LogPrefix, "prefix start",
+	ctxlog.Debug(ctx, "prefix start",
 		"start", state.start,
 		"prefix", w.root,
 		"path", prefix)
@@ -323,7 +322,7 @@ func (w *walker) Contents(ctx context.Context, state *prefixState, prefix string
 	sinceLast := time.Since(state.contentsStart)
 	state.contentsStart = time.Now()
 	if sinceLast > w.slowScan {
-		internal.Log(ctx, internal.LogProgress, "slow scan",
+		ctxlog.Info(ctx, "slow scan",
 			"prefix", w.root,
 			"path", prefix,
 			"duration", sinceLast.String())
@@ -333,7 +332,7 @@ func (w *walker) Contents(ctx context.Context, state *prefixState, prefix string
 	for _, entry := range contents {
 		path := w.fs.Join(prefix, entry.Name)
 		if w.exclude(path) {
-			internal.Log(ctx, internal.LogPrefix, "entry exclusion",
+			ctxlog.Debug(ctx, "entry exclusion",
 				"prefix", w.root,
 				"path", path)
 			continue
@@ -357,7 +356,7 @@ func (w *walker) Contents(ctx context.Context, state *prefixState, prefix string
 
 func (w *walker) Done(ctx context.Context, state *prefixState, prefix string, err error) error {
 	if err != nil && !errors.Is(err, state.contentsErr) {
-		internal.Log(ctx, internal.LogPrefix, "prefix done with error",
+		ctxlog.Debug(ctx, "prefix done with error",
 			"prefix", w.root,
 			"path", prefix,
 			"error", err)
@@ -365,7 +364,7 @@ func (w *walker) Done(ctx context.Context, state *prefixState, prefix string, er
 	}
 
 	defer func(state *prefixState) {
-		internal.Log(ctx, internal.LogPrefix, "prefix done",
+		ctxlog.Debug(ctx, "prefix done",
 			"prefix", w.root,
 			"path", prefix,
 			"parent-unchanged", state.parentUnchanged,
@@ -403,7 +402,7 @@ func (w *walker) Done(ctx context.Context, state *prefixState, prefix string, er
 	}
 
 	if err := w.db.setPrefixInfo(ctx, prefix, unchanged, &state.current); err != nil {
-		internal.Log(ctx, internal.LogPrefix, "prefix done",
+		ctxlog.Debug(ctx, "prefix done",
 			"prefix", w.root,
 			"path", prefix,
 			"error", err)

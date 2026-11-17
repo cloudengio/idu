@@ -24,7 +24,6 @@ import (
 
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
-	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/file"
 	"cloudeng.io/file/filewalk"
@@ -250,10 +249,6 @@ func testAnalyze(ctx context.Context, t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	internal.LogDir = filepath.Join(tmpDir, "logs")
-	if err := os.MkdirAll(internal.LogDir, 0700); err != nil {
-		t.Fatal(err)
-	}
 	globalConfig = cfg
 
 	fs := localfs.New()
@@ -357,10 +352,6 @@ func TestAnalyzeByName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	internal.LogDir = filepath.Join(tmpDir, "logs")
-	if err := os.MkdirAll(internal.LogDir, 0700); err != nil {
-		t.Fatal(err)
-	}
 	globalConfig = cfg
 
 	fs := localfs.New()
@@ -430,22 +421,6 @@ func TestAnalyzeDefaults(t *testing.T) {
 	}
 }
 
-func setTempLogDir(t *testing.T) {
-	t.Helper()
-	// globalLogger retains its open file handle across tests, so keep LogDir
-	// outside t.TempDir() to avoid Windows TempDir cleanup failures.
-	logDir, err := os.MkdirTemp("", "idu-test-logs")
-	if err != nil {
-		t.Fatal(err)
-	}
-	origLogDir := internal.LogDir
-	internal.LogDir = logDir
-	t.Cleanup(func() {
-		internal.LogDir = origLogDir
-		_ = os.RemoveAll(logDir)
-	})
-}
-
 func setupAnalyzeTestConfig(t *testing.T, root string) iduconfig.T {
 	t.Helper()
 	tmpDir := filepath.Dir(root)
@@ -466,7 +441,6 @@ func setupAnalyzeTestConfig(t *testing.T, root string) iduconfig.T {
 	t.Cleanup(func() {
 		globalConfig = origCfg
 	})
-	setTempLogDir(t)
 	return cfg
 }
 
@@ -550,7 +524,6 @@ func TestAnalyzeSymlink(t *testing.T) {
 	origCfg := globalConfig
 	globalConfig = cfg
 	t.Cleanup(func() { globalConfig = origCfg })
-	setTempLogDir(t)
 
 	alz := &analyzeCmd{}
 	if err := alz.analyzeFS(ctx, localfs.New(), &analyzeFlags{}, []string{sym}); err != nil {
@@ -870,7 +843,6 @@ func TestAnalyzeExclusions(t *testing.T) {
 	origCfg := globalConfig
 	globalConfig = cfg
 	t.Cleanup(func() { globalConfig = origCfg })
-	setTempLogDir(t)
 
 	alz := &analyzeCmd{}
 	lfs := localfs.New()
