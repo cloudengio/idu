@@ -89,6 +89,11 @@ func (kr *KeyRange) Location() string {
 }
 
 func (kr *KeyRange) setDefaults() {
+	if kr.Separator == "" {
+		// Keys in key oriented stores conventionally use / regardless of
+		// the local operating system.
+		kr.Separator = "/"
+	}
 	if kr.StopPrefix == "" {
 		kr.StopPrefix = PrefixSuccessor(kr.StartPrefix)
 	}
@@ -162,24 +167,24 @@ type docT struct {
 }
 
 // decodeFilesystem decodes a single filesystem entry as either a *Root or
-// a *KeyRange depending on the fields it contains.
+// a *KeyRange depending on the fields it contains. The fields are
+// determined by decoding the node, rather than inspecting its keys, so that
+// fields supplied via YAML merge keys (<<) are taken into account.
 func decodeFilesystem(node *yaml.Node) (Filesystem, error) {
-	var rootKey, prefixKey *yaml.Node
-	hasRange := false
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		switch node.Content[i].Value {
-		case "root":
-			rootKey = node.Content[i]
-		case deprecatedRootKey:
-			prefixKey = node.Content[i]
-		case "start_prefix", "stop_prefix":
-			hasRange = true
-		}
+	var probe struct {
+		Root        *string `yaml:"root"`
+		Prefix      *string `yaml:"prefix"`
+		StartPrefix *string `yaml:"start_prefix"`
+		StopPrefix  *string `yaml:"stop_prefix"`
 	}
-	if rootKey != nil && prefixKey != nil {
+	if err := node.Decode(&probe); err != nil {
+		return nil, err
+	}
+	if probe.Root != nil && probe.Prefix != nil {
 		return nil, fmt.Errorf("yaml: line %d: only one of root and its deprecated alias prefix may be specified", node.Line)
 	}
-	hasRoot := rootKey != nil || prefixKey != nil
+	hasRoot := probe.Root != nil || probe.Prefix != nil
+	hasRange := probe.StartPrefix != nil || probe.StopPrefix != nil
 	if hasRoot && hasRange {
 		return nil, fmt.Errorf("yaml: line %d: a filesystem must specify either root or start_prefix/stop_prefix, but not both", node.Line)
 	}
@@ -187,20 +192,15 @@ func decodeFilesystem(node *yaml.Node) (Filesystem, error) {
 		kr := &KeyRange{}
 		return kr, node.Decode(kr)
 	}
-	if prefixKey != nil {
-		// Rename the deprecated key on a copy of the node.
-		cp := *node
-		cp.Content = make([]*yaml.Node, len(node.Content))
-		for i, n := range node.Content {
-			if n == prefixKey {
-				renamed := *n
-				renamed.Value = "root"
-				n = &renamed
-			}
-			cp.Content[i] = n
-		}
-		node = &cp
-	}
+	// Note that the deprecated prefix key is ignored when decoding into
+	// Root since the decoding is not strict; the keys have already been
+	// validated by validateMappingKeys.
 	r := &Root{}
-	return r, node.Decode(r)
+	if err := node.Decode(r); err != nil {
+		return nil, err
+	}
+	if probe.Prefix != nil {
+		r.Root = *probe.Prefix
+	}
+	return r, nil
 }

@@ -4,7 +4,10 @@
 
 package iduconfig
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestContainsPath(t *testing.T) {
 	for _, tc := range []struct {
@@ -26,6 +29,29 @@ func TestContainsPath(t *testing.T) {
 	} {
 		if got := containsPath(tc.root, tc.path, tc.caseInsensitive); got != tc.want {
 			t.Errorf("containsPath(%q, %q, %v) = %v, want %v", tc.root, tc.path, tc.caseInsensitive, got, tc.want)
+		}
+	}
+}
+
+func TestCleanPath(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"/a/b/", "/a/b"},
+		{"/a//b/./c/..", "/a/b"},
+		{"/", "/"},
+	}
+	if filepath.Separator == '\\' {
+		cases = append(cases, []struct{ in, want string }{
+			// Forward slashes are preserved if used exclusively.
+			{"C:/data//x/", "C:/data/x"},
+			{`C:\data\\x\`, `C:\data\x`},
+			// Mixed separators use the platform separator.
+			{`C:/data\x/`, `C:\data\x`},
+			{"C:/", "C:/"},
+		}...)
+	}
+	for _, tc := range cases {
+		if got := cleanPath(tc.in); got != tc.want {
+			t.Errorf("cleanPath(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }

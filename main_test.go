@@ -276,6 +276,9 @@ func assertStatsViews(t *testing.T, env []string, treeDir, statsDir, overrideSta
 	if out, err := runIDUEnv(env, "stats", "view"); err == nil {
 		t.Fatalf("expected stats view without --fs to fail, got %q", out)
 	}
+	// --fs is not required when --stats-dir is specified.
+	assertStatsViewOutput(t, env, treeDir, nil, "--stats-dir="+overrideStatsDir)
+	assertStatsViewOutput(t, env, treeDir, nil, "--stats-dir="+statsDir, "latest.idustats")
 }
 
 func TestConfigShowAndCommandsOnLoadError(t *testing.T) {

@@ -20,7 +20,8 @@ func TestLookup(t *testing.T) {
 		"filesystems:\n" +
 			"  - name: mytmp\n    root: /tmp\n" +
 			"  - name: root\n    prefix: /\n" +
-			"  - name: mytree\n    prefix: " + root + string(filepath.Separator) + "\n",
+			"  - name: mytree\n    prefix: " + root + string(filepath.Separator) + "\n" +
+			"  - name: messy\n    root: /tmp//messy/./\n",
 	))
 	if err != nil {
 		t.Fatal(err)
@@ -38,6 +39,15 @@ func TestLookup(t *testing.T) {
 		{"mytmp", "xx", "/tmp", "/tmp/xx"},
 		{"mytmp", "xx/yy/", "/tmp", "/tmp/xx/yy"},
 		{"mytmp", "xx/../yy", "/tmp", "/tmp/yy"},
+		// Absolute prefixes are cleaned.
+		{"mytmp", "/tmp/xx/../yy", "/tmp", "/tmp/yy"},
+		{"mytmp", "/tmp/.", "/tmp", "/tmp"},
+		{"mytmp", "/tmp//xx", "/tmp", "/tmp/xx"},
+		{"mytmp", "/tmp/xx/", "/tmp", "/tmp/xx"},
+		// As is the configured root.
+		{"messy", "", "/tmp//messy/./", "/tmp/messy"},
+		{"messy", "a", "/tmp//messy/./", "/tmp/messy/a"},
+		{"messy", "/tmp/messy/a/", "/tmp//messy/./", "/tmp/messy/a"},
 		{"root", "", "/", "/"},
 		{"root", "/tmp/xx", "/", "/tmp/xx"},
 		{"root", "tmp", "/", "/tmp"},
@@ -145,6 +155,10 @@ func TestLookupKeyRange(t *testing.T) {
 		if got, want := kr.Layout.Calculator, "bytes"; got != want {
 			t.Errorf("%v: got %v, want %v", tc.name, got, want)
 		}
+		// Key ranges default to / as a separator on all systems.
+		if got, want := kr.SeparatorOrDefault(), "/"; got != want {
+			t.Errorf("%v: got %q, want %q", tc.name, got, want)
+		}
 	}
 
 	for _, tc := range []struct{ fs, prefix, want string }{
@@ -244,5 +258,97 @@ func TestKeyRangeContains(t *testing.T) {
 	unbounded := iduconfig.KeyRange{StartPrefix: "b"}
 	if !unbounded.ContainsPrefix("zzz") || !unbounded.ContainsPrefix("\xff") || unbounded.Contains("a") {
 		t.Errorf("unexpected results for an unbounded range")
+	}
+}
+
+func TestForPrefixCleansPaths(t *testing.T) {
+	t.Parallel()
+	cfg, err := iduconfig.ParseConfig([]byte(`filesystems:
+  - name: tmp
+    root: /tmp
+  - name: sub
+    root: /tmp/sub
+  - name: messy
+    root: /data//./x/
+  - name: range
+    start_prefix: /tmp/sub/
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ path, want string }{
+		{"/tmp/sub/..", "tmp"},
+		{"/tmp/sub/../other", "tmp"},
+		{"/tmp/sub/./a", "sub"},
+		{"/tmp//sub", "sub"},
+		{"/data/x/y", "messy"},
+		{"/data/./x", "messy"},
+	} {
+		r, ok := cfg.ForPrefix(tc.path)
+		if !ok {
+			t.Errorf("ForPrefix(%q): no match", tc.path)
+			continue
+		}
+		if got := r.Name; got != tc.want {
+			t.Errorf("ForPrefix(%q): got %v, want %v", tc.path, got, tc.want)
+		}
+	}
+	if r, ok := cfg.ForPrefix("/data/xy"); ok {
+		t.Errorf("ForPrefix(/data/xy): unexpected match %v", r.Name)
+	}
+}
+
+func TestFilesystemMergeKeys(t *testing.T) {
+	t.Parallel()
+	cfg, err := iduconfig.ParseConfig([]byte(`filesystems:
+  - &keys
+    name: keys-a
+    start_prefix: a/
+    database: ./db-a
+  - <<: *keys
+    name: keys-b
+    database: ./db-b
+  - &old
+    name: old-a
+    prefix: /old
+  - <<: *old
+    name: old-b
+  - <<: [*old]
+    name: old-c
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"keys-a", "keys-b"} {
+		f, ok := cfg.ForName(name)
+		if !ok {
+			t.Fatalf("missing %v", name)
+		}
+		kr, ok := f.(*iduconfig.KeyRange)
+		if !ok {
+			t.Fatalf("%v: got %T, want *iduconfig.KeyRange", name, f)
+		}
+		if kr.StartPrefix != "a/" || kr.StopPrefix != "a0" {
+			t.Errorf("%v: got %v", name, kr.Location())
+		}
+	}
+	for _, name := range []string{"old-a", "old-b", "old-c"} {
+		f, ok := cfg.ForName(name)
+		if !ok {
+			t.Fatalf("missing %v", name)
+		}
+		if got, want := rootOf(t, f).Root, "/old"; got != want {
+			t.Errorf("%v: got %v, want %v", name, got, want)
+		}
+	}
+
+	// Conflicts introduced via merge keys are detected.
+	for _, tc := range []struct{ yaml, errMsg string }{
+		{"filesystems:\n  - &r\n    name: r\n    root: /r\n  - <<: *r\n    name: x\n    start_prefix: a\n", "not both"},
+		{"filesystems:\n  - &r\n    name: r\n    prefix: /r\n  - <<: *r\n    name: x\n    root: /r\n", "deprecated alias"},
+	} {
+		if _, err := iduconfig.ParseConfig([]byte(tc.yaml)); err == nil || !strings.Contains(err.Error(), tc.errMsg) {
+			t.Errorf("%q: got %v, want error containing %q", tc.yaml, err, tc.errMsg)
+		}
 	}
 }

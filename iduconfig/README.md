@@ -412,9 +412,10 @@ filesystem is used, otherwise ErrFilesystemNameRequired is returned.
 
 For a *Root, an empty prefix refers to the root itself, a relative prefix
 is interpreted relative to the root and an absolute prefix is used as is.
-In all cases the resulting path must be contained within the root.
-The returned path is cleaned and has no trailing separator (other than for a
-root such as / or C:\).
+In all cases the resulting path is cleaned (see filepath.Clean), and hence
+has no trailing separator other than for a root such as / or C:\, and must
+be contained within the root. On Windows, the returned path uses forward
+slashes if the root or absolute prefix uses only forward slashes.
 
 For a *KeyRange, an empty prefix refers to the entire range and is returned
 as the empty string. Otherwise prefix is a key prefix that is used as is and

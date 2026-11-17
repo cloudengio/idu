@@ -24,9 +24,10 @@ var ErrFilesystemNameRequired = errors.New("a filesystem name is required when m
 //
 // For a *Root, an empty prefix refers to the root itself, a relative prefix
 // is interpreted relative to the root and an absolute prefix is used as is.
-// In all cases the resulting path must be contained within the root. The
-// returned path is cleaned and has no trailing separator (other than for a
-// root such as / or C:\).
+// In all cases the resulting path is cleaned (see filepath.Clean), and hence
+// has no trailing separator other than for a root such as / or C:\, and
+// must be contained within the root. On Windows, the returned path uses
+// forward slashes if the root or absolute prefix uses only forward slashes.
 //
 // For a *KeyRange, an empty prefix refers to the entire range and is
 // returned as the empty string. Otherwise prefix is a key prefix that is
@@ -45,19 +46,16 @@ func (t T) Lookup(fsname, prefix string) (Filesystem, string, error) {
 }
 
 func (r *Root) lookup(prefix string) (string, error) {
-	root := trimTrailingSep(r.Root)
-	var path string
+	root := cleanPath(r.Root)
+	path := root
 	switch {
-	case len(prefix) == 0:
-		path = root
 	case filepath.IsAbs(prefix):
-		// Avoid filepath.Clean here since on Windows it would rewrite
-		// forward slashes that may be used in the configured roots.
-		path = trimTrailingSep(prefix)
-	default:
-		path = trimTrailingSep(filepath.Join(root, prefix))
+		path = cleanPath(prefix)
+	case len(prefix) > 0:
+		// filepath.Join cleans its result.
+		path = matchSeparators(root, filepath.Join(root, prefix))
 	}
-	if !containsPath(filepath.Clean(root), filepath.Clean(path), caseInsensitivePaths) {
+	if !containsPath(root, path, caseInsensitivePaths) {
 		return "", fmt.Errorf("%v is not contained within the root", prefix)
 	}
 	return path, nil
@@ -99,41 +97,42 @@ func (t T) filesystemNames() string {
 
 // containsPath reports whether path is root or is contained within root,
 // comparing whole path components only so that /tmpx is not considered to
-// be within /tmp.
+// be within /tmp. Both root and path must already be cleaned.
 func containsPath(root, path string, caseInsensitive bool) bool {
-	equal := func(a, b string) bool {
-		if caseInsensitive {
-			return strings.EqualFold(a, b)
-		}
-		return a == b
-	}
-	if equal(root, path) {
+	// Allow for a mix of / and \ on Windows, ToSlash is a no-op elsewhere.
+	root, path = filepath.ToSlash(root), filepath.ToSlash(path)
+	if pathEqual(root, path, caseInsensitive) {
 		return true
 	}
-	if len(path) <= len(root) || !equal(path[:len(root)], root) {
+	if len(path) <= len(root) || !pathEqual(path[:len(root)], root, caseInsensitive) {
 		return false
 	}
-	if isSep(root[len(root)-1]) {
-		// root is / or C:\ etc.
+	if root[len(root)-1] == '/' {
+		// root is / or C:/ etc.
 		return true
 	}
-	return isSep(path[len(root)])
+	return path[len(root)] == '/'
 }
 
-func isSep(c byte) bool {
-	return c == '/' || c == filepath.Separator
+func pathEqual(a, b string, caseInsensitive bool) bool {
+	if caseInsensitive {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
-// trimTrailingSep strips trailing path separators while preserving root paths
-// such as "/" or "C:\" without altering internal separators (important on
-// Windows when configured prefixes use forward slashes).
-func trimTrailingSep(path string) string {
-	trimmed := strings.TrimRight(path, `/\`)
-	if trimmed == "" && len(path) > 0 {
-		return path[:1]
+// cleanPath returns filepath.Clean(p), but on Windows, where filepath.Clean
+// converts / to \, it preserves the use of forward slashes if p uses only
+// forward slashes, as may be the case for configured roots.
+func cleanPath(p string) string {
+	return matchSeparators(p, filepath.Clean(p))
+}
+
+// matchSeparators returns p using forward slashes if orig uses only
+// forward slashes and the platform separator is not /.
+func matchSeparators(orig, p string) string {
+	if filepath.Separator != '/' && strings.ContainsRune(orig, '/') && !strings.ContainsRune(orig, filepath.Separator) {
+		return filepath.ToSlash(p)
 	}
-	if len(path) >= 3 && path[1] == ':' && (path[2] == '/' || path[2] == '\\') && len(trimmed) == 2 {
-		return path[:3]
-	}
-	return trimmed
+	return p
 }

@@ -81,7 +81,7 @@ commands:
           - <expression>...
 
       - name: view
-        summary: view the statistics stored in a file created using the compute command. If no filename is specified then the latest statistics for the filesystem specified by --fs are displayed, otherwise the named file is displayed, a relative filename that does not exist is looked for in the filesystem's stats directory.
+        summary: view the statistics stored in a file created using the compute command. If no filename is specified then the latest statistics for the filesystem specified by --fs are displayed, otherwise the named file is displayed, a relative filename that does not exist is looked for in the stats directory, which is specified by --stats-dir or is the stats directory of the filesystem specified by --fs.
         arguments:
           - '[<filename>]'
 

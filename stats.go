@@ -120,7 +120,7 @@ type computeFlags struct {
 
 type viewFlags struct {
 	StatsFlags
-	StatsDir string `subcmd:"stats-dir,,'directory that stats files are read from, defaults to stats_dir from the configuration or stats'"`
+	StatsDir string `subcmd:"stats-dir,,'directory that stats files are read from, defaults to stats_dir from the configuration of the filesystem specified by --fs; --fs is not required if this flag is set'"`
 	User     string `subcmd:"user,,display stats for the specified user"`
 	Group    string `subcmd:"group,,display stats for the specified group"`
 	Info     bool   `subcmd:"info,false,display metadata for the stats file"`
@@ -313,10 +313,11 @@ func resolveDirectStatsFile(statsDirFlag, arg string) (string, bool) {
 }
 
 // resolveStatsFilename returns the stats file to be viewed. With no
-// arguments it is the latest.idustats file in the stats directory for the
-// filesystem specified by --fs. With a single argument it is that file if
-// it exists (or is -), otherwise it is the named file in the stats
-// directory for the filesystem specified by --fs.
+// arguments it is the latest.idustats file in the stats directory. With a
+// single argument it is that file if it exists (or is -), otherwise it is
+// the named file in the stats directory. The stats directory is the one
+// specified by --stats-dir, if set, in which case --fs is not required,
+// otherwise it is the stats directory for the filesystem specified by --fs.
 func resolveStatsFilename(ctx context.Context, cfg iduconfig.T, statsDirFlag string, args []string) (string, error) {
 	if len(args) > 1 {
 		return "", fmt.Errorf("too many arguments: expected [<filename>]")
@@ -330,6 +331,9 @@ func resolveStatsFilename(ctx context.Context, cfg iduconfig.T, statsDirFlag str
 		if filepath.IsAbs(name) {
 			return name, nil
 		}
+	}
+	if len(statsDirFlag) > 0 {
+		return filepath.Join(statsDirFlag, name), nil
 	}
 	pcfg, _, err := lookupFS(cfg, "")
 	if err != nil {

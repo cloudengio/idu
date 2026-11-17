@@ -317,13 +317,16 @@ func (t T) ForName(name string) (Filesystem, bool) {
 // if a match is found.
 func (t T) ForPrefix(path string) (*Root, bool) {
 	var longest *Root
+	longestLen := 0
+	path = cleanPath(path)
 	for _, f := range t.Filesystems {
 		r, ok := f.(*Root)
 		if !ok || r.Root == "" {
 			continue
 		}
-		if containsPath(trimTrailingSep(r.Root), trimTrailingSep(path), caseInsensitivePaths) && (longest == nil || len(r.Root) > len(longest.Root)) {
-			longest = r
+		root := cleanPath(r.Root)
+		if containsPath(root, path, caseInsensitivePaths) && (longest == nil || len(root) > longestLen) {
+			longest, longestLen = r, len(root)
 		}
 	}
 	return longest, longest != nil
