@@ -77,7 +77,7 @@ func TestHelp(t *testing.T) {
 	if err := containsAnyOf(out, base...); err != nil {
 		t.Fatal(err)
 	}
-	err := containsAnyOf(out, "[--config= --gcpercent=50 --http= --log-dir= --profile= --stderr=false --units=decimal --v=0]")
+	err := containsAnyOf(out, "[--config= --gcpercent=50 --http= --log-file= --log-format=json --log-level=0 --log-source-code=false --profile= --units=decimal]")
 	if err != nil {
 		t.Fatal(err)
 	}

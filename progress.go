@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"cloudeng.io/cmd/idu/idudb"
-	"cloudeng.io/cmd/idu/internal"
+	"cloudeng.io/logging/ctxlog"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 )
@@ -210,7 +210,7 @@ func (pt *progressTracker) summary(ctx context.Context) {
 }
 
 func (pt progressStats) log(ctx context.Context) {
-	internal.Log(ctx, internal.LogProgress, "summary",
+	ctxlog.Info(ctx, "summary",
 		"prefixes started", pt.numPrefixesStarted,
 		"prefixes", pt.numPrefixesFinished,
 		"deleted", pt.numDeleted,

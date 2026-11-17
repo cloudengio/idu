@@ -15,6 +15,7 @@ import (
 	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/idudb/backends/badgerdb"
 	"cloudeng.io/cmd/idu/internal"
+	"cloudeng.io/logging/ctxlog"
 	"github.com/dgraph-io/badger/v4"
 	badgeroptions "github.com/dgraph-io/badger/v4/options"
 )
@@ -31,7 +32,7 @@ func openBadgerDB(ctx context.Context, path string, readonly bool) (idudb.Databa
 		}
 	}
 	bopts := badger.DefaultOptions(path).
-		WithLogger(&internal.BadgerLogger{}).
+		WithLogger(badgerdb.NewLogger(ctxlog.Logger(ctx))).
 		WithDetectConflicts(false).
 		WithMetricsEnabled(false).
 		WithIndexCacheSize(64 << 20)

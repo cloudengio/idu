@@ -50,7 +50,6 @@ func TestFindFS(t *testing.T) {
 	t.Cleanup(func() {
 		globalConfig = origCfg
 	})
-	setTempLogDir(t)
 
 	lfs := localfs.New()
 	alz := &analyzeCmd{}
@@ -134,7 +133,6 @@ func TestFindNoSiblingBleedAndPrefixFlag(t *testing.T) {
 	origCfg := globalConfig
 	globalConfig = cfg
 	t.Cleanup(func() { globalConfig = origCfg })
-	setTempLogDir(t)
 
 	lfs := localfs.New()
 	if err := (&analyzeCmd{}).analyzeFS(ctx, lfs, &analyzeFlags{}, []string{root}); err != nil {

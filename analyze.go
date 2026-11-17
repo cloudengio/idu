@@ -23,6 +23,7 @@ import (
 	"cloudeng.io/file/filewalk"
 	"cloudeng.io/file/filewalk/asyncstat"
 	"cloudeng.io/file/localfs"
+	"cloudeng.io/logging/ctxlog"
 )
 
 func showDefaults() {
@@ -57,7 +58,7 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *anal
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	if err := useMaxProcs(ctx); err != nil {
-		internal.Log(ctx, internal.LogError, "failed to set max procs", "error", err)
+		ctxlog.Error(ctx, "failed to set max procs", "error", err)
 	}
 	if af.Defaults {
 		showDefaults()
@@ -70,7 +71,7 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *anal
 	}
 	if cfg.SetMaxThreads > 0 {
 		debug.SetMaxThreads(cfg.SetMaxThreads)
-		internal.Log(ctx, internal.LogProgress, "set max threads", "max-threads", cfg.SetMaxThreads)
+		ctxlog.Info(ctx, "set max threads", "max-threads", cfg.SetMaxThreads)
 	}
 	openDB := alz.openDB
 	if openDB == nil {

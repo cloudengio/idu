@@ -9,6 +9,13 @@
 # You can also point idu directly at this file with:
 #   idu --config=example-config.yml config show
 
+# Logging, the --log-level, --log-file, --log-format and --log-source-code
+# flags override these settings.
+logging:
+  level: 0          # 0=error, 1=warn, 2=info, 3=debug
+  # file: /tmp/idu.log  # defaults to stderr, - for stdout
+  format: json      # json or text
+
 vars:
   db_root: ./local-database
 

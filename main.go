@@ -6,9 +6,9 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
-	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -21,7 +21,6 @@ import (
 	debugpkg "runtime/debug"
 
 	"cloudeng.io/cmd/idu/iduconfig"
-	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmdutil"
 	"cloudeng.io/cmdutil/cmdconfig"
 	"cloudeng.io/cmdutil/flags"
@@ -130,12 +129,10 @@ func (u units) EnumValues() map[string]units {
 }
 
 type GlobalFlags struct {
+	cmdutil.LoggingFlags
 	ExitProfile profiling.ProfileFlag `subcmd:"profile,,'write a profile on exit; the format is <profile-name>:<file> and the flag may be repeated to request multiple profile types, use cpu to request cpu profiling in addition to predefined profiles in runtime/pprof'"`
 	Config      cmdconfig.FilesFlag   `subcmd:"config,,'configuration files (.yaml, .yml, .env) or comma-separated list; defaults to config.yaml (and its filesystem_config_files) in the idu search path or all .yaml/.yml files in $HOME/.config/idu'"`
 	Units       flags.Enum[units]     `subcmd:"units,decimal,display usage in decimal (KB) or binary (KiB) formats"`
-	Verbose     int                   `subcmd:"v,0,lower values show more debugging output"`
-	LogDir      string                `subcmd:"log-dir,,directory to write log files to"`
-	Stderr      bool                  `subcmd:"stderr,false,write log messages to stderr"`
 	HTTP        string                `subcmd:"http,,set to a port to enable http serving of /debug/vars and profiling"`
 	GCPercent   int                   `subcmd:"gcpercent,50,value to use for runtime/debug.SetGCPercent"`
 }
@@ -185,6 +182,8 @@ func cli() *subcmd.CommandSetYAML {
 
 	db := &dbCmd{}
 	cmdSet.Set("database", "locate").MustRunner(requireConfig(db.locate), &locateFlags{})
+
+	cmdSet.AppendPreHooks(subcmd.LoggerHook("logging", newLogger))
 
 	globals := subcmd.GlobalFlagSet()
 	globals.MustRegisterFlagStruct(&globalFlags, nil, nil)
@@ -241,16 +240,22 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 		go http.Serve(ln, nil) //nolint:gosec,errcheck
 	}
 
-	internal.Verbosity = slog.Level(globalFlags.Verbose)
-	internal.LogDir = globalFlags.LogDir
-	if internal.LogDir == "" {
-		internal.LogDir = os.TempDir()
-	}
-
 	ctx, cancel := context.WithCancel(ctx)
 	cmdutil.HandleSignals(cancel, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	return cmdRunner(ctx)
+}
+
+// newLogger creates the logger specified by the logging section of the
+// configuration file, overridden by any --log-* flags set on the command line.
+func newLogger(ctx context.Context, fs *flag.FlagSet) (*cmdutil.Logger, error) {
+	cfg, _ := cmdutil.ContextValue[iduconfig.T](ctx)
+	lc := cfg.Logging
+	if lc.Format == "" {
+		// Match the default of the --log-format flag.
+		lc.Format = globalFlags.Format
+	}
+	return lc.WithFlagOverrides(fs, globalFlags.LoggingFlags).NewLogger()
 }
 
 func main() {

@@ -9,10 +9,10 @@ package main
 import (
 	"context"
 
-	"cloudeng.io/cmd/idu/internal"
+	"cloudeng.io/logging/ctxlog"
 )
 
 func useMaxProcs(ctx context.Context) error {
-	internal.Log(ctx, internal.LogProgress, "max procs unchanged")
+	ctxlog.Info(ctx, "max procs unchanged")
 	return nil
 }

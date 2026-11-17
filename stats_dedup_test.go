@@ -15,7 +15,6 @@ import (
 
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
-	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/file/localfs"
@@ -129,10 +128,6 @@ func TestHardlinkDedupSummariesMatchRescan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	internal.LogDir = filepath.Join(root, "logs")
-	if err := os.MkdirAll(internal.LogDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
 	root = filepath.Join(root, "tree")
 	createHardlinkTree(t, root)
 
@@ -243,10 +238,6 @@ func createSparseTree(ctx context.Context, t *testing.T, dir string) (string, in
 	t.Helper()
 	root, err := filepath.EvalSymlinks(dir)
 	if err != nil {
-		t.Fatal(err)
-	}
-	internal.LogDir = filepath.Join(root, "logs")
-	if err := os.MkdirAll(internal.LogDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	root = filepath.Join(root, "tree")

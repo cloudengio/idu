@@ -19,26 +19,29 @@
 //	           config - show the configuration, and its documentation.
 //	         database - database management commands.
 //
-// global flags: [--config= --gcpercent=50 --http= --log-dir= --profile= --stderr=false --units=decimal --v=0]
+// global flags: [--config= --gcpercent=50 --http= --log-file= --log-format=json --log-level=0 --log-source-code=false --profile= --units=decimal]
 //
 //	-config value
 //	  configuration files (.yaml, .yml, .env) or comma-separated list; defaults
-//	  to config.yaml (and its filesystem_config_files) in the idu search path or all
-//	  .yaml/.yml files in $HOME/.config/idu
+//	  to config.yaml (and its filesystem_config_files) in the idu search path
+//	  or all .yaml/.yml files in $HOME/.config/idu
 //	-gcpercent int
 //	  value to use for runtime/debug.SetGCPercent (default 50)
 //	-http string
 //	  set to a port to enable http serving of /debug/vars and profiling
-//	-log-dir string
-//	  directory to write log files to
+//	-log-file string
+//	  log file path. If not specified logs are written to stderr, if set to -
+//	  logs are written to stdout
+//	-log-format string
+//	  log format: text or json (default "json")
+//	-log-level int
+//	  logging level: 0=error, 1=warn, 2=info, 3=debug
+//	-log-source-code
+//	  include source code file and line number in logs
 //	-profile value
 //	  write a profile on exit; the format is <profile-name>:<file> and the
 //	  flag may be repeated to request multiple profile types, use cpu to request
 //	  cpu profiling in addition to predefined profiles in runtime/pprof
-//	-stderr
-//	  write log messages to stderr
 //	-units value
 //	  display usage in decimal (KB) or binary (KiB) formats
-//	-v int
-//	  lower values show more debugging output
 package main

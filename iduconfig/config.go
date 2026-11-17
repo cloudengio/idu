@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"cloudeng.io/cmdutil"
 	"cloudeng.io/cmdutil/cmdconfig"
 	"cloudeng.io/cmdutil/cmdtypes"
 	"cloudeng.io/cmdutil/cmdyaml"
@@ -233,8 +234,9 @@ func (fs *Filesystems) UnmarshalYAML(value *yaml.Node) error {
 var tYAMLFields = structYAMLFields(T{})
 
 type T struct {
-	ConfigFiles Files       `yaml:"filesystem_config_files,omitempty" doc:"other configuration files to search for and merge"`
-	Filesystems Filesystems `yaml:"filesystems" doc:"the filesystem configurations to be analyzed"`
+	ConfigFiles Files                 `yaml:"filesystem_config_files,omitempty" doc:"other configuration files to search for and merge"`
+	Filesystems Filesystems           `yaml:"filesystems" doc:"the filesystem configurations to be analyzed"`
+	Logging     cmdutil.LoggingConfig `yaml:"logging,omitempty" doc:"logging configuration, it may be overridden by the --log-* command line flags"`
 }
 
 // UnmarshalYAML implements yaml.Unmarshaler so that YAML documents can be
