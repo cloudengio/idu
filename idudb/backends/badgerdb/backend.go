@@ -18,7 +18,7 @@ import (
 // to the logger in ctx, see cloudeng.io/logging/ctxlog, and any deadline on
 // ctx is used as the timeout for acquiring the database's lock.
 func NewBackend(ctx context.Context, path string, readonly bool) (*Database, error) {
-	var opts []Option
+	opts := make([]Option, 0, 3)
 	if readonly {
 		opts = append(opts, ReadOnly())
 	}

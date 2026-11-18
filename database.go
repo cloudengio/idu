@@ -12,6 +12,7 @@ import (
 
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
+	"cloudeng.io/cmd/idu/idudb/backends/badgerdb"
 )
 
 // openProgress is where messages are written while waiting for a database
@@ -19,7 +20,7 @@ import (
 var openProgress io.Writer = os.Stdout
 
 // databaseFactory creates the database backend and may be overridden by tests.
-var databaseFactory idudb.BackendFactory = badgerBackend
+var databaseFactory = idudb.NewBackendFactory(badgerdb.NewBackend)
 
 // dbOpenOptions returns the options used to open all databases.
 func dbOpenOptions() []idudb.OpenOption {

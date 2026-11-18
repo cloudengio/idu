@@ -120,6 +120,7 @@ type computeFlags struct {
 
 type viewFlags struct {
 	StatsFlags
+	FS       string `subcmd:"fs,,'the name of the configured filesystem to operate on, overrides the global --fs flag'"`
 	StatsDir string `subcmd:"stats-dir,,'directory that stats files are read from, defaults to stats_dir from the configuration of the filesystem specified by --fs; --fs is not required if this flag is set'"`
 	User     string `subcmd:"user,,display stats for the specified user"`
 	Group    string `subcmd:"group,,display stats for the specified group"`
@@ -293,7 +294,7 @@ func resolveDirectStatsFile(statsDirFlag, arg string) (string, bool) {
 // the named file in the stats directory. The stats directory is the one
 // specified by --stats-dir, if set, in which case --fs is not required,
 // otherwise it is the stats directory for the filesystem specified by --fs.
-func resolveStatsFilename(ctx context.Context, cfg iduconfig.T, statsDirFlag string, args []string) (string, error) {
+func resolveStatsFilename(ctx context.Context, cfg iduconfig.T, fsFlag, statsDirFlag string, args []string) (string, error) {
 	if len(args) > 1 {
 		return "", fmt.Errorf("too many arguments: expected [<filename>]")
 	}
@@ -310,7 +311,10 @@ func resolveStatsFilename(ctx context.Context, cfg iduconfig.T, statsDirFlag str
 	if len(statsDirFlag) > 0 {
 		return filepath.Join(statsDirFlag, name), nil
 	}
-	pcfg, _, err := lookupFS(cfg, "")
+	if len(fsFlag) == 0 {
+		fsFlag = globalFlags.FS
+	}
+	pcfg, _, err := lookupFSFor(cfg, fsFlag, "")
 	if err != nil {
 		if loadErr, ok := cmdutil.ContextValue[configLoadError](ctx); ok && loadErr.err != nil {
 			return "", loadErr.err
@@ -326,7 +330,7 @@ func (st *statsCmds) view(ctx context.Context, values interface{}, args []string
 		return fmt.Errorf("only one of --user or --group may be specified")
 	}
 
-	filename, err := resolveStatsFilename(ctx, globalConfig, af.StatsDir, args)
+	filename, err := resolveStatsFilename(ctx, globalConfig, af.FS, af.StatsDir, args)
 	if err != nil {
 		return err
 	}

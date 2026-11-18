@@ -20,8 +20,6 @@ import (
 	debugpkg "runtime/debug"
 
 	"cloudeng.io/cmd/idu/iduconfig"
-	"cloudeng.io/cmd/idu/idudb"
-	"cloudeng.io/cmd/idu/idudb/backends/badgerdb"
 	"cloudeng.io/cmdutil"
 	"cloudeng.io/cmdutil/cmdconfig"
 	"cloudeng.io/cmdutil/flags"
@@ -270,15 +268,4 @@ func banner(out io.Writer, ul string, format string, args ...any) {
 	buf.WriteString(strings.Repeat(ul, len(o)))
 	buf.WriteRune('\n')
 	out.Write([]byte(buf.String())) //nolint:errcheck
-}
-
-// badgerBackend is the idudb.BackendFactory used by idu, it opens a badger
-// database using badgerdb.NewBackend.
-func badgerBackend(ctx context.Context, path string, readonly bool) (idudb.Database, error) {
-	db, err := badgerdb.NewBackend(ctx, path, readonly)
-	if err != nil {
-		// Avoid returning a non-nil interface holding a nil pointer.
-		return nil, err
-	}
-	return db, nil
 }

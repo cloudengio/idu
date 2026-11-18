@@ -25,6 +25,16 @@ func trimTrailingSep(sep, path string) string {
 	return strings.TrimRight(path, sep)
 }
 
+// NormalizePath trims any trailing path separator from path using sep
+// (defaulting to "/"), while preserving filesystem root paths such as "/"
+// or "C:\".
+func NormalizePath(sep, path string) string {
+	if sep == "" {
+		sep = "/"
+	}
+	return trimTrailingSep(sep, path)
+}
+
 // SummaryKeys converts a filesystem path and separator into the exact key and
 // child-prefix key used by the ordered summary bucket. Replacing the path
 // separator with NUL ('\x00') ensures lexicographical ordering matches DFS
@@ -36,7 +46,7 @@ func SummaryKeys(sep, path string) (exactKey, childPrefix string) {
 	if path == "" {
 		return "", ""
 	}
-	norm := trimTrailingSep(sep, path)
+	norm := NormalizePath(sep, path)
 	exactKey = strings.ReplaceAll(norm, sep, "\x00")
 	if strings.HasSuffix(norm, sep) {
 		childPrefix = exactKey

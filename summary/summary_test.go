@@ -22,16 +22,7 @@ import (
 	"cloudeng.io/cmd/idu/summary"
 )
 
-// badgerFactory opens a badger database for tests.
-func badgerFactory(ctx context.Context, path string, readonly bool) (idudb.Database, error) {
-	db, err := badgerdb.NewBackend(ctx, path, readonly)
-	if err != nil {
-		return nil, err
-	}
-	return db, nil
-}
-
-var withBadger = idudb.WithBackendFactory(badgerFactory)
+var withBadger = idudb.WithBackendFactory(idudb.NewBackendFactory(badgerdb.NewBackend))
 
 func writeFile(t *testing.T, name string, size int) {
 	t.Helper()
@@ -195,7 +186,39 @@ func TestChildren(t *testing.T) {
 	if want := []string{j(root, "a"), j(root, "c")}; !slices.Equal(names, want) {
 		t.Errorf("got %v, want %v", names, want)
 	}
+
+	// Trailing separator on a non-root path is normalized consistently with Get/Walk.
+	childrenTrail, missing, err := sr.Children(ctx, root+string(filepath.Separator))
+	if err != nil || missing != 0 || len(childrenTrail) != 2 {
+		t.Fatalf("Children with trailing sep: len=%d missing=%v err=%v", len(childrenTrail), missing, err)
+	}
 }
+
+func TestNilGuards(t *testing.T) {
+	ctx := context.Background()
+	if _, err := summary.Open(ctx, nil, withBadger); err == nil {
+		t.Error("expected an error from summary.Open with nil settings")
+	}
+	for _, sr := range []*summary.Reader{
+		summary.New(nil, &iduconfig.Settings{}),
+		summary.New(&mockNilCheckReader{}, nil),
+	} {
+		if err := sr.Check(ctx); err == nil {
+			t.Error("expected Check error")
+		}
+		if _, _, err := sr.Get(ctx, "/"); err == nil {
+			t.Error("expected Get error")
+		}
+		if _, _, err := sr.Children(ctx, "/"); err == nil {
+			t.Error("expected Children error")
+		}
+		if err := lastErr(sr.Walk(ctx, "/")); err == nil {
+			t.Error("expected Walk error")
+		}
+	}
+}
+
+type mockNilCheckReader struct{ idudb.Reader }
 
 func TestHardlinkDedup(t *testing.T) {
 	if runtime.GOOS == "windows" {

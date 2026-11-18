@@ -22,6 +22,22 @@ type BackendFactory func(ctx context.Context, path string, readonly bool) (Datab
 // BackendFactory, see WithBackendFactory.
 var ErrNoBackend = errors.New("no database backend specified, see idudb.WithBackendFactory")
 
+// NewBackendFactory adapts a typed backend constructor, such as
+// badgerdb.NewBackend, into a BackendFactory while ensuring a nil concrete
+// pointer is not returned inside a non-nil Database interface on error.
+func NewBackendFactory[T Database](fn func(context.Context, string, bool) (T, error)) BackendFactory {
+	if fn == nil {
+		return nil
+	}
+	return func(ctx context.Context, path string, readonly bool) (Database, error) {
+		db, err := fn(ctx, path, readonly)
+		if err != nil {
+			return nil, err
+		}
+		return db, nil
+	}
+}
+
 // OpenOption configures OpenBackend, Open and OpenWritable.
 type OpenOption func(*openOptions)
 
@@ -105,9 +121,19 @@ func OpenBackend(ctx context.Context, path string, readonly bool, opts ...OpenOp
 	}
 }
 
+func validateSettings(cfg *iduconfig.Settings) error {
+	if cfg == nil {
+		return errors.New("idudb: nil settings configuration")
+	}
+	return nil
+}
+
 // Open opens the database specified by cfg for reading only and checks its
 // format, see CheckFormat.
 func Open(ctx context.Context, cfg *iduconfig.Settings, opts ...OpenOption) (Reader, error) {
+	if err := validateSettings(cfg); err != nil {
+		return nil, err
+	}
 	db, err := OpenBackend(ctx, cfg.Database, true, opts...)
 	if err != nil {
 		return nil, err
@@ -123,6 +149,9 @@ func Open(ctx context.Context, cfg *iduconfig.Settings, opts ...OpenOption) (Rea
 // an Analyzer, configured using OptionsFromConfig(cfg) followed by any
 // supplied dbOpts.
 func OpenWritable(ctx context.Context, cfg *iduconfig.Settings, opts []OpenOption, dbOpts ...Option) (*DB, error) {
+	if err := validateSettings(cfg); err != nil {
+		return nil, err
+	}
 	raw, err := OpenBackend(ctx, cfg.Database, false, opts...)
 	if err != nil {
 		return nil, err

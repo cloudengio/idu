@@ -19,16 +19,7 @@ import (
 	"cloudeng.io/cmd/idu/idudb/backends/badgerdb"
 )
 
-// badgerFactory opens a badger database for tests.
-func badgerFactory(ctx context.Context, path string, readonly bool) (idudb.Database, error) {
-	db, err := badgerdb.NewBackend(ctx, path, readonly)
-	if err != nil {
-		return nil, err
-	}
-	return db, nil
-}
-
-var withBadger = idudb.WithBackendFactory(badgerFactory)
+var withBadger = idudb.WithBackendFactory(idudb.NewBackendFactory(badgerdb.NewBackend))
 
 func TestOpen(t *testing.T) {
 	ctx := context.Background()
@@ -89,12 +80,28 @@ func TestOpenBackendOptions(t *testing.T) {
 		t.Errorf("got %v, want %v", err, wantErr)
 	}
 
+	if _, err := idudb.Open(ctx, nil, withBadger); err == nil {
+		t.Error("expected an error for nil settings in Open")
+	}
+	if _, err := idudb.OpenWritable(ctx, nil, []idudb.OpenOption{withBadger}); err == nil {
+		t.Error("expected an error for nil settings in OpenWritable")
+	}
+	if _, err := idudb.OpenBackend(ctx, "x", true, idudb.WithBackendFactory(idudb.NewBackendFactory[*badgerdb.Database](nil))); !errors.Is(err, idudb.ErrNoBackend) {
+		t.Errorf("got %v, want %v", err, idudb.ErrNoBackend)
+	}
+	nilPtrFactory := func(context.Context, string, bool) (*badgerdb.Database, error) {
+		return nil, wantErr
+	}
+	if db, err := idudb.NewBackendFactory(nilPtrFactory)(ctx, "x", true); !errors.Is(err, wantErr) || db != nil {
+		t.Errorf("got (%v, %v), want (nil, %v)", db, err, wantErr)
+	}
+
 	for _, progress := range []bool{true, false} {
 		synctest.Test(t, func(t *testing.T) {
 			dbDir := filepath.Join(t.TempDir(), "db")
 			slow := func(ctx context.Context, path string, readonly bool) (idudb.Database, error) {
 				time.Sleep(1100 * time.Millisecond)
-				return badgerFactory(ctx, path, readonly)
+				return idudb.NewBackendFactory(badgerdb.NewBackend)(ctx, path, readonly)
 			}
 			var out bytes.Buffer
 			opts := []idudb.OpenOption{idudb.WithBackendFactory(slow)}

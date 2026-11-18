@@ -269,10 +269,13 @@ func assertStatsViews(t *testing.T, env []string, treeDir, statsDir, overrideSta
 	t.Helper()
 	mytree := []string{"--fs=mytree"}
 	assertStatsViewOutput(t, env, treeDir, mytree)
+	assertStatsViewOutput(t, env, treeDir, nil, "--fs=mytree")
+	assertStatsViewOutput(t, env, treeDir, []string{"--fs=other"}, "--fs=mytree")
 	assertStatsViewOutput(t, env, treeDir, nil, filepath.Join(statsDir, "latest.idustats"))
 	assertStatsViewOutput(t, env, treeDir, mytree, "--stats-dir="+overrideStatsDir)
 	if targetFile, err := os.Readlink(filepath.Join(statsDir, "latest.idustats")); err == nil {
 		assertStatsViewOutput(t, env, treeDir, mytree, filepath.Base(targetFile))
+		assertStatsViewOutput(t, env, treeDir, nil, "--fs=mytree", filepath.Base(targetFile))
 	}
 	if out, err := runIDUEnv(env, "stats", "view"); err == nil {
 		t.Fatalf("expected stats view without --fs to fail, got %q", out)

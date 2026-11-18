@@ -11,6 +11,7 @@ package summary
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"iter"
 	"strings"
@@ -41,12 +42,19 @@ type Reader struct {
 	sep    string
 	calcID string
 	dedup  bool
+	err    error
 }
 
 // New returns a Reader for db, which must contain the database specified by
 // cfg. Hardlinks are deduplicated by Walk unless cfg.CountHardlinkAsFiles is
 // set.
 func New(db idudb.Reader, cfg *iduconfig.Settings) *Reader {
+	if db == nil {
+		return &Reader{err: errors.New("summary: nil database reader")}
+	}
+	if cfg == nil {
+		return &Reader{db: db, err: errors.New("summary: nil settings configuration")}
+	}
 	return &Reader{
 		db:     db,
 		sep:    cfg.SeparatorOrDefault(),
@@ -59,6 +67,9 @@ func New(db idudb.Reader, cfg *iduconfig.Settings) *Reader {
 // Reader for it. The options must include idudb.WithBackendFactory. The
 // database is closed by calling Close.
 func Open(ctx context.Context, cfg *iduconfig.Settings, opts ...idudb.OpenOption) (*Reader, error) {
+	if cfg == nil {
+		return nil, errors.New("summary: nil settings configuration")
+	}
 	db, err := idudb.Open(ctx, cfg, opts...)
 	if err != nil {
 		return nil, err
@@ -73,6 +84,9 @@ func (r *Reader) DB() idudb.Reader {
 
 // Close closes the underlying database.
 func (r *Reader) Close(ctx context.Context) error {
+	if r.db == nil {
+		return r.err
+	}
 	return r.db.Close(ctx)
 }
 
@@ -80,6 +94,9 @@ func (r *Reader) Close(ctx context.Context) error {
 // complete set of summaries computed with the configuration the Reader was
 // created with.
 func (r *Reader) Check(ctx context.Context) error {
+	if r.err != nil {
+		return r.err
+	}
 	return idudb.CheckSummaries(ctx, r.db, r.calcID, r.dedup)
 }
 
@@ -97,6 +114,9 @@ func (r *Reader) decode(path string, val []byte, ps *stats.PrefixSummary) error 
 // deduplicated since doing so requires visiting every summary that
 // precedes path, see Walk.
 func (r *Reader) Get(ctx context.Context, path string) (stats.PrefixSummary, bool, error) {
+	if r.err != nil {
+		return stats.PrefixSummary{}, false, r.err
+	}
 	exactKey, _ := stats.SummaryKeys(r.sep, path)
 	var ps stats.PrefixSummary
 	found := false
@@ -144,6 +164,10 @@ func (r *Reader) Walk(ctx context.Context, path string, opts ...WalkOption) iter
 		fn(&o)
 	}
 	return func(yield func(Entry, error) bool) {
+		if r.err != nil {
+			yield(Entry{}, r.err)
+			return
+		}
 		var hl *hardlinks.Incremental
 		if r.dedup {
 			hl = &hardlinks.Incremental{}
@@ -201,8 +225,12 @@ func keyDepth(exactKey, childPrefix, key string) int {
 // proportional to the number of children rather than the size of the
 // subtree rooted at path. Hardlinks are not deduplicated, see Get.
 func (r *Reader) Children(ctx context.Context, path string) ([]Entry, int, error) {
+	if r.err != nil {
+		return nil, 0, r.err
+	}
+	norm := stats.NormalizePath(r.sep, path)
 	var buf bytes.Buffer
-	if err := r.db.Get(ctx, path, &buf); err != nil {
+	if err := r.db.Get(ctx, norm, &buf); err != nil {
 		return nil, 0, err
 	}
 	if buf.Len() == 0 {
@@ -210,12 +238,13 @@ func (r *Reader) Children(ctx context.Context, path string) ([]Entry, int, error
 	}
 	var pi prefixinfo.T
 	if err := pi.UnmarshalBinary(buf.Bytes()); err != nil {
-		return nil, 0, fmt.Errorf("%v: %w", path, err)
+		return nil, 0, fmt.Errorf("%v: %w", norm, err)
 	}
-	var children []Entry
+	prefixes := pi.PrefixesOnly()
+	children := make([]Entry, 0, len(prefixes))
 	missing := 0
-	for _, fi := range pi.PrefixesOnly() {
-		child := join(r.sep, path, fi.Name())
+	for _, fi := range prefixes {
+		child := join(r.sep, norm, fi.Name())
 		ps, ok, err := r.Get(ctx, child)
 		if err != nil {
 			return nil, 0, err
