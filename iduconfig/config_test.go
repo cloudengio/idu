@@ -7,6 +7,7 @@ package iduconfig_test
 import (
 	"bytes"
 	"context"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -330,6 +331,14 @@ func TestStrictAndErrors(t *testing.T) {
 		{
 			name: "topn-oversubscription-nan",
 			yaml: "filesystems:\n  - prefix: /tmp\n    topn_oversubscription: .nan\n",
+		},
+		{
+			name: "topn-oversubscription-inf",
+			yaml: "filesystems:\n  - prefix: /tmp\n    topn_oversubscription: .inf\n",
+		},
+		{
+			name: "topn-oversubscription-overflow",
+			yaml: "filesystems:\n  - prefix: /tmp\n    topn_oversubscription: 1e308\n",
 		},
 	}
 	for _, tc := range cases {
@@ -777,6 +786,21 @@ filesystems:
 		if got := p.TopNPerIDCapacity(); got != tc.perIDCapacity {
 			t.Errorf("%s: got %v, want %v", tc.name, got, tc.perIDCapacity)
 		}
+	}
+
+	overflow := iduconfig.Settings{TopN: 100, TopNPerID: 10, TopNOversubscription: 1e308}
+	if got := overflow.TopNCapacity(); got != math.MaxInt {
+		t.Errorf("overflow TopNCapacity() = %v, want %v", got, math.MaxInt)
+	}
+	if got := overflow.TopNPerIDCapacity(); got != math.MaxInt {
+		t.Errorf("overflow TopNPerIDCapacity() = %v, want %v", got, math.MaxInt)
+	}
+	neg := iduconfig.Settings{TopN: -5, TopNPerID: -1}
+	if got := neg.TopNCapacity(); got != 0 {
+		t.Errorf("negative TopNCapacity() = %v, want 0", got)
+	}
+	if got := neg.TopNPerIDCapacity(); got != 0 {
+		t.Errorf("negative TopNPerIDCapacity() = %v, want 0", got)
 	}
 }
 

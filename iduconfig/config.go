@@ -170,7 +170,18 @@ func (p *Settings) TopNPerIDCapacity() int {
 }
 
 func (p *Settings) oversubscribed(n int) int {
-	return int(math.Ceil(float64(n) * p.TopNOversubscriptionOrDefault()))
+	if n <= 0 {
+		return 0
+	}
+	factor := p.TopNOversubscriptionOrDefault()
+	if factor < 1 {
+		factor = 1
+	}
+	scaled := math.Ceil(float64(n) * factor)
+	if math.IsInf(scaled, 1) || scaled >= float64(math.MaxInt) {
+		return math.MaxInt
+	}
+	return int(scaled)
 }
 
 // CompactionInterval returns the combined compaction interval computed by
@@ -465,14 +476,8 @@ func (t *T) Validate() error {
 		if err := validateCompactIntervals(p); err != nil {
 			return fmt.Errorf("filesystem %q: %w", Label(f), err)
 		}
-		if p.TopN < 0 {
-			return fmt.Errorf("filesystem %q: topn must not be negative (%d)", Label(f), p.TopN)
-		}
-		if p.TopNPerID < 0 {
-			return fmt.Errorf("filesystem %q: topn_per_id must not be negative (%d)", Label(f), p.TopNPerID)
-		}
-		if o := p.TopNOversubscription; o != 0 && (o < 1 || math.IsNaN(o) || math.IsInf(o, 0)) {
-			return fmt.Errorf("filesystem %q: topn_oversubscription must be at least 1, not %v", Label(f), o)
+		if err := validateTopN(p); err != nil {
+			return fmt.Errorf("filesystem %q: %w", Label(f), err)
 		}
 		switch p.HardlinkDedup {
 		case "":
@@ -504,6 +509,33 @@ func validateCompactIntervals(p *Settings) error {
 	daysDur := time.Duration(p.CompactIntervalDays) * 24 * time.Hour
 	if int64(p.CompactInterval) > math.MaxInt64-int64(daysDur) {
 		return fmt.Errorf("compact_interval_days + compact_interval overflows duration")
+	}
+	return nil
+}
+
+func validateTopN(p *Settings) error {
+	if p.TopN < 0 {
+		return fmt.Errorf("topn must not be negative (%d)", p.TopN)
+	}
+	if p.TopNPerID < 0 {
+		return fmt.Errorf("topn_per_id must not be negative (%d)", p.TopNPerID)
+	}
+	o := p.TopNOversubscription
+	if o != 0 && (o < 1 || math.IsNaN(o) || math.IsInf(o, 0)) {
+		return fmt.Errorf("topn_oversubscription must be at least 1, not %v", o)
+	}
+	factor := p.TopNOversubscriptionOrDefault()
+	for _, field := range []struct {
+		name string
+		n    int
+	}{
+		{"topn", p.TopNOrDefault()},
+		{"topn_per_id", p.TopNPerIDOrDefault()},
+	} {
+		scaled := math.Ceil(float64(field.n) * factor)
+		if math.IsInf(scaled, 1) || scaled >= float64(math.MaxInt) {
+			return fmt.Errorf("%s * topn_oversubscription overflows int", field.name)
+		}
 	}
 	return nil
 }
