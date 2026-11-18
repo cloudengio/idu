@@ -45,6 +45,9 @@ type DB struct {
 	// a different specification and must be recomputed for unchanged prefixes.
 	rewriteSummaries bool
 	invalidateOnce   sync.Once
+	// observer, if set, is notified of every change to the summaries. It
+	// is set by Analyze for the duration of an analysis.
+	observer Observer
 }
 
 // New returns a DB that uses the supplied, writable, database backend. The
@@ -165,6 +168,13 @@ func (sdb *DB) deletePrefix(ctx context.Context, prefix string) error {
 	if err := sdb.db.Flush(ctx); err != nil {
 		return err
 	}
+	if sdb.observer != nil {
+		var scanErr error
+		sdb.observer.SubtreeDeleted(ctx, prefix, sdb.deletedSummaries(ctx, prefix, &scanErr))
+		if scanErr != nil {
+			return scanErr
+		}
+	}
 	if err := sdb.db.Delete(ctx, prefix); err != nil {
 		return err
 	}
@@ -232,7 +242,17 @@ func (sdb *DB) setPrefixInfo(ctx context.Context, key string, unchanged bool, pi
 func (sdb *DB) setSummary(ctx context.Context, key string, pi *prefixinfo.T) error {
 	summary := stats.ComputeSummary(key, pi, sdb.calc, sdb.match, sdb.hardlinkInfo)
 	exactKey, _ := stats.SummaryKeys(sdb.sep, key)
+	var old *stats.PrefixSummary
+	if sdb.observer != nil {
+		// Each prefix's summary is written at most once per analysis and
+		// all writes are flushed when an analysis completes, so the
+		// previous summary cannot be in a pending batched write.
+		old = sdb.previousSummary(ctx, key, exactKey)
+	}
 	err := sdb.db.SetSummary(ctx, exactKey, summary.AppendBinary(nil), true)
+	if err == nil && sdb.observer != nil {
+		sdb.observer.PrefixChanged(ctx, key, old, &summary)
+	}
 	if err != nil {
 		// Ensure that stats will not use the now incomplete summaries
 		// and that the next analyze will rewrite them.

@@ -94,6 +94,7 @@ type analyzeOptions struct {
 	force                    bool
 	slowScan                 time.Duration
 	progress                 ScanProgress
+	observer                 Observer
 }
 
 // DefaultSlowScanThreshold is the default duration after which scans
