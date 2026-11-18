@@ -113,6 +113,7 @@ func (sdb *DB) previousSummary(ctx context.Context, key, exactKey string) *stats
 // prefix and its descendants. Any error encountered is stored in *errp.
 func (sdb *DB) deletedSummaries(ctx context.Context, prefix string, errp *error) iter.Seq2[string, *stats.PrefixSummary] {
 	return func(yield func(string, *stats.PrefixSummary) bool) {
+		*errp = nil
 		exactKey, childPrefix := stats.SummaryKeys(sdb.sep, prefix)
 		var ps stats.PrefixSummary
 		var decodeErr error

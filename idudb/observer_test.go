@@ -28,12 +28,15 @@ type deletion struct {
 }
 
 type recordingObserver struct {
-	mu        sync.Mutex
-	started   []ScanInfo
-	changes   map[string]change
-	deletions []deletion
-	done      []error
-	startErr  error
+	mu           sync.Mutex
+	started      []ScanInfo
+	changes      map[string]change
+	deletions    []deletion
+	done         []error
+	startErr     error
+	doneErr      error
+	skipDeleteIt bool
+	onChanged    func()
 }
 
 func (r *recordingObserver) ScanStarted(_ context.Context, scan ScanInfo) error {
@@ -47,7 +50,6 @@ func (r *recordingObserver) ScanStarted(_ context.Context, scan ScanInfo) error 
 
 func (r *recordingObserver) PrefixChanged(_ context.Context, path string, old, cur *stats.PrefixSummary) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	var c change
 	if old != nil {
 		o := old.Direct
@@ -56,13 +58,23 @@ func (r *recordingObserver) PrefixChanged(_ context.Context, path string, old, c
 	n := cur.Direct
 	c.new = &n
 	r.changes[path] = c
+	onChanged := r.onChanged
+	r.mu.Unlock()
+	if onChanged != nil {
+		onChanged()
+	}
 }
 
 func (r *recordingObserver) SubtreeDeleted(_ context.Context, path string, summaries iter.Seq2[string, *stats.PrefixSummary]) {
+	r.mu.Lock()
+	skip := r.skipDeleteIt
+	r.mu.Unlock()
 	d := deletion{path: path}
-	for p, ps := range summaries {
-		d.paths = append(d.paths, p)
-		d.files += ps.Direct.Files
+	if !skip {
+		for p, ps := range summaries {
+			d.paths = append(d.paths, p)
+			d.files += ps.Direct.Files
+		}
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -73,7 +85,7 @@ func (r *recordingObserver) ScanDone(_ context.Context, scanErr error) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.done = append(r.done, scanErr)
-	return nil
+	return r.doneErr
 }
 
 func (r *recordingObserver) changed() []string {
@@ -225,5 +237,95 @@ func TestObserverRewriteAndStartError(t *testing.T) {
 	}
 	if db.observer != nil {
 		t.Errorf("observer not cleared")
+	}
+}
+
+func corruptSummary(ctx context.Context, t *testing.T, dbDir, path string) {
+	t.Helper()
+	db, err := openTestDB(ctx, dbDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close(ctx)
+	exactKey, _ := stats.SummaryKeys(string(filepath.Separator), path)
+	if err := db.db.SetSummary(ctx, exactKey, []byte("corrupt"), false); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestObserverScanDoneErrorAndCancel(t *testing.T) {
+	ctx := context.Background()
+	root, _, dbDir := createRootAndSub(t)
+	db, err := openTestDB(ctx, dbDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close(ctx)
+
+	obs := &recordingObserver{doneErr: errors.New("done failed")}
+	if err := NewAnalyzer(db, root, WithObserver(obs)).Analyze(ctx, root); !errors.Is(err, obs.doneErr) {
+		t.Errorf("got %v, want %v", err, obs.doneErr)
+	}
+	if len(obs.done) != 1 || obs.done[0] != nil {
+		t.Errorf("done: %v", obs.done)
+	}
+
+	cctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cancelObs := &recordingObserver{onChanged: cancel}
+	err = NewAnalyzer(db, root, WithObserver(cancelObs), WithForce(true)).Analyze(cctx, root)
+	if len(cancelObs.done) != 1 || !errors.Is(cancelObs.done[0], context.Canceled) {
+		t.Errorf("ScanDone scanErr: %v (analyze err: %v)", cancelObs.done, err)
+	}
+}
+
+func TestObserverCorruptPreviousSummary(t *testing.T) {
+	ctx := context.Background()
+	root, sub, dbDir := createRootAndSub(t)
+	analyzeOnce(ctx, t, dbDir, root)
+	corruptSummary(ctx, t, dbDir, sub)
+	mkfile(t, filepath.Join(sub, "f2"))
+	obs := &recordingObserver{}
+	analyzeOnce(ctx, t, dbDir, root, WithObserver(obs))
+	c, ok := obs.changes[sub]
+	if !ok || c.old != nil || c.new.Files != 2 {
+		t.Errorf("sub change: %v %+v", ok, c)
+	}
+}
+
+func TestObserverSubtreeDeletedErrorAndSkip(t *testing.T) {
+	ctx := context.Background()
+	root, sub, dbDir := createRootAndSub(t)
+	d := filepath.Join(sub, "d")
+	mkfile(t, filepath.Join(d, "f2"))
+	analyzeOnce(ctx, t, dbDir, root)
+	corruptSummary(ctx, t, dbDir, d)
+	if err := os.RemoveAll(d); err != nil {
+		t.Fatal(err)
+	}
+
+	// Iterating summaries fails deletion and preserves the subtree in the DB.
+	db, err := openTestDB(ctx, dbDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs := &recordingObserver{}
+	err = NewAnalyzer(db, root, WithObserver(obs)).Analyze(ctx, root)
+	_ = db.Close(ctx)
+	if err == nil || len(obs.done) != 1 || obs.done[0] == nil {
+		t.Fatalf("expected error from corrupt deleted summary, got err=%v done=%v", err, obs.done)
+	}
+	if got := readSummaryPaths(ctx, t, dbDir, root); !slices.Contains(got, d) {
+		t.Errorf("expected %v to remain in summaries: %v", d, got)
+	}
+
+	// Skipping iteration succeeds without reading summaries.
+	obsLazy := &recordingObserver{skipDeleteIt: true}
+	analyzeOnce(ctx, t, dbDir, root, WithObserver(obsLazy))
+	if len(obsLazy.deletions) != 1 || obsLazy.deletions[0].path != d || len(obsLazy.deletions[0].paths) != 0 {
+		t.Errorf("unexpected deletions: %+v", obsLazy.deletions)
+	}
+	if got := readSummaryPaths(ctx, t, dbDir, root); slices.Contains(got, d) {
+		t.Errorf("expected %v to be deleted: %v", d, got)
 	}
 }
