@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"cloudeng.io/cmd/idu/internal/hardlinks"
-	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/file/diskusage"
 )
 
@@ -99,7 +98,7 @@ type FileEntry struct {
 // If hardlinkInfo is true the summary records the information required
 // for hardlinks to be deduplicated by ApplyHardlinks. match should not
 // perform hardlink handling itself.
-func ComputeSummary(prefix string, pi *prefixinfo.T, du diskusage.Calculator, match Matcher, hardlinkInfo bool) PrefixSummary {
+func ComputeSummary(prefix string, pi PrefixInfo, du diskusage.Calculator, match Matcher, hardlinkInfo bool) PrefixSummary {
 	direct, users, groups := ComputeTotals(prefix, pi, du, match)
 	calcID := ""
 	if du != nil {
@@ -113,14 +112,15 @@ func ComputeSummary(prefix string, pi *prefixinfo.T, du diskusage.Calculator, ma
 	}
 	if hardlinkInfo {
 		ps.HardlinkInfo = true
-		ps.Device, ps.FileID = pi.DevIno()
+		xattr := pi.XAttr()
+		ps.Device, ps.FileID = xattr.Device, xattr.FileID
 		ps.Files = computeFileEntries(prefix, pi, du, match)
 	}
 	return ps
 }
 
 // computeFileEntries returns the files counted by ComputeTotals.
-func computeFileEntries(prefix string, pi *prefixinfo.T, du diskusage.Calculator, match Matcher) []FileEntry {
+func computeFileEntries(prefix string, pi PrefixInfo, du diskusage.Calculator, match Matcher) []FileEntry {
 	if !match.Prefix(prefix, pi) {
 		return nil
 	}
@@ -157,7 +157,7 @@ func (ps *PrefixSummary) ApplyHardlinks(hl *hardlinks.Incremental) {
 		return
 	}
 	for _, l := range ps.Files {
-		// Files share the device of their prefix, see prefixinfo.XAttrInfo.
+		// Files share the device of their prefix.
 		if !hl.Ref(ps.Device, l.FileID) {
 			continue
 		}

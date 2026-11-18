@@ -62,12 +62,11 @@ func (ts *testStats) update(bytes, storageBytes, files, prefixes, children, pref
 	ts.prefixBytes += prefixBytes
 }
 
-func computeStats(t *testing.T, sdb *report.AllStats, calc diskusage.Calculator, keys []string, match stats.Matcher, pis ...prefixinfo.T) {
+func computeStats(_ *testing.T, sdb *report.AllStats, calc diskusage.Calculator, keys []string, match stats.Matcher, pis ...prefixinfo.T) {
 	for i, pi := range pis {
 		k := keys[i]
-		if err := sdb.Update(k, pi, calc, match); err != nil {
-			t.Fatal(err)
-		}
+		totals, users, groups := stats.ComputeTotals(k, &pi, calc, match)
+		sdb.RecordDirect(k, totals, users, groups)
 	}
 	sdb.Finalize()
 }

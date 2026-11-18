@@ -4,30 +4,29 @@
 
 package internal
 
-import (
-	"io/fs"
+import "strings"
 
-	"cloudeng.io/cmd/idu/internal/prefixinfo"
-)
-
-type prefixInfo struct {
-	name string
-	prefixinfo.T
-}
-
-// PrefixInfoAsFSInfo returns a fs.FileInfo for the supplied PrefixInfo.
-func PrefixInfoAsFSInfo(pi prefixinfo.T, name string) fs.FileInfo {
-	return &prefixInfo{T: pi, name: name}
-}
-
-func (pi *prefixInfo) Name() string {
-	return pi.name
-}
-
-func (pi *prefixInfo) IsDir() bool {
-	return pi.Mode().IsDir()
-}
-
-func (pi *prefixInfo) Sys() any {
-	return nil
+// SubtreeMatch reports whether key equals target or is beneath target
+// delimited by sep, and whether lexicographical scan has passed target's
+// subtree. Sibling keys sorting between target and target+sep (such as /a-b
+// for /a) return (false, false) so scanning skips them and continues to
+// /a/... descendants.
+func SubtreeMatch(key, target, sep string) (match, stop bool) {
+	if key == target {
+		return true, false
+	}
+	if strings.HasSuffix(target, sep) {
+		if strings.HasPrefix(key, target) {
+			return true, false
+		}
+		return false, true
+	}
+	childPrefix := target + sep
+	if strings.HasPrefix(key, childPrefix) {
+		return true, false
+	}
+	if !strings.HasPrefix(key, target) || key > childPrefix {
+		return false, true
+	}
+	return false, false
 }

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"cloudeng.io/cmd/idu/idudb"
+	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmdutil/flags"
 )
 
@@ -63,7 +64,7 @@ func (l *lister) errors(ctx context.Context, values interface{}, args []string) 
 	var lastPrefix string
 	return db.VisitErrors(ctx, target,
 		func(ctx context.Context, key string, when time.Time, detail []byte) bool {
-			inSubtree, stop := subtreeMatch(key, target, cfg.Separator)
+			inSubtree, stop := internal.SubtreeMatch(key, target, cfg.Separator)
 			if stop {
 				return false
 			}

@@ -6,11 +6,15 @@ import cloudeng.io/cmd/idu/internal
 
 
 ## Functions
-### Func PrefixInfoAsFSInfo
+### Func SubtreeMatch
 ```go
-func PrefixInfoAsFSInfo(pi prefixinfo.T, name string) fs.FileInfo
+func SubtreeMatch(key, target, sep string) (match, stop bool)
 ```
-PrefixInfoAsFSInfo returns a fs.FileInfo for the supplied PrefixInfo.
+SubtreeMatch reports whether key equals target or is beneath target
+delimited by sep, and whether lexicographical scan has passed target's
+subtree. Sibling keys sorting between target and target+sep (such as /a-b
+for /a) return (false, false) so scanning skips them and continues to /a/...
+descendants.
 
 
 

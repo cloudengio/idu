@@ -10,8 +10,8 @@ import (
 	"sync"
 
 	"cloudeng.io/cmd/idu/idudb"
-	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/stats"
+	"cloudeng.io/cmd/idu/summary"
 	"cloudeng.io/sync/syncsort"
 )
 
@@ -29,7 +29,7 @@ const (
 type prefixEntry struct {
 	summaryKey string
 	prefix     string
-	pi         prefixinfo.T
+	pi         summary.Prefix
 	missing    bool  // no metadata is stored for this prefix.
 	decodeErr  error // the metadata could not be decoded.
 }
@@ -46,8 +46,8 @@ func (b *prefixBatch) read(ctx context.Context, db idudb.Reader, prefixes []stri
 			e.missing = true
 			return nil
 		}
-		// UnmarshalBinary copies everything it needs from val.
-		e.decodeErr = e.pi.UnmarshalBinary(val)
+		// Decode copies everything it needs from val.
+		e.decodeErr = e.pi.Decode(e.prefix, val)
 		return nil
 	})
 }

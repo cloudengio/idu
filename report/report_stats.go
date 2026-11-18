@@ -6,9 +6,7 @@ package report
 
 import (
 	"cloudeng.io/algo/container/heap"
-	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/stats"
-	"cloudeng.io/file/diskusage"
 )
 
 // Heaps is a collection of heap data structures for determining the top N
@@ -266,10 +264,4 @@ func (s *AllStats) RecordDirect(prefix string, totals stats.Totals, users, group
 	s.Prefix.TotalHardlinkDirs += totals.HardlinkDirs
 	s.PushPerUserStats(prefix, users)
 	s.PushPerGroupStats(prefix, groups)
-}
-
-func (s *AllStats) Update(prefix string, pi prefixinfo.T, calc diskusage.Calculator, matcher stats.Matcher) error {
-	totals, users, groups := stats.ComputeTotals(prefix, &pi, calc, matcher)
-	s.RecordDirect(prefix, totals, users, groups)
-	return nil
 }
