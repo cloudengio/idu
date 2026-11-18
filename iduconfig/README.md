@@ -27,6 +27,26 @@ const (
 )
 ```
 
+### DefaultTopN
+```go
+const DefaultTopN = 2000
+```
+DefaultTopN is the default value of Settings.TopN, it matches the default
+number of entries computed by the stats command.
+
+### DefaultTopNOversubscription
+```go
+const DefaultTopNOversubscription = 2.0
+```
+DefaultTopNOversubscription is the default value of
+Settings.TopNOversubscription.
+
+### DefaultTopNPerID
+```go
+const DefaultTopNPerID = 100
+```
+DefaultTopNPerID is the default value of Settings.TopNPerID.
+
 
 
 ## Variables
@@ -277,6 +297,9 @@ type Settings struct {
 	HardlinkDedup            HardlinkDedup      `yaml:"hardlink_dedup" doc:"the strategy used to deduplicate hardlinks when count_hardlinks_as_files is false (summaries, rescan), defaults to summaries, see Hardlink deduplication strategies below"`
 	CompactIntervalDays      int                `yaml:"compact_interval_days" doc:"number of days after the last database write before running compaction, added to compact_interval"`
 	CompactInterval          time.Duration      `yaml:"compact_interval" doc:"duration after the last database write before running compaction, added to compact_interval_days"`
+	TopN                     int                `yaml:"topn" doc:"the number of top entries, N, maintained incrementally by analyze for each top-N report, ie. by prefix, subtree, user and group, reports for more entries than this require a scan of the database, it defaults to 2000"`
+	TopNPerID                int                `yaml:"topn_per_id" doc:"the number of top entries maintained incrementally by analyze for each user and each group, ie. the prefixes and subtrees using the most of a given user's or group's storage; since there is a top-N report per user and per group it should be much smaller than topn, it defaults to 100"`
+	TopNOversubscription     float64            `yaml:"topn_oversubscription" doc:"the factor by which the incrementally maintained top-N heaps are oversubscribed, ie. each heap holds this multiple of N entries so that entries which shrink or are deleted can be replaced without rescanning the database, it must be at least 1 and defaults to 2"`
 
 	Layout Layout `yaml:"layout" doc:"the filesystem layout to use for calculating raw bytes used"`
 
@@ -332,6 +355,44 @@ the precomputed summaries.
 func (p *Settings) SeparatorOrDefault() string
 ```
 SeparatorOrDefault returns the configured separator or "/".
+
+
+```go
+func (p *Settings) TopNCapacity() int
+```
+TopNCapacity returns the number of entries to be held by each
+incrementally maintained top-N heap, ie. TopNOrDefault scaled by
+TopNOversubscriptionOrDefault and rounded up.
+
+
+```go
+func (p *Settings) TopNOrDefault() int
+```
+TopNOrDefault returns the configured number of top entries to be maintained
+by analyze or DefaultTopN if none is configured.
+
+
+```go
+func (p *Settings) TopNOversubscriptionOrDefault() float64
+```
+TopNOversubscriptionOrDefault returns the configured top-N oversubscription
+factor or DefaultTopNOversubscription if none is configured.
+
+
+```go
+func (p *Settings) TopNPerIDCapacity() int
+```
+TopNPerIDCapacity returns the number of entries to be held by each
+incrementally maintained per-user and per-group top-N heap, ie.
+TopNPerIDOrDefault scaled by TopNOversubscriptionOrDefault and rounded up.
+
+
+```go
+func (p *Settings) TopNPerIDOrDefault() int
+```
+TopNPerIDOrDefault returns the configured number of top entries to be
+maintained by analyze for each user and each group or DefaultTopNPerID if
+none is configured.
 
 
 
@@ -411,11 +472,12 @@ If fsname is empty and exactly one filesystem is configured then that
 filesystem is used, otherwise ErrFilesystemNameRequired is returned.
 
 For a *Root, an empty prefix refers to the root itself, a relative prefix
-is interpreted relative to the root and an absolute prefix is used as is.
-In all cases the resulting path is cleaned (see filepath.Clean), and hence
-has no trailing separator other than for a root such as / or C:\, and must
-be contained within the root. On Windows, the returned path uses forward
-slashes if the root or absolute prefix uses only forward slashes.
+is interpreted relative to the root and an absolute prefix, including one
+that starts with a separator but has no volume name on Windows, is used
+as is. In all cases the resulting path is cleaned (see filepath.Clean),
+and hence has no trailing separator other than for a root such as / or C:\,
+and must be contained within the root. On Windows, the returned path uses
+forward slashes if the root or absolute prefix uses only forward slashes.
 
 For a *KeyRange, an empty prefix refers to the entire range and is returned
 as the empty string. Otherwise prefix is a key prefix that is used as is and
