@@ -15,7 +15,7 @@ import (
 
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
-	"cloudeng.io/cmd/idu/internal/reports"
+	"cloudeng.io/cmd/idu/report"
 	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/file/localfs"
 )
@@ -71,7 +71,7 @@ type statsTotals struct {
 	SparseFiles, SparseBytes, SubtreeSparse, UserSparse           int64
 }
 
-func totalsFor(sdb *reports.AllStats) statsTotals {
+func totalsFor(sdb *report.AllStats) statsTotals {
 	return statsTotals{
 		Files:         sdb.Prefix.TotalFiles,
 		Bytes:         sdb.Prefix.TotalBytes,
@@ -105,7 +105,7 @@ func hardlinkMatcher(ctx context.Context, t testing.TB) stats.Matcher {
 
 // computeBoth computes stats for target using both the summaries and a
 // rescan of all of the file metadata.
-func computeBoth(ctx context.Context, t *testing.T, cfg iduconfig.T, target string) (fromSummaries *reports.AllStats, fromPrefixes *reports.AllStats, summaryErr error) {
+func computeBoth(ctx context.Context, t *testing.T, cfg iduconfig.T, target string) (fromSummaries *report.AllStats, fromPrefixes *report.AllStats, summaryErr error) {
 	t.Helper()
 	_, pcfg, _, db, err := openPrefixReadOnly(ctx, cfg, target)
 	if err != nil {

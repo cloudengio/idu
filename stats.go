@@ -19,10 +19,10 @@ import (
 	"cloudeng.io/algo/container/heap"
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
-	"cloudeng.io/cmd/idu/internal/hardlinks"
-	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/cmd/idu/internal/usernames"
+	"cloudeng.io/cmd/idu/report"
 	"cloudeng.io/cmd/idu/stats"
+	"cloudeng.io/cmd/idu/summary"
 	"cloudeng.io/cmdutil"
 	"cloudeng.io/cmdutil/flags"
 	"cloudeng.io/file/filewalk"
@@ -33,7 +33,7 @@ type statsFileFormat struct {
 	Prefix     string
 	Date       time.Time
 	Expression string
-	Stats      *reports.AllStats
+	Stats      *report.AllStats
 }
 
 func loadStats(filename string) (statsFileFormat, error) {
@@ -120,6 +120,7 @@ type computeFlags struct {
 
 type viewFlags struct {
 	StatsFlags
+	FS       string `subcmd:"fs,,'the name of the configured filesystem to operate on, overrides the global --fs flag'"`
 	StatsDir string `subcmd:"stats-dir,,'directory that stats files are read from, defaults to stats_dir from the configuration of the filesystem specified by --fs; --fs is not required if this flag is set'"`
 	User     string `subcmd:"user,,display stats for the specified user"`
 	Group    string `subcmd:"group,,display stats for the specified group"`
@@ -172,57 +173,32 @@ func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *comput
 // unless they cannot be used, in which case all of the file metadata is
 // rescanned: summaries are computed without any filter expression and only
 // record what's needed to deduplicate hardlinks if configured to do so.
-func (st *statsCmds) computeStats(ctx context.Context, db idudb.Reader, cfg *iduconfig.Settings, match stats.Matcher, prefix string, topN int, progress bool) (*reports.AllStats, error) {
+func (st *statsCmds) computeStats(ctx context.Context, db idudb.Reader, cfg *iduconfig.Settings, match stats.Matcher, prefix string, topN int, progress bool) (*report.AllStats, error) {
 	if match.HasExpression() || !cfg.CountHardlinkAsFiles && !cfg.RecordHardlinks() {
 		return st.computeFromPrefixes(ctx, db, cfg, match, prefix, topN, progress)
 	}
 	return st.computeFromSummaries(ctx, db, cfg, prefix, topN, progress)
 }
 
-func (st *statsCmds) computeFromSummaries(ctx context.Context, db idudb.Reader, cfg *iduconfig.Settings, prefix string, topN int, progress bool) (*reports.AllStats, error) {
-	calcID, sep := cfg.CalculatorOrDefault().String(), cfg.SeparatorOrDefault()
-	dedup := !cfg.CountHardlinkAsFiles
-	if err := idudb.CheckSummaries(ctx, db, calcID, dedup); err != nil {
+func (st *statsCmds) computeFromSummaries(ctx context.Context, db idudb.Reader, cfg *iduconfig.Settings, prefix string, topN int, progress bool) (*report.AllStats, error) {
+	sr := summary.New(db, cfg)
+	if err := sr.Check(ctx); err != nil {
 		return nil, err
 	}
-	var hl *hardlinks.Incremental
-	if dedup {
-		hl = &hardlinks.Incremental{}
-	}
-	sdb := reports.NewAllStats(prefix, topN)
-	agg := reports.NewSubtreeAggregator(prefix, topN)
-	exactKey, childPrefix := stats.SummaryKeys(sep, prefix)
+	sdb := report.NewAllStats(prefix, topN)
+	agg := report.NewSubtreeAggregator(prefix, topN)
 	n := 0
-	var summaryErr error
-	err := db.ScanSummaries(ctx, exactKey, childPrefix, func(_ context.Context, k string, v []byte) bool {
+	for e, err := range sr.Walk(ctx, prefix) {
+		if err != nil {
+			return nil, err
+		}
 		if progress && (n != 0 && n%1000 == 0) {
 			fmt.Printf("processed % 10v summary entries\n", fmtCount(int64(n)))
 		}
 		n++
-		path := stats.DecodeSummaryKey(sep, k)
-		var ps stats.PrefixSummary
-		if err := ps.UnmarshalBinary(v); err != nil {
-			summaryErr = fmt.Errorf("%v: %w", path, err)
-			return false
-		}
-		if ps.CalcID != calcID || dedup && !ps.HardlinkInfo {
-			summaryErr = fmt.Errorf("%v: %w", path, idudb.ErrStaleSummaries)
-			return false
-		}
-		if dedup {
-			// Summaries are visited in DFS pre-order, hence the
-			// first of a set of hardlinks encountered is the one counted.
-			ps.ApplyHardlinks(hl)
-		}
-		sdb.RecordDirect(path, ps.Direct, ps.PerUser, ps.PerGroup)
-		agg.Step(k, path, ps.Direct)
-		return true
-	})
-	if err == nil {
-		err = summaryErr
-	}
-	if err != nil {
-		return nil, err
+		ps := e.Summary
+		sdb.RecordDirect(e.Path, ps.Direct, ps.PerUser, ps.PerGroup)
+		agg.Step(e.Key, e.Path, ps.Direct)
 	}
 	if progress {
 		fmt.Printf("processed % 10v summary entries\n", fmtCount(int64(n)))
@@ -240,13 +216,13 @@ func (st *statsCmds) computeFromSummaries(ctx context.Context, db idudb.Reader, 
 // the depth of the tree and hardlinks are attributed to the same prefixes as
 // when using the summaries. The metadata is read and decoded concurrently,
 // but the stats, including hardlink deduplication, are computed in order.
-func (st *statsCmds) computeFromPrefixes(ctx context.Context, db idudb.Reader, cfg *iduconfig.Settings, match stats.Matcher, prefix string, topN int, progress bool) (*reports.AllStats, error) {
+func (st *statsCmds) computeFromPrefixes(ctx context.Context, db idudb.Reader, cfg *iduconfig.Settings, match stats.Matcher, prefix string, topN int, progress bool) (*report.AllStats, error) {
 	if err := idudb.CheckSummaryKeys(ctx, db); err != nil {
 		return nil, err
 	}
 	calc, sep := cfg.CalculatorOrDefault(), cfg.SeparatorOrDefault()
-	sdb := reports.NewAllStats(prefix, topN)
-	agg := reports.NewSubtreeAggregator(prefix, topN)
+	sdb := report.NewAllStats(prefix, topN)
+	agg := report.NewSubtreeAggregator(prefix, topN)
 	exactKey, childPrefix := stats.SummaryKeys(sep, prefix)
 	readers := st.readers
 	if readers == 0 {
@@ -318,7 +294,7 @@ func resolveDirectStatsFile(statsDirFlag, arg string) (string, bool) {
 // the named file in the stats directory. The stats directory is the one
 // specified by --stats-dir, if set, in which case --fs is not required,
 // otherwise it is the stats directory for the filesystem specified by --fs.
-func resolveStatsFilename(ctx context.Context, cfg iduconfig.T, statsDirFlag string, args []string) (string, error) {
+func resolveStatsFilename(ctx context.Context, cfg iduconfig.T, fsFlag, statsDirFlag string, args []string) (string, error) {
 	if len(args) > 1 {
 		return "", fmt.Errorf("too many arguments: expected [<filename>]")
 	}
@@ -335,7 +311,10 @@ func resolveStatsFilename(ctx context.Context, cfg iduconfig.T, statsDirFlag str
 	if len(statsDirFlag) > 0 {
 		return filepath.Join(statsDirFlag, name), nil
 	}
-	pcfg, _, err := lookupFS(cfg, "")
+	if len(fsFlag) == 0 {
+		fsFlag = globalFlags.FS
+	}
+	pcfg, _, err := lookupFSFor(cfg, fsFlag, "")
 	if err != nil {
 		if loadErr, ok := cmdutil.ContextValue[configLoadError](ctx); ok && loadErr.err != nil {
 			return "", loadErr.err
@@ -351,7 +330,7 @@ func (st *statsCmds) view(ctx context.Context, values interface{}, args []string
 		return fmt.Errorf("only one of --user or --group may be specified")
 	}
 
-	filename, err := resolveStatsFilename(ctx, globalConfig, af.StatsDir, args)
+	filename, err := resolveStatsFilename(ctx, globalConfig, af.FS, af.StatsDir, args)
 	if err != nil {
 		return err
 	}
@@ -431,7 +410,7 @@ func (hf heapFormatter[T]) formatHeap(heap *heap.MinMax[int64, T], out io.Writer
 	}
 }
 
-func (hf heapFormatter[T]) formatHeaps(h *reports.Heaps[T], out io.Writer, valueFormatter func(T) string, n int) {
+func (hf heapFormatter[T]) formatHeaps(h *report.Heaps[T], out io.Writer, valueFormatter func(T) string, n int) {
 	banner(out, "-", "Bytes used\n")
 	hf.formatHeap(h.Bytes, out, fmtSize, valueFormatter, n)
 	banner(out, "-", "\nBytes used on underlying filesystem\n")
@@ -446,7 +425,7 @@ func (hf heapFormatter[T]) formatHeaps(h *reports.Heaps[T], out io.Writer, value
 	}
 }
 
-func (hf heapFormatter[T]) formatTotals(h *reports.Heaps[T], out io.Writer) {
+func (hf heapFormatter[T]) formatTotals(h *report.Heaps[T], out io.Writer) {
 	banner(out, "-", "Totals\n")
 	fmt.Fprintf(out, "Bytes:     %v (%v)\n", fmtSize(h.TotalBytes), fmtKiBytes(h.TotalBytes))
 	fmt.Fprintf(out, "Storage:   %v (%v)\n", fmtSize(h.TotalStorageBytes), fmtKiBytes(h.TotalStorageBytes))
@@ -458,8 +437,8 @@ func (hf heapFormatter[T]) formatTotals(h *reports.Heaps[T], out io.Writer) {
 	fmt.Fprintf(out, "Sparse:    %v (%v not allocated)\n\n", fmtCount(h.TotalSparseFiles), strings.TrimSpace(fmtSize(h.TotalSparseBytes)))
 }
 
-func formatDistributedHeaps(dh *reports.DistributedHeaps, out io.Writer, n int) {
-	printSection := func(title string, list []reports.DistributedStats, metric func(reports.DistributedStats) (string, string, float64)) {
+func formatDistributedHeaps(dh *report.DistributedHeaps, out io.Writer, n int) {
+	printSection := func(title string, list []report.DistributedStats, metric func(report.DistributedStats) (string, string, float64)) {
 		if len(list) == 0 {
 			return
 		}
@@ -470,18 +449,18 @@ func formatDistributedHeaps(dh *reports.DistributedHeaps, out io.Writer, n int) 
 				distVal, maxLeafVal, amp, fmtCount(ds.SubtreeDirs), ds.MaxChildShare*100, ds.Prefix)
 		}
 	}
-	printSection("Distributed Bytes used", reports.TopDistributed(dh.Bytes, n), func(ds reports.DistributedStats) (string, string, float64) {
+	printSection("Distributed Bytes used", report.TopDistributed(dh.Bytes, n), func(ds report.DistributedStats) (string, string, float64) {
 		return fmtSize(ds.DistributedBytes), fmtSize(ds.MaxLeafBytes), ds.BytesAmplification
 	})
-	printSection("\nDistributed Storage Bytes used", reports.TopDistributed(dh.StorageBytes, n), func(ds reports.DistributedStats) (string, string, float64) {
+	printSection("\nDistributed Storage Bytes used", report.TopDistributed(dh.StorageBytes, n), func(ds report.DistributedStats) (string, string, float64) {
 		return fmtSize(ds.DistributedStorage), fmtSize(ds.MaxLeafStorage), ds.StorageAmplification
 	})
-	printSection("\nDistributed Files", reports.TopDistributed(dh.Files, n), func(ds reports.DistributedStats) (string, string, float64) {
+	printSection("\nDistributed Files", report.TopDistributed(dh.Files, n), func(ds report.DistributedStats) (string, string, float64) {
 		return fmtCount(ds.DistributedFiles), fmtCount(ds.MaxLeafFiles), ds.FilesAmplification
 	})
 }
 
-func (st *statsCmds) formatPerIDStats(s reports.PerIDStats, out io.Writer, nameForID func(int64) string, ids map[int64]bool, n int) {
+func (st *statsCmds) formatPerIDStats(s report.PerIDStats, out io.Writer, nameForID func(int64) string, ids map[int64]bool, n int) {
 	for id, h := range s.ByPrefix {
 		if len(ids) != 0 && !ids[id] {
 			continue

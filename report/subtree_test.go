@@ -2,7 +2,7 @@
 // Use of this source code is governed by the Apache-2.0
 // license that can be found in the LICENSE file.
 
-package reports_test
+package report_test
 
 import (
 	"bytes"
@@ -12,7 +12,7 @@ import (
 	"sort"
 	"testing"
 
-	"cloudeng.io/cmd/idu/internal/reports"
+	"cloudeng.io/cmd/idu/report"
 	"cloudeng.io/cmd/idu/stats"
 )
 
@@ -24,7 +24,7 @@ type dirEntry struct {
 
 // rollup sorts entries into DFS pre-order by summary key and feeds them
 // through sa.
-func rollup(sa *reports.SubtreeAggregator, entries []dirEntry) {
+func rollup(sa *report.SubtreeAggregator, entries []dirEntry) {
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].SummaryKey < entries[j].SummaryKey
 	})
@@ -69,31 +69,31 @@ func buildFanoutEntries() []dirEntry {
 	return entries
 }
 
-func assertSubtreeGobRoundTrip(t *testing.T, agg *reports.SubtreeAggregator) {
+func assertSubtreeGobRoundTrip(t *testing.T, agg *report.SubtreeAggregator) {
 	t.Helper()
-	all := reports.NewAllStats("/root", 20)
+	all := report.NewAllStats("/root", 20)
 	all.Subtree = agg.Subtree
 	all.Distributed = agg.Distributed
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(all); err != nil {
 		t.Fatalf("gob encode AllStats: %v", err)
 	}
-	var decoded reports.AllStats
+	var decoded report.AllStats
 	if err := gob.NewDecoder(&buf).Decode(&decoded); err != nil {
 		t.Fatalf("gob decode AllStats: %v", err)
 	}
-	if got := len(reports.TopDistributed(decoded.Distributed.Bytes, 10)); got == 0 {
+	if got := len(report.TopDistributed(decoded.Distributed.Bytes, 10)); got == 0 {
 		t.Fatalf("expected non-empty decoded Distributed stats")
 	}
 }
 
-func assertDistributedFanout(t *testing.T, agg *reports.SubtreeAggregator) {
+func assertDistributedFanout(t *testing.T, agg *report.SubtreeAggregator) {
 	t.Helper()
-	dist := reports.TopDistributed(agg.Distributed.Bytes, 20)
-	if dist2 := reports.TopDistributed(agg.Distributed.Bytes, 20); len(dist2) != len(dist) {
+	dist := report.TopDistributed(agg.Distributed.Bytes, 20)
+	if dist2 := report.TopDistributed(agg.Distributed.Bytes, 20); len(dist2) != len(dist) {
 		t.Fatalf("TopDistributed mutated heap: %d vs %d", len(dist), len(dist2))
 	}
-	byDistPath := map[string]reports.DistributedStats{}
+	byDistPath := map[string]report.DistributedStats{}
 	for _, d := range dist {
 		byDistPath[d.Prefix] = d
 	}
@@ -117,7 +117,7 @@ func assertDistributedFanout(t *testing.T, agg *reports.SubtreeAggregator) {
 
 func TestSubtreeAggregatorFanoutDetection(t *testing.T) {
 	entries := buildFanoutEntries()
-	agg := reports.NewSubtreeAggregator("/root", 20)
+	agg := report.NewSubtreeAggregator("/root", 20)
 	rollup(agg, entries)
 
 	if got, want := agg.Subtree.TotalBytes, int64(76<<20); got != want {
@@ -128,7 +128,7 @@ func TestSubtreeAggregatorFanoutDetection(t *testing.T) {
 	}
 
 	subtreeByPath := map[string]int64{}
-	for _, z := range reports.ZipN(agg.Subtree.Bytes, 10) {
+	for _, z := range report.ZipN(agg.Subtree.Bytes, 10) {
 		subtreeByPath[z.V] = z.K
 	}
 	if got, want := subtreeByPath["/root"], int64(26<<20); got != want {
@@ -150,7 +150,7 @@ func TestSubtreeAggregatorMissingIntermediateDir(t *testing.T) {
 	addDirEntry(&entries, "/a/missing/c1", 500, 500, 2, 4096)
 	addDirEntry(&entries, "/a/missing/c2", 500, 500, 2, 4096)
 
-	agg := reports.NewSubtreeAggregator("/a", 10)
+	agg := report.NewSubtreeAggregator("/a", 10)
 	rollup(agg, entries)
 
 	if got, want := agg.Subtree.TotalBytes, int64(1100); got != want {
@@ -159,7 +159,7 @@ func TestSubtreeAggregatorMissingIntermediateDir(t *testing.T) {
 	if got, want := agg.Subtree.TotalFiles, int64(5); got != want {
 		t.Fatalf("TotalFiles = %d, want %d", got, want)
 	}
-	dist := reports.TopDistributed(agg.Distributed.Bytes, 10)
+	dist := report.TopDistributed(agg.Distributed.Bytes, 10)
 	if len(dist) != 1 || dist[0].Prefix != "/a" {
 		t.Fatalf("expected /a in Distributed with missing intermediate collapsed, got %+v", dist)
 	}

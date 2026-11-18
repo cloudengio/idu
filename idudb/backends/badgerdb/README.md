@@ -17,6 +17,15 @@ Database represents a badger database.
 ### Functions
 
 ```go
+func NewBackend(ctx context.Context, path string, readonly bool) (*Database, error)
+```
+NewBackend opens the badger database at path configured for use by idu,
+opening it for reading only if readonly is true. Log messages are written to
+the logger in ctx, see cloudeng.io/logging/ctxlog, and any deadline on ctx
+is used as the timeout for acquiring the database's lock.
+
+
+```go
 func Open(location string, opts ...Option) (*Database, error)
 ```
 Open opens the specified database. If the database does not exist it will be

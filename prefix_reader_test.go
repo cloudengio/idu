@@ -68,7 +68,7 @@ func TestReadPrefixesInOrder(t *testing.T) {
 	}
 	_ = rawDB.Close(ctx)
 
-	db, err := openReadOnlyDB(ctx, cfg.Database)
+	db, err := openReadOnlyDB(ctx, &cfg.Settings)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestReadPrefixesInOrder(t *testing.T) {
 func TestReadPrefixesInOrderCancel(t *testing.T) {
 	ctx := context.Background()
 	cfg := createPrefixTreeDB(ctx, t, 40, 3)
-	db, err := openReadOnlyDB(ctx, cfg.Database)
+	db, err := openReadOnlyDB(ctx, &cfg.Settings)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func (db *failingGetBatchDB) GetBatch(ctx context.Context, prefixes []string, fn
 func TestReadPrefixesInOrderError(t *testing.T) {
 	ctx := context.Background()
 	cfg := createPrefixTreeDB(ctx, t, 40, 3)
-	rodb, err := openReadOnlyDB(ctx, cfg.Database)
+	rodb, err := openReadOnlyDB(ctx, &cfg.Settings)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestReadPrefixesInOrderScanErrorAndDecodeErr(t *testing.T) {
 	cfg := createPrefixTreeDB(ctx, t, 40, 3)
 
 	t.Run("ScanSummaries mid-stream error", func(t *testing.T) {
-		rodb, err := openReadOnlyDB(ctx, cfg.Database)
+		rodb, err := openReadOnlyDB(ctx, &cfg.Settings)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -232,7 +232,7 @@ func TestReadPrefixesInOrderScanErrorAndDecodeErr(t *testing.T) {
 		}
 		_ = rwdb.Close(ctx)
 
-		rodb, err := openReadOnlyDB(ctx, cfg.Database)
+		rodb, err := openReadOnlyDB(ctx, &cfg.Settings)
 		if err != nil {
 			t.Fatal(err)
 		}

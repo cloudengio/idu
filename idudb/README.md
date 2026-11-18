@@ -8,10 +8,13 @@ Package idudb provides support for building and maintaining a database of
 filesystem metadata that can be used for incrementally computing disk usage
 statistics. The database itself is accessed via the Database and Reader
 interfaces, implementations of which (e.g. backends/badgerdb) are created
-by the caller and passed to New. All operations that modify the database are
-implemented by this package; other packages should only read the database
-via the Reader interface. Log messages are written to the logger, if any,
-in the context supplied to each method, see cloudeng.io/logging/ctxlog.
+by a BackendFactory. Open and OpenWritable open the database specified
+by an iduconfig.Settings for reading and for analysis respectively.
+All operations that modify the database are implemented by this package;
+other packages should only read the database via the Reader interface,
+or the higher level APIs provided by the summary and report packages.
+Log messages are written to the logger, if any, in the context supplied to
+each method, see cloudeng.io/logging/ctxlog.
 
 ## Constants
 ### DefaultSlowScanThreshold
@@ -32,6 +35,14 @@ ErrLegacyDatabase = errors.New("legacy database format without summaries: delete
 ErrLegacyDatabase is returned for a database that was created before
 precomputed summaries were introduced. Such databases are not supported and
 must be deleted and recreated by rerunning analyze.
+
+### ErrNoBackend
+```go
+ErrNoBackend = errors.New("no database backend specified, see idudb.WithBackendFactory")
+
+```
+ErrNoBackend is returned when a database is opened without specifying a
+BackendFactory, see WithBackendFactory.
 
 ### ErrStaleSummaries
 ```go
@@ -209,6 +220,14 @@ that is, including any default values.
 
 
 
+### Type BackendFactory
+```go
+type BackendFactory func(ctx context.Context, path string, readonly bool) (Database, error)
+```
+BackendFactory creates the database backend for the database stored at path,
+opening it for reading only if readonly is true.
+
+
 ### Type Configuration
 ```go
 type Configuration struct {
@@ -242,6 +261,14 @@ remains the responsibility of the caller. New returns ErrLegacyDatabase for
 databases created by older versions of idu, see CheckFormat.
 
 
+```go
+func OpenWritable(ctx context.Context, cfg *iduconfig.Settings, opts []OpenOption, dbOpts ...Option) (*DB, error)
+```
+OpenWritable opens, or creates, the database specified by cfg for use by an
+Analyzer, configured using OptionsFromConfig(cfg) followed by any supplied
+dbOpts.
+
+
 
 ### Methods
 
@@ -270,6 +297,44 @@ type Database interface {
 ```
 Database represents a database backend that supports both read and write
 operations. Only the idudb package should use the Writer methods.
+
+### Functions
+
+```go
+func OpenBackend(ctx context.Context, path string, readonly bool, opts ...OpenOption) (Database, error)
+```
+OpenBackend opens the database backend for the database stored at path,
+waiting until it is opened or ctx is canceled. If ctx is canceled first then
+any database that is subsequently opened is closed. OpenBackend does not
+check the format of the database, see CheckFormat.
+
+
+
+
+### Type OpenOption
+```go
+type OpenOption func(*openOptions)
+```
+OpenOption configures OpenBackend, Open and OpenWritable.
+
+### Functions
+
+```go
+func WithBackendFactory(f BackendFactory) OpenOption
+```
+WithBackendFactory sets the factory used to create the database backend,
+eg. one that opens a badger database using badgerdb.NewBackend. It must be
+specified, otherwise ErrNoBackend is returned.
+
+
+```go
+func WithOpenProgress(w io.Writer) OpenOption
+```
+WithOpenProgress requests that a message be written to w, once a second,
+while waiting for a database to open, eg. because another process holds its
+lock. By default no messages are written.
+
+
 
 
 ### Type Option
@@ -366,6 +431,16 @@ type Reader interface {
 ```
 Reader represents the read-only operations supported by a database backend,
 such as the one implemented by backends/badgerdb.
+
+### Functions
+
+```go
+func Open(ctx context.Context, cfg *iduconfig.Settings, opts ...OpenOption) (Reader, error)
+```
+Open opens the database specified by cfg for reading only and checks its
+format, see CheckFormat.
+
+
 
 
 ### Type ScanProgress

@@ -16,7 +16,7 @@ import (
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
-	"cloudeng.io/cmd/idu/internal/reports"
+	"cloudeng.io/cmd/idu/report"
 	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/file"
 )
@@ -88,7 +88,7 @@ func BenchmarkComputeFromPrefixes(b *testing.B) {
 	ctx := context.Background()
 	for _, nfiles := range []int{10, 100} {
 		cfg := createPrefixTreeDB(ctx, b, 100, nfiles)
-		db, err := openReadOnlyDB(ctx, cfg.Database)
+		db, err := openReadOnlyDB(ctx, &cfg.Settings)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -118,7 +118,7 @@ func BenchmarkComputeFromSummaries(b *testing.B) {
 	ctx := context.Background()
 	for _, nfiles := range []int{10, 100} {
 		cfg := createPrefixTreeDB(ctx, b, 100, nfiles)
-		db, err := openReadOnlyDB(ctx, cfg.Database)
+		db, err := openReadOnlyDB(ctx, &cfg.Settings)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -137,10 +137,10 @@ func BenchmarkComputeFromSummaries(b *testing.B) {
 // computeFromPrefixesPerGet is the previous, serial, implementation of
 // computeFromPrefixes that uses a database transaction per prefix and is
 // retained for comparison.
-func computeFromPrefixesPerGet(ctx context.Context, db idudb.Reader, cfg *iduconfig.Settings, match stats.Matcher, prefix string, topN int) (*reports.AllStats, error) {
+func computeFromPrefixesPerGet(ctx context.Context, db idudb.Reader, cfg *iduconfig.Settings, match stats.Matcher, prefix string, topN int) (*report.AllStats, error) {
 	calc, sep := cfg.CalculatorOrDefault(), cfg.SeparatorOrDefault()
-	sdb := reports.NewAllStats(prefix, topN)
-	agg := reports.NewSubtreeAggregator(prefix, topN)
+	sdb := report.NewAllStats(prefix, topN)
+	agg := report.NewSubtreeAggregator(prefix, topN)
 	exactKey, childPrefix := stats.SummaryKeys(sep, prefix)
 	var buf bytes.Buffer
 	var getErr error

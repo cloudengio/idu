@@ -17,8 +17,8 @@ import (
 	"sort"
 	"time"
 
-	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/cmd/idu/internal/usernames"
+	"cloudeng.io/cmd/idu/report"
 	"cloudeng.io/errors"
 )
 
@@ -181,11 +181,11 @@ func (rf *reportFilenames) latest() (src, dst string) {
 	return rf.when.Format(reportDirLayout), filepath.Join(rf.root, "latest")
 }
 
-func writeReportFiles(sdb *reports.AllStats,
+func writeReportFiles(sdb *report.AllStats,
 	filenames *reportFilenames,
-	prefixFormatter func(m map[string]reports.MergedStats) []byte,
-	idFormatter func(m map[int64]reports.MergedStats, nameForID func(int64) string) []byte,
-	distributedFormatter func(list []reports.DistributedStats) []byte,
+	prefixFormatter func(m map[string]report.MergedStats) []byte,
+	idFormatter func(m map[int64]report.MergedStats, nameForID func(int64) string) []byte,
+	distributedFormatter func(list []report.DistributedStats) []byte,
 	topN int,
 ) error {
 
@@ -199,13 +199,13 @@ func writeReportFiles(sdb *reports.AllStats,
 			return err
 		}
 	}
-	if dist := reports.MergeDistributed(sdb.Distributed, topN); len(dist) > 0 && distributedFormatter != nil {
+	if dist := report.MergeDistributed(sdb.Distributed, topN); len(dist) > 0 && distributedFormatter != nil {
 		if err := os.WriteFile(filenames.summary("distributed"), distributedFormatter(dist), 0600); err != nil {
 			return err
 		}
 	}
 	clear(merged)
-	merged[sdb.Prefix.Prefix] = reports.MergedStats{
+	merged[sdb.Prefix.Prefix] = report.MergedStats{
 		Prefix:      sdb.Prefix.Prefix,
 		Bytes:       sdb.Prefix.TotalBytes,
 		Storage:     sdb.Prefix.TotalStorageBytes,

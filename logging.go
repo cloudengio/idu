@@ -113,7 +113,11 @@ func lookupPrefix(ctx context.Context, all iduconfig.T, prefix string) (context.
 
 // lookupFS is like lookupPrefix but does not configure logging.
 func lookupFS(all iduconfig.T, prefix string) (iduconfig.Filesystem, string, error) {
-	f, target, err := all.Lookup(globalFlags.FS, prefix)
+	return lookupFSFor(all, globalFlags.FS, prefix)
+}
+
+func lookupFSFor(all iduconfig.T, fsName, prefix string) (iduconfig.Filesystem, string, error) {
+	f, target, err := all.Lookup(fsName, prefix)
 	if errors.Is(err, iduconfig.ErrFilesystemNameRequired) {
 		err = fmt.Errorf("%w, use --fs=<name> to specify one", err)
 	}

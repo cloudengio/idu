@@ -2,7 +2,7 @@
 // Use of this source code is governed by the Apache-2.0
 // license that can be found in the LICENSE file.
 
-package reports_test
+package report_test
 
 import (
 	"context"
@@ -17,8 +17,8 @@ import (
 
 	"cloudeng.io/algo/container/heap"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
-	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/cmd/idu/internal/testutil"
+	"cloudeng.io/cmd/idu/report"
 	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/file"
 	"cloudeng.io/file/diskusage"
@@ -62,7 +62,7 @@ func (ts *testStats) update(bytes, storageBytes, files, prefixes, children, pref
 	ts.prefixBytes += prefixBytes
 }
 
-func computeStats(t *testing.T, sdb *reports.AllStats, calc diskusage.Calculator, keys []string, match stats.Matcher, pis ...prefixinfo.T) {
+func computeStats(t *testing.T, sdb *report.AllStats, calc diskusage.Calculator, keys []string, match stats.Matcher, pis ...prefixinfo.T) {
 	for i, pi := range pis {
 		k := keys[i]
 		if err := sdb.Update(k, pi, calc, match); err != nil {
@@ -72,7 +72,7 @@ func computeStats(t *testing.T, sdb *reports.AllStats, calc diskusage.Calculator
 	sdb.Finalize()
 }
 
-func compareIDs[T comparable](t *testing.T, m map[int64]*reports.Heaps[T], want ...int64) {
+func compareIDs[T comparable](t *testing.T, m map[int64]*report.Heaps[T], want ...int64) {
 	got := maps.Keys(m)
 	slices.Sort(got)
 	if !slices.Equal(got, want) {
@@ -92,7 +92,7 @@ func identicalValues(v []int64) bool {
 
 func compareHeap[T comparable](t *testing.T, h *heap.MinMax[int64, T], n int, ws []int64, wp ...T) {
 	_, _, l, _ := runtime.Caller(1)
-	s, p := reports.PopN(h, n)
+	s, p := report.PopN(h, n)
 	if got, want := s, ws; !slices.Equal(got, want) {
 		t.Errorf("line %v: got %v, want %v", l, got, want)
 	}
@@ -103,7 +103,7 @@ func compareHeap[T comparable](t *testing.T, h *heap.MinMax[int64, T], n int, ws
 	}
 }
 
-func compareHeapTotals[T comparable](t *testing.T, h *reports.Heaps[T], totals testStats) {
+func compareHeapTotals[T comparable](t *testing.T, h *report.Heaps[T], totals testStats) {
 	_, _, l, _ := runtime.Caller(1)
 	if h.TotalBytes != totals.bytes {
 		t.Errorf("line %v: bytes: got %v, want %v", l, h.TotalBytes, totals.bytes)
@@ -122,7 +122,7 @@ func compareHeapTotals[T comparable](t *testing.T, h *reports.Heaps[T], totals t
 	}
 }
 
-func comparePerIDTotals(t *testing.T, pis reports.PerIDStats, totals testStats) {
+func comparePerIDTotals(t *testing.T, pis report.PerIDStats, totals testStats) {
 	_, _, l, _ := runtime.Caller(1)
 	var tb, tsb, tf, tp, tpb int64
 	for _, v := range pis.ByPrefix {
@@ -210,14 +210,14 @@ func TestReportStatsSingleID(t *testing.T) {
 			pis = append(pis, npi(tc.uid, tc.gid, pikeys[i], nInfoF(nf[i], tc.uid, tc.gid), nInfoD(nd[i], tc.uid, tc.gid)))
 		}
 
-		sdb := reports.NewAllStats("test", 5)
+		sdb := report.NewAllStats("test", 5)
 
 		computeStats(t, sdb, calc, pikeys, stats.AlwaysMatch(), pis...)
 
 		compareIDs(t, sdb.PerUser.ByPrefix, tc.uid)
 		compareIDs(t, sdb.PerGroup.ByPrefix, tc.gid)
 
-		for _, h := range []*reports.Heaps[string]{
+		for _, h := range []*report.Heaps[string]{
 			sdb.Prefix,
 			sdb.PerUser.ByPrefix[tc.uid],
 			sdb.PerGroup.ByPrefix[tc.gid],
@@ -231,7 +231,7 @@ func TestReportStatsSingleID(t *testing.T) {
 		}
 
 		for _, tcid := range []struct {
-			h  *reports.Heaps[int64]
+			h  *report.Heaps[int64]
 			id int64
 		}{
 			{sdb.ByUser, tc.uid},
@@ -245,7 +245,7 @@ func TestReportStatsSingleID(t *testing.T) {
 			compareHeap(t, tcid.h.PrefixBytes, 10, []int64{totals.prefixBytes}, tcid.id)
 		}
 
-		sdb = reports.NewAllStats("test", 5)
+		sdb = report.NewAllStats("test", 5)
 		matcher, err := stats.NewMatcher(
 			testutil.NewParser(context.Background(), nil),
 			stats.WithExpression("user=1000000"))
@@ -255,7 +255,7 @@ func TestReportStatsSingleID(t *testing.T) {
 
 		zeroes := testStats{}
 		computeStats(t, sdb, calc, pikeys, matcher, pis...)
-		for _, h := range []*reports.Heaps[string]{
+		for _, h := range []*report.Heaps[string]{
 			sdb.Prefix,
 			sdb.PerUser.ByPrefix[tc.uid],
 			sdb.PerGroup.ByPrefix[tc.gid],
@@ -343,7 +343,7 @@ func TestReportStatsMultipleIDs(t *testing.T) {
 func testSingleID(t *testing.T, match stats.Matcher, group bool, pikeys []string, pis []prefixinfo.T, id int64, perIDTotal testStats, sizeOrdered, fileOrdered, prefixedOrdered []testStats) {
 	calc := sumSizeAndBlocks{}
 
-	sdb := reports.NewAllStats("test", 5)
+	sdb := report.NewAllStats("test", 5)
 
 	computeStats(t, sdb, calc, pikeys, match, pis...)
 
@@ -354,7 +354,7 @@ func testSingleID(t *testing.T, match stats.Matcher, group bool, pikeys []string
 
 	so, fo, po := sizeOrdered, fileOrdered, prefixedOrdered
 
-	var h *reports.Heaps[string]
+	var h *report.Heaps[string]
 	if group {
 		compareIDs(t, sdb.PerGroup.ByPrefix, id)
 		h = sdb.PerGroup.ByPrefix[id]
@@ -403,7 +403,7 @@ func testIDExpr(t *testing.T, pikeys []string, pis []prefixinfo.T, uids, gids []
 func testAllIDs(t *testing.T, pikeys []string, pis []prefixinfo.T, totals testStats, uids, gids []int64, perIDTotals map[int64]testStats, sizeOrdered, fileOrdered, prefixedOrdered map[int64][]testStats) {
 	calc := sumSizeAndBlocks{}
 
-	sdb := reports.NewAllStats("test", 5)
+	sdb := report.NewAllStats("test", 5)
 	computeStats(t, sdb, calc, pikeys,
 		stats.AlwaysMatch(), pis...)
 

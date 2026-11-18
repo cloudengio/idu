@@ -9,7 +9,7 @@ import (
 	"encoding/csv"
 	"strconv"
 
-	"cloudeng.io/cmd/idu/internal/reports"
+	"cloudeng.io/cmd/idu/report"
 )
 
 type tsvReports struct {
@@ -19,7 +19,7 @@ func (tr *tsvReports) generateReports(rf *generateReportsFlags, filenames *repor
 	return writeReportFiles(stats.Stats, filenames, tr.formatMerged, tr.formatUserGroupMerged, tr.formatDistributed, rf.TSV)
 }
 
-func (tr *tsvReports) formatDistributed(list []reports.DistributedStats) []byte {
+func (tr *tsvReports) formatDistributed(list []report.DistributedStats) []byte {
 	out := &bytes.Buffer{}
 	wr := csv.NewWriter(out)
 	wr.Comma = '\t'
@@ -52,7 +52,7 @@ func (tr *tsvReports) formatDistributed(list []reports.DistributedStats) []byte 
 	return out.Bytes()
 }
 
-func (tr *tsvReports) formatMerged(merged map[string]reports.MergedStats) []byte {
+func (tr *tsvReports) formatMerged(merged map[string]report.MergedStats) []byte {
 	out := &bytes.Buffer{}
 	wr := csv.NewWriter(out)
 	wr.Comma = '\t'
@@ -70,7 +70,7 @@ func (tr *tsvReports) formatMerged(merged map[string]reports.MergedStats) []byte
 	return out.Bytes()
 }
 
-func (tr *tsvReports) formatUserGroupMerged(merged map[int64]reports.MergedStats, nameForID func(int64) string) []byte {
+func (tr *tsvReports) formatUserGroupMerged(merged map[int64]report.MergedStats, nameForID func(int64) string) []byte {
 	out := &bytes.Buffer{}
 	wr := csv.NewWriter(out)
 	wr.Comma = '\t'
