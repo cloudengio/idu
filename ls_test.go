@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"cloudeng.io/cmd/idu/iduconfig"
-	"cloudeng.io/cmd/idu/internal"
+	"cloudeng.io/cmdutil/flags"
 	"cloudeng.io/file/localfs"
 )
 
@@ -69,13 +69,7 @@ func TestListerLogsAndErrors(t *testing.T) {
 		if err := ls.logs(ctx, &logFlags{JSON: false}, []string{"testtree"}); err != nil {
 			t.Fatalf("logs plain: %v", err)
 		}
-		lf := &logFlags{
-			TimeRangeFlags: internal.TimeRangeFlags{Since: time.Hour},
-			JSON:           true,
-		}
-		if err := ls.logs(ctx, lf, []string{target}); err != nil {
-			t.Fatalf("logs since: %v", err)
-		}
+		runLogsWithRanges(ctx, t, ls, target, "-1h..", "..+1h", "-1d..+1d", "2020-01-01..")
 		if err := ls.logs(ctx, &logFlags{}, []string{"/unknown"}); err == nil {
 			t.Fatal("expected error for unknown prefix")
 		}
@@ -189,5 +183,66 @@ func TestErrorsNoSiblingBleedAndPrefixFlag(t *testing.T) {
 	}
 	if strings.Contains(prefOut, "err sibling dash") || strings.Contains(prefOut, "err sibling ab") {
 		t.Errorf("errors --prefix leaked sibling:\n%s", prefOut)
+	}
+}
+
+func TestLogTimeRange(t *testing.T) {
+	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.Local)
+	parse := func(s string) *flags.TimeInterval {
+		t.Helper()
+		var iv flags.TimeInterval
+		if s == "" {
+			return &iv
+		}
+		if err := iv.Set(s); err != nil {
+			t.Fatalf("Set(%q): %v", s, err)
+		}
+		return &iv
+	}
+	day := func(y int, m time.Month, d int) time.Time {
+		return time.Date(y, m, d, 0, 0, 0, 0, time.Local)
+	}
+	for _, tc := range []struct {
+		in       string
+		from, to time.Time
+	}{
+		{"", time.Time{}, now},
+		{"2026-11-01..", day(2026, 11, 1), now},
+		{"..2026-11-05", time.Time{}, day(2026, 11, 6).Add(-time.Nanosecond)},
+		{"2026-11-01..2026-11-05", day(2026, 11, 1), day(2026, 11, 6).Add(-time.Nanosecond)},
+		{"2026-11", day(2026, 11, 1), day(2026, 12, 1).Add(-time.Nanosecond)},
+	} {
+		from, to := logTimeRange(parse(tc.in), now)
+		if !from.Equal(tc.from) || !to.Equal(tc.to) {
+			t.Errorf("%q: got [%v, %v], want [%v, %v]", tc.in, from, to, tc.from, tc.to)
+		}
+	}
+
+	// Relative times are relative to the current time.
+	before := time.Now()
+	from, to := logTimeRange(parse("-1h.."), now)
+	if d := before.Add(-time.Hour).Sub(from); d < -time.Minute || d > time.Minute {
+		t.Errorf("-1h..: from %v is not about an hour ago", from)
+	}
+	if !to.Equal(now) {
+		t.Errorf("-1h..: got to %v, want %v", to, now)
+	}
+
+	var iv flags.TimeInterval
+	if err := iv.Set("2026-11-05..2026-11-01"); err == nil {
+		t.Errorf("expected an error for an interval that ends before it starts")
+	}
+}
+
+func runLogsWithRanges(ctx context.Context, t *testing.T, ls *lister, target string, ranges ...string) {
+	t.Helper()
+	for _, rng := range ranges {
+		lf := &logFlags{JSON: true}
+		if err := lf.Range.Set(rng); err != nil {
+			t.Fatalf("--range=%v: %v", rng, err)
+		}
+		if err := ls.logs(ctx, lf, []string{target}); err != nil {
+			t.Fatalf("logs --range=%v: %v", rng, err)
+		}
 	}
 }

@@ -14,13 +14,13 @@ import (
 	"time"
 
 	"cloudeng.io/cmd/idu/idudb"
-	"cloudeng.io/cmd/idu/internal"
+	"cloudeng.io/cmdutil/flags"
 )
 
 type logFlags struct {
-	internal.TimeRangeFlags
-	Erase bool `subcmd:"erase,false,erase the logs rather than displaying them"`
-	JSON  bool `subcmd:"json,true,display logs in json format"`
+	Range flags.TimeInterval `subcmd:"range,,'display the log entries within this time range, written <from>..<to>, <from>.., ..<to> or as a single date/time; eg. -1h.. for the last hour, 2026-11-01..2026-11-05 to include all of the fifth, or 2026-11 for all of November. All entries are displayed if not set'"`
+	Erase bool               `subcmd:"erase,false,erase the logs rather than displaying them"`
+	JSON  bool               `subcmd:"json,true,display logs in json format"`
 }
 
 type errorFlags struct {
@@ -95,10 +95,7 @@ func (l *lister) logs(ctx context.Context, values interface{}, args []string) er
 	}
 	defer db.Close(ctx)
 
-	from, to, _, err := lf.FromTo()
-	if err != nil {
-		return err
-	}
+	from, to := logTimeRange(&lf.Range, time.Now())
 
 	return db.VisitLogs(ctx, from, to,
 		func(_ context.Context, begin, end time.Time, detail []byte) bool {
@@ -122,4 +119,16 @@ func (l *lister) logs(ctx context.Context, values interface{}, args []string) er
 			return true
 
 		})
+}
+
+// logTimeRange returns the inclusive range of times, [from, to], to be passed
+// to idudb.Reader.VisitLogs for the half-open interval [From, To) specified
+// by iv. An open start is the zero time and an open end, or an unset
+// interval, is now.
+func logTimeRange(iv *flags.TimeInterval, now time.Time) (from, to time.Time) {
+	from, _ = iv.From()
+	if t, ok := iv.To(); ok {
+		return from, t.Add(-time.Nanosecond)
+	}
+	return from, now
 }

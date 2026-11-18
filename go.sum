@@ -1,7 +1,7 @@
 cloudeng.io/algo v0.0.0-20261112230521-bb2e0354f2e1 h1:vqAuTSF/UeAlq5yI7ZY4EZg6ayDQtqR31zTxy2tKF9k=
 cloudeng.io/algo v0.0.0-20261112230521-bb2e0354f2e1/go.mod h1:N09rv/FG6DMPz5phIlsWmn8oEr9QM28pVGgqXJg8nxs=
-cloudeng.io/cmdutil v0.0.0-20261116055709-6086a19cfe34 h1:BCJ+wqKkZrvsfBaLuYqMDCBJCpBdpfohNlHGajHfTIM=
-cloudeng.io/cmdutil v0.0.0-20261116055709-6086a19cfe34/go.mod h1:ecAB8NTNQRPE3DK6P/XBHD2LYOjcsEUwYw/xCDAlMp4=
+cloudeng.io/cmdutil v0.0.0-20261117180932-5d898ef2016d h1:OvFhkJfCNxtwoaMia2tKnban1f5AlYLBT6jScAd4JBw=
+cloudeng.io/cmdutil v0.0.0-20261117180932-5d898ef2016d/go.mod h1:ecAB8NTNQRPE3DK6P/XBHD2LYOjcsEUwYw/xCDAlMp4=
 cloudeng.io/debug v0.0.0-20260527194618-4cb6d4558850 h1:gUar3YNqSdi+uvszdB44uBuutJnWWZX1lzAzlT/Y0IA=
 cloudeng.io/debug v0.0.0-20260527194618-4cb6d4558850/go.mod h1:MECwal0eFhXI3wixLVjNGnXohW4qGQRg+J68yQWmi9k=
 cloudeng.io/errors v0.0.14-0.20260312171538-61fcde6ce278 h1:zvkZ9WBpBjerUAhl+SLCcQLar2mNdsA0kFc0Ku5NKVQ=
