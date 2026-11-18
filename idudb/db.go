@@ -6,9 +6,12 @@
 // of filesystem metadata that can be used for incrementally computing disk
 // usage statistics. The database itself is accessed via the Database and
 // Reader interfaces, implementations of which (e.g. backends/badgerdb) are
-// created by the caller and passed to New. All operations that modify the
-// database are implemented by this package; other packages should only
-// read the database via the Reader interface. Log messages are written to the
+// created by a BackendFactory. Open and OpenWritable open the database
+// specified by an iduconfig.Settings for reading and for analysis
+// respectively. All operations that modify the database are implemented by
+// this package; other packages should only read the database via the
+// Reader interface, or the higher level APIs provided by the summary and
+// report packages. Log messages are written to the
 // logger, if any, in the context supplied to each method, see
 // cloudeng.io/logging/ctxlog.
 package idudb

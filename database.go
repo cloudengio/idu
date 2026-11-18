@@ -9,113 +9,40 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"time"
 
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
-	"cloudeng.io/cmd/idu/idudb/backends/badgerdb"
-	"cloudeng.io/logging/ctxlog"
-	"github.com/dgraph-io/badger/v4"
-	badgeroptions "github.com/dgraph-io/badger/v4/options"
 )
-
-// openBadgerDB opens the badger database backend at path.
-func openBadgerDB(ctx context.Context, path string, readonly bool) (idudb.Database, error) {
-	var opts []badgerdb.Option
-	if readonly {
-		opts = append(opts, badgerdb.ReadOnly())
-	}
-	if deadline, ok := ctx.Deadline(); ok {
-		if timeout := time.Until(deadline); timeout > 0 {
-			opts = append(opts, badgerdb.WithTimeout(timeout))
-		}
-	}
-	bopts := badger.DefaultOptions(path).
-		WithLogger(badgerdb.NewLogger(ctxlog.Logger(ctx))).
-		WithDetectConflicts(false).
-		WithMetricsEnabled(false).
-		WithIndexCacheSize(64 << 20)
-	if !readonly {
-		bopts = bopts.
-			WithCompactL0OnClose(true).
-			WithCompression(badgeroptions.ZSTD).
-			WithBlockCacheSize(32 << 20)
-	}
-	opts = append(opts, badgerdb.WithBadgerOptions(bopts))
-	return badgerdb.Open(path, opts...)
-}
 
 // openProgress is where messages are written while waiting for a database
 // to open, it may be overridden by tests.
 var openProgress io.Writer = os.Stdout
 
 // databaseFactory creates the database backend and may be overridden by tests.
-var databaseFactory = openBadgerDB
+var databaseFactory idudb.BackendFactory = badgerBackend
+
+// dbOpenOptions returns the options used to open all databases.
+func dbOpenOptions() []idudb.OpenOption {
+	return []idudb.OpenOption{
+		idudb.WithBackendFactory(databaseFactory),
+		idudb.WithOpenProgress(openProgress),
+	}
+}
 
 // openDatabase opens the database backend at path, waiting until it is
 // opened or ctx is canceled and displaying a message while waiting.
 func openDatabase(ctx context.Context, path string, readonly bool) (idudb.Database, error) {
-	type result struct {
-		db  idudb.Database
-		err error
-	}
-	doneCh := make(chan result, 1)
-	go func() {
-		db, err := databaseFactory(ctx, path, readonly)
-		doneCh <- result{db, err}
-	}()
-	start := time.Now()
-	delayed := false
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			closeCtx := context.WithoutCancel(ctx)
-			go func() {
-				res := <-doneCh
-				if res.err == nil && res.db != nil {
-					_ = res.db.Close(closeCtx)
-				}
-			}()
-			return nil, ctx.Err()
-		case res := <-doneCh:
-			if delayed {
-				fmt.Fprintln(openProgress)
-			}
-			return res.db, res.err
-		case <-ticker.C:
-			fmt.Fprintf(openProgress, "waiting for database to open: %v: %s\t\t\r", path, time.Since(start).Truncate(time.Second))
-			delayed = true
-		}
-	}
+	return idudb.OpenBackend(ctx, path, readonly, dbOpenOptions()...)
 }
 
-// openReadOnlyDB opens the database at path for reading only.
-func openReadOnlyDB(ctx context.Context, path string) (idudb.Reader, error) {
-	db, err := openDatabase(ctx, path, true)
-	if err != nil {
-		return nil, err
-	}
-	if err := idudb.CheckFormat(ctx, db); err != nil {
-		_ = db.Close(context.WithoutCancel(ctx))
-		return nil, fmt.Errorf("%v: %w", path, err)
-	}
-	return db, nil
+// openReadOnlyDB opens the database specified by cfg for reading only.
+func openReadOnlyDB(ctx context.Context, cfg *iduconfig.Settings) (idudb.Reader, error) {
+	return idudb.Open(ctx, cfg, dbOpenOptions()...)
 }
 
 // openWritableDB opens the database specified by cfg for use by analyze.
 func openWritableDB(ctx context.Context, cfg *iduconfig.Settings) (*idudb.DB, error) {
-	raw, err := openDatabase(ctx, cfg.Database, false)
-	if err != nil {
-		return nil, err
-	}
-	db, err := idudb.New(ctx, raw, idudb.OptionsFromConfig(cfg)...)
-	if err != nil {
-		_ = raw.Close(context.WithoutCancel(ctx))
-		return nil, fmt.Errorf("%v: %w", cfg.Database, err)
-	}
-	return db, nil
+	return idudb.OpenWritable(ctx, cfg, dbOpenOptions())
 }
 
 // openPrefixReadOnly resolves prefix to its configuration and the target
@@ -126,7 +53,7 @@ func openPrefixReadOnly(ctx context.Context, all iduconfig.T, prefix string) (co
 		return ctx, nil, "", nil, err
 	}
 	cfg := f.Config()
-	db, err := openReadOnlyDB(ctx, cfg.Database)
+	db, err := openReadOnlyDB(ctx, cfg)
 	if err != nil {
 		return ctx, nil, "", nil, fmt.Errorf("failed to open database for %v in %v: %w", iduconfig.Label(f), cfg.Database, err)
 	}

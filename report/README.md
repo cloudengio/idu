@@ -1,7 +1,7 @@
-# Package [cloudeng.io/cmd/idu/internal/reports](https://pkg.go.dev/cloudeng.io/cmd/idu/internal/reports?tab=doc)
+# Package [cloudeng.io/cmd/idu/report](https://pkg.go.dev/cloudeng.io/cmd/idu/report?tab=doc)
 
 ```go
-import cloudeng.io/cmd/idu/internal/reports
+import cloudeng.io/cmd/idu/report
 ```
 
 
@@ -66,7 +66,7 @@ breakdowns into s.
 
 
 ```go
-func (s *AllStats) Update(prefix string, pi prefixinfo.T, calc diskusage.Calculator, matcher boolexpr.Matcher) error
+func (s *AllStats) Update(prefix string, pi prefixinfo.T, calc diskusage.Calculator, matcher stats.Matcher) error
 ```
 
 

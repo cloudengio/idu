@@ -11,8 +11,8 @@ import (
 	"text/template"
 	"time"
 
-	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/cmd/idu/internal/usernames"
+	"cloudeng.io/cmd/idu/report"
 	"cloudeng.io/file/diskusage"
 	"golang.org/x/exp/maps"
 )
@@ -246,12 +246,12 @@ type mdHeap[T comparable] struct {
 	TopN         int
 	Prefix       string
 	UserOrGroup  string
-	Bytes        []reports.Zipped[T]
-	StorageBytes []reports.Zipped[T]
-	Files        []reports.Zipped[T]
-	Prefixes     []reports.Zipped[T]
-	PrefixBytes  []reports.Zipped[T]
-	SparseBytes  []reports.Zipped[T]
+	Bytes        []report.Zipped[T]
+	StorageBytes []report.Zipped[T]
+	Files        []report.Zipped[T]
+	Prefixes     []report.Zipped[T]
+	PrefixBytes  []report.Zipped[T]
+	SparseBytes  []report.Zipped[T]
 }
 
 type mdPerIDHeap struct {
@@ -348,7 +348,7 @@ func (md *markdownReports) generateReports(rf *generateReportsFlags, filenames *
 	// Totals.
 	if err := md.totals.Execute(out, struct {
 		Prefix                string
-		Heaps                 *reports.Heaps[string]
+		Heaps                 *report.Heaps[string]
 		TotalPrefixesAndFiles int64
 		When                  string
 	}{
@@ -364,12 +364,12 @@ func (md *markdownReports) generateReports(rf *generateReportsFlags, filenames *
 	byPrefix := mdHeap[string]{
 		Prefix:       prefix,
 		TopN:         rf.Markdown,
-		Bytes:        reports.ZipN(sdb.Prefix.Bytes, rf.Markdown),
-		Files:        reports.ZipN(sdb.Prefix.Files, rf.Markdown),
-		Prefixes:     reports.ZipN(sdb.Prefix.Prefixes, rf.Markdown),
-		StorageBytes: reports.ZipN(sdb.Prefix.StorageBytes, rf.Markdown),
-		PrefixBytes:  reports.ZipN(sdb.Prefix.PrefixBytes, rf.Markdown),
-		SparseBytes:  reports.ZipN(sdb.Prefix.SparseBytes, rf.Markdown),
+		Bytes:        report.ZipN(sdb.Prefix.Bytes, rf.Markdown),
+		Files:        report.ZipN(sdb.Prefix.Files, rf.Markdown),
+		Prefixes:     report.ZipN(sdb.Prefix.Prefixes, rf.Markdown),
+		StorageBytes: report.ZipN(sdb.Prefix.StorageBytes, rf.Markdown),
+		PrefixBytes:  report.ZipN(sdb.Prefix.PrefixBytes, rf.Markdown),
+		SparseBytes:  report.ZipN(sdb.Prefix.SparseBytes, rf.Markdown),
 	}
 
 	if err := md.prefixes.Execute(out, byPrefix); err != nil {
@@ -380,22 +380,22 @@ func (md *markdownReports) generateReports(rf *generateReportsFlags, filenames *
 		bySubtree := mdHeap[string]{
 			Prefix:       prefix,
 			TopN:         rf.Markdown,
-			Bytes:        reports.ZipN(sdb.Subtree.Bytes, rf.Markdown),
-			Files:        reports.ZipN(sdb.Subtree.Files, rf.Markdown),
-			Prefixes:     reports.ZipN(sdb.Subtree.Prefixes, rf.Markdown),
-			StorageBytes: reports.ZipN(sdb.Subtree.StorageBytes, rf.Markdown),
-			PrefixBytes:  reports.ZipN(sdb.Subtree.PrefixBytes, rf.Markdown),
-			SparseBytes:  reports.ZipN(sdb.Subtree.SparseBytes, rf.Markdown),
+			Bytes:        report.ZipN(sdb.Subtree.Bytes, rf.Markdown),
+			Files:        report.ZipN(sdb.Subtree.Files, rf.Markdown),
+			Prefixes:     report.ZipN(sdb.Subtree.Prefixes, rf.Markdown),
+			StorageBytes: report.ZipN(sdb.Subtree.StorageBytes, rf.Markdown),
+			PrefixBytes:  report.ZipN(sdb.Subtree.PrefixBytes, rf.Markdown),
+			SparseBytes:  report.ZipN(sdb.Subtree.SparseBytes, rf.Markdown),
 		}
 		if err := md.subtrees.Execute(out, bySubtree); err != nil {
 			return err
 		}
 	}
 
-	if dist := reports.MergeDistributed(sdb.Distributed, rf.Markdown); len(dist) > 0 {
+	if dist := report.MergeDistributed(sdb.Distributed, rf.Markdown); len(dist) > 0 {
 		if err := md.distributed.Execute(out, struct {
 			Prefix string
-			Items  []reports.DistributedStats
+			Items  []report.DistributedStats
 		}{
 			Prefix: prefix,
 			Items:  dist,
@@ -409,11 +409,11 @@ func (md *markdownReports) generateReports(rf *generateReportsFlags, filenames *
 		Prefix:       prefix,
 		TopN:         rf.Markdown,
 		UserOrGroup:  "Users",
-		Bytes:        reports.ZipN(sdb.ByUser.Bytes, rf.Markdown),
-		Files:        reports.ZipN(sdb.ByUser.Files, rf.Markdown),
-		Prefixes:     reports.ZipN(sdb.ByUser.Prefixes, rf.Markdown),
-		StorageBytes: reports.ZipN(sdb.ByUser.StorageBytes, rf.Markdown),
-		PrefixBytes:  reports.ZipN(sdb.ByUser.PrefixBytes, rf.Markdown),
+		Bytes:        report.ZipN(sdb.ByUser.Bytes, rf.Markdown),
+		Files:        report.ZipN(sdb.ByUser.Files, rf.Markdown),
+		Prefixes:     report.ZipN(sdb.ByUser.Prefixes, rf.Markdown),
+		StorageBytes: report.ZipN(sdb.ByUser.StorageBytes, rf.Markdown),
+		PrefixBytes:  report.ZipN(sdb.ByUser.PrefixBytes, rf.Markdown),
 	}
 
 	if err := md.byUsers.Execute(out, byUsers); err != nil {
@@ -424,11 +424,11 @@ func (md *markdownReports) generateReports(rf *generateReportsFlags, filenames *
 		Prefix:       prefix,
 		TopN:         rf.Markdown,
 		UserOrGroup:  "Groups",
-		Bytes:        reports.ZipN(sdb.ByGroup.Bytes, rf.Markdown),
-		Files:        reports.ZipN(sdb.ByGroup.Files, rf.Markdown),
-		Prefixes:     reports.ZipN(sdb.ByGroup.Prefixes, rf.Markdown),
-		StorageBytes: reports.ZipN(sdb.ByGroup.StorageBytes, rf.Markdown),
-		PrefixBytes:  reports.ZipN(sdb.ByGroup.PrefixBytes, rf.Markdown),
+		Bytes:        report.ZipN(sdb.ByGroup.Bytes, rf.Markdown),
+		Files:        report.ZipN(sdb.ByGroup.Files, rf.Markdown),
+		Prefixes:     report.ZipN(sdb.ByGroup.Prefixes, rf.Markdown),
+		StorageBytes: report.ZipN(sdb.ByGroup.StorageBytes, rf.Markdown),
+		PrefixBytes:  report.ZipN(sdb.ByGroup.PrefixBytes, rf.Markdown),
 	}
 
 	if err := md.byGroups.Execute(out, byGroups); err != nil {
@@ -438,7 +438,7 @@ func (md *markdownReports) generateReports(rf *generateReportsFlags, filenames *
 	for _, r := range []struct {
 		label string
 		tpl   *template.Template
-		data  map[int64]*reports.Heaps[string]
+		data  map[int64]*report.Heaps[string]
 	}{
 		{"user", md.perUsers, sdb.PerUser.ByPrefix},
 		{"group", md.perGroups, sdb.PerGroup.ByPrefix},
@@ -454,11 +454,11 @@ func (md *markdownReports) generateReports(rf *generateReportsFlags, filenames *
 				Prefix:       prefix,
 				TopN:         rf.Markdown,
 				UserOrGroup:  r.label,
-				Bytes:        reports.ZipN(us.Bytes, rf.Markdown),
-				Files:        reports.ZipN(us.Files, rf.Markdown),
-				Prefixes:     reports.ZipN(us.Prefixes, rf.Markdown),
-				StorageBytes: reports.ZipN(us.StorageBytes, rf.Markdown),
-				PrefixBytes:  reports.ZipN(us.PrefixBytes, rf.Markdown),
+				Bytes:        report.ZipN(us.Bytes, rf.Markdown),
+				Files:        report.ZipN(us.Files, rf.Markdown),
+				Prefixes:     report.ZipN(us.Prefixes, rf.Markdown),
+				StorageBytes: report.ZipN(us.StorageBytes, rf.Markdown),
+				PrefixBytes:  report.ZipN(us.PrefixBytes, rf.Markdown),
 			}
 		}
 		if err := r.tpl.Execute(out, perUsers); err != nil {
