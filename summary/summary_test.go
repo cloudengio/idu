@@ -215,6 +215,16 @@ func TestNilGuards(t *testing.T) {
 		if err := lastErr(sr.Walk(ctx, "/")); err == nil {
 			t.Error("expected Walk error")
 		}
+		if _, _, err := sr.Prefix(ctx, "/"); err == nil {
+			t.Error("expected Prefix error")
+		}
+		var prefixErr error
+		for _, err := range sr.Prefixes(ctx, "/") {
+			prefixErr = err
+		}
+		if prefixErr == nil {
+			t.Error("expected Prefixes error")
+		}
 	}
 }
 

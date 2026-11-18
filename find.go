@@ -73,7 +73,7 @@ func (fc *findCmds) findFS(ctx context.Context, fwfs filewalk.FS, ff *findFlags,
 		return err
 	}
 	defer db.Close(ctx)
-	sep := cfg.Separator
+	sep := cfg.SeparatorOrDefault()
 	for p, err := range summary.New(db, cfg).Prefixes(ctx, target) {
 		if err != nil {
 			return err

@@ -233,12 +233,7 @@ func (r *Reader) Children(ctx context.Context, path string) ([]Entry, int, error
 		return nil, 0, err
 	}
 	norm := p.Path()
-	var prefixes []Info
-	for _, e := range p.Entries() {
-		if e.IsDir() {
-			prefixes = append(prefixes, e)
-		}
-	}
+	prefixes := p.pi.PrefixesOnly()
 	children := make([]Entry, 0, len(prefixes))
 	missing := 0
 	for _, fi := range prefixes {

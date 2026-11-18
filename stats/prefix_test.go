@@ -84,4 +84,11 @@ func TestCustomOperand(t *testing.T) {
 			}
 		}
 	}
+
+	if totals, _, _ := stats.ComputeTotals("/p", nil, nil, stats.AlwaysMatch()); totals != (stats.Totals{}) {
+		t.Errorf("ComputeTotals(nil): got %+v, want zero", totals)
+	}
+	if totals, _, _ := stats.ComputeTotals("/p", &pi, nil, stats.AlwaysMatch()); totals.Files != 2 || totals.SubPrefixes != 1 {
+		t.Errorf("ComputeTotals(nil calc): got %+v", totals)
+	}
 }

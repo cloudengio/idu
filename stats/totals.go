@@ -197,8 +197,11 @@ const verbose = false
 //  3. The size of this prefix is included in the totals for the prefix, but
 //     the sizes of prefixes it contains are not.
 func ComputeTotals(prefix string, pi PrefixInfo, du diskusage.Calculator, match Matcher) (totals Totals, perUser, perGroup PerIDTotals) {
-	if !match.Prefix(prefix, pi) {
+	if pi == nil || !match.Prefix(prefix, pi) {
 		return
+	}
+	if du == nil {
+		du = diskusage.NewIdentity()
 	}
 	totals.Prefix = 1
 	xattr := pi.XAttr()
