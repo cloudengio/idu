@@ -65,6 +65,9 @@ type Settings struct {
 	HardlinkDedup            HardlinkDedup      `yaml:"hardlink_dedup" doc:"the strategy used to deduplicate hardlinks when count_hardlinks_as_files is false (summaries, rescan), defaults to summaries, see Hardlink deduplication strategies below"`
 	CompactIntervalDays      int                `yaml:"compact_interval_days" doc:"number of days after the last database write before running compaction, added to compact_interval"`
 	CompactInterval          time.Duration      `yaml:"compact_interval" doc:"duration after the last database write before running compaction, added to compact_interval_days"`
+	TopN                     int                `yaml:"topn" doc:"the number of top entries, N, maintained incrementally by analyze for each top-N report, ie. by prefix, subtree, user and group, reports for more entries than this require a scan of the database, it defaults to 2000"`
+	TopNPerID                int                `yaml:"topn_per_id" doc:"the number of top entries maintained incrementally by analyze for each user and each group, ie. the prefixes and subtrees using the most of a given user's or group's storage; since there is a top-N report per user and per group it should be much smaller than topn, it defaults to 100"`
+	TopNOversubscription     float64            `yaml:"topn_oversubscription" doc:"the factor by which the incrementally maintained top-N heaps are oversubscribed, ie. each heap holds this multiple of N entries so that entries which shrink or are deleted can be replaced without rescanning the database, it must be at least 1 and defaults to 2"`
 
 	Layout Layout `yaml:"layout" doc:"the filesystem layout to use for calculating raw bytes used"`
 
@@ -109,6 +112,65 @@ func (p *Settings) SeparatorOrDefault() string {
 		return "/"
 	}
 	return p.Separator
+}
+
+// DefaultTopN is the default value of Settings.TopN, it matches the
+// default number of entries computed by the stats command.
+const DefaultTopN = 2000
+
+// TopNOrDefault returns the configured number of top entries to be
+// maintained by analyze or DefaultTopN if none is configured.
+func (p *Settings) TopNOrDefault() int {
+	if p.TopN == 0 {
+		return DefaultTopN
+	}
+	return p.TopN
+}
+
+// DefaultTopNPerID is the default value of Settings.TopNPerID.
+const DefaultTopNPerID = 100
+
+// TopNPerIDOrDefault returns the configured number of top entries to be
+// maintained by analyze for each user and each group or DefaultTopNPerID
+// if none is configured.
+func (p *Settings) TopNPerIDOrDefault() int {
+	if p.TopNPerID == 0 {
+		return DefaultTopNPerID
+	}
+	return p.TopNPerID
+}
+
+// DefaultTopNOversubscription is the default value of
+// Settings.TopNOversubscription.
+const DefaultTopNOversubscription = 2.0
+
+// TopNOversubscriptionOrDefault returns the configured top-N
+// oversubscription factor or DefaultTopNOversubscription if none is
+// configured.
+func (p *Settings) TopNOversubscriptionOrDefault() float64 {
+	if p.TopNOversubscription == 0 {
+		return DefaultTopNOversubscription
+	}
+	return p.TopNOversubscription
+}
+
+// TopNCapacity returns the number of entries to be held by each
+// incrementally maintained top-N heap, ie. TopNOrDefault scaled by
+// TopNOversubscriptionOrDefault and rounded up.
+func (p *Settings) TopNCapacity() int {
+	return p.oversubscribed(p.TopNOrDefault())
+}
+
+// TopNPerIDCapacity returns the number of entries to be held by each
+// incrementally maintained per-user and per-group top-N heap, ie.
+// TopNPerIDOrDefault scaled by TopNOversubscriptionOrDefault and rounded
+// up.
+func (p *Settings) TopNPerIDCapacity() int {
+	return p.oversubscribed(p.TopNPerIDOrDefault())
+}
+
+func (p *Settings) oversubscribed(n int) int {
+	return int(math.Ceil(float64(n) * p.TopNOversubscriptionOrDefault()))
 }
 
 // CompactionInterval returns the combined compaction interval computed by
@@ -402,6 +464,15 @@ func (t *T) Validate() error {
 		}
 		if err := validateCompactIntervals(p); err != nil {
 			return fmt.Errorf("filesystem %q: %w", Label(f), err)
+		}
+		if p.TopN < 0 {
+			return fmt.Errorf("filesystem %q: topn must not be negative (%d)", Label(f), p.TopN)
+		}
+		if p.TopNPerID < 0 {
+			return fmt.Errorf("filesystem %q: topn_per_id must not be negative (%d)", Label(f), p.TopNPerID)
+		}
+		if o := p.TopNOversubscription; o != 0 && (o < 1 || math.IsNaN(o) || math.IsInf(o, 0)) {
+			return fmt.Errorf("filesystem %q: topn_oversubscription must be at least 1, not %v", Label(f), o)
 		}
 		switch p.HardlinkDedup {
 		case "":

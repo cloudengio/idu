@@ -311,6 +311,26 @@ func TestStrictAndErrors(t *testing.T) {
 			name: "negative-compact-interval",
 			yaml: "filesystems:\n  - prefix: /tmp\n    compact_interval: -5m\n",
 		},
+		{
+			name: "topn-negative",
+			yaml: "filesystems:\n  - prefix: /tmp\n    topn: -1\n",
+		},
+		{
+			name: "topn-per-id-negative",
+			yaml: "filesystems:\n  - prefix: /tmp\n    topn_per_id: -1\n",
+		},
+		{
+			name: "topn-oversubscription-below-one",
+			yaml: "filesystems:\n  - prefix: /tmp\n    topn_oversubscription: 0.5\n",
+		},
+		{
+			name: "topn-oversubscription-negative",
+			yaml: "filesystems:\n  - prefix: /tmp\n    topn_oversubscription: -2\n",
+		},
+		{
+			name: "topn-oversubscription-nan",
+			yaml: "filesystems:\n  - prefix: /tmp\n    topn_oversubscription: .nan\n",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -573,6 +593,9 @@ func TestDocumentation(t *testing.T) {
 		"stats_dir:",
 		"compact_interval_days:",
 		"compact_interval:",
+		"topn:",
+		"topn_per_id:",
+		"topn_oversubscription:",
 		"when building",
 		"stripe_size:",
 		"hardlink_dedup:",
@@ -700,6 +723,59 @@ filesystems:
 		}
 		if got := p.CompactionInterval(); got != want {
 			t.Errorf("%s: CompactionInterval() = %v, want %v", name, got, want)
+		}
+	}
+}
+
+func TestTopN(t *testing.T) {
+	cfg, err := iduconfig.ParseConfig([]byte(`
+filesystems:
+  - name: default
+    prefix: /default
+  - name: one
+    prefix: /one
+    topn: 100
+    topn_per_id: 10
+    topn_oversubscription: 1
+  - name: scaled
+    prefix: /scaled
+    topn: 3
+    topn_per_id: 7
+    topn_oversubscription: 1.5
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name          string
+		n, perID      int
+		factor        float64
+		capacity      int
+		perIDCapacity int
+	}{
+		{"default", iduconfig.DefaultTopN, iduconfig.DefaultTopNPerID, iduconfig.DefaultTopNOversubscription,
+			2 * iduconfig.DefaultTopN, 2 * iduconfig.DefaultTopNPerID},
+		{"one", 100, 10, 1, 100, 10},
+		{"scaled", 3, 7, 1.5, 5, 11}, // rounded up
+	} {
+		p, ok := settingsForName(cfg, tc.name)
+		if !ok {
+			t.Fatalf("missing %q", tc.name)
+		}
+		if got := p.TopNOrDefault(); got != tc.n {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.n)
+		}
+		if got := p.TopNOversubscriptionOrDefault(); got != tc.factor {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.factor)
+		}
+		if got := p.TopNCapacity(); got != tc.capacity {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.capacity)
+		}
+		if got := p.TopNPerIDOrDefault(); got != tc.perID {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.perID)
+		}
+		if got := p.TopNPerIDCapacity(); got != tc.perIDCapacity {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.perIDCapacity)
 		}
 	}
 }
