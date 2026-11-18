@@ -65,11 +65,6 @@ RecordDirect pushes precomputed direct directory totals and per-ID
 breakdowns into s.
 
 
-```go
-func (s *AllStats) Update(prefix string, pi prefixinfo.T, calc diskusage.Calculator, matcher stats.Matcher) error
-```
-
-
 
 
 ### Type DistributedHeaps

@@ -2,14 +2,15 @@
 // Use of this source code is governed by the Apache-2.0
 // license that can be found in the LICENSE file.
 
-// Package summary provides typed, read-only, access to the per-prefix
-// summaries stored in an idu database. It hides the encoding of the
-// summaries and their keys and checks that they were computed with the
-// configuration that the database is being read with.
+// Package summary provides typed, read-only, access to an idu database:
+// to the precomputed per-prefix summaries (Get, Walk, Children) and to all
+// of the metadata recorded for each prefix and its files (Prefix,
+// Prefixes). It hides the encoding of the database's keys and values and
+// checks that the summaries were computed with the configuration that the
+// database is being read with.
 package summary
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -19,7 +20,6 @@ import (
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/internal/hardlinks"
-	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/stats"
 )
 
@@ -228,19 +228,12 @@ func (r *Reader) Children(ctx context.Context, path string) ([]Entry, int, error
 	if r.err != nil {
 		return nil, 0, r.err
 	}
-	norm := stats.NormalizePath(r.sep, path)
-	var buf bytes.Buffer
-	if err := r.db.Get(ctx, norm, &buf); err != nil {
+	p, ok, err := r.Prefix(ctx, path)
+	if err != nil || !ok {
 		return nil, 0, err
 	}
-	if buf.Len() == 0 {
-		return nil, 0, nil
-	}
-	var pi prefixinfo.T
-	if err := pi.UnmarshalBinary(buf.Bytes()); err != nil {
-		return nil, 0, fmt.Errorf("%v: %w", norm, err)
-	}
-	prefixes := pi.PrefixesOnly()
+	norm := p.Path()
+	prefixes := p.pi.PrefixesOnly()
 	children := make([]Entry, 0, len(prefixes))
 	missing := 0
 	for _, fi := range prefixes {

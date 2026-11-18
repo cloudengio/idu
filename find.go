@@ -10,12 +10,9 @@ import (
 	"io/fs"
 	"strings"
 
-	"cloudeng.io/cmd/idu/internal"
-	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/stats"
+	"cloudeng.io/cmd/idu/summary"
 	"cloudeng.io/cmdutil/flags"
-	"cloudeng.io/errors"
-	"cloudeng.io/file"
 	"cloudeng.io/file/filewalk"
 	"cloudeng.io/file/localfs"
 )
@@ -33,48 +30,22 @@ func (fc *findCmds) find(ctx context.Context, values interface{}, args []string)
 	return fc.findFS(ctx, fs, values.(*findFlags), args)
 }
 
-func printPrefix(pi prefixinfo.T, long bool, k string) {
+func printPrefix(p *summary.Prefix, long bool) {
 	if long {
-		xattr := pi.XAttr()
-		fmt.Printf("%s uid: %v gid: %v\n", fs.FormatFileInfo(internal.PrefixInfoAsFSInfo(pi, k)), xattr.UID, xattr.GID)
+		info := p.Info()
+		fmt.Printf("%s uid: %v gid: %v\n", fs.FormatFileInfo(info), info.XAttr.UID, info.XAttr.GID)
 	} else {
-		fmt.Printf("%v\n", k)
+		fmt.Printf("%v\n", p.Path())
 	}
 }
 
-func printEntry(pi prefixinfo.T, fi file.Info, long bool, sep, k string) {
+func printEntry(p *summary.Prefix, e summary.Info, long bool, sep string) {
 	if long {
-		xattr := pi.XAttrInfo(fi)
-		fmt.Printf("    %s uid: %v gid: %v\n", fs.FormatFileInfo(fi), xattr.UID, xattr.GID)
+		fmt.Printf("    %s uid: %v gid: %v\n", fs.FormatFileInfo(e), e.XAttr.UID, e.XAttr.GID)
 	} else {
-		n := strings.TrimSuffix(k, sep) + sep + fi.Name()
+		n := strings.TrimSuffix(p.Path(), sep) + sep + e.Name()
 		fmt.Printf("%v\n", n)
 	}
-}
-
-// subtreeMatch reports whether key equals target or is beneath target
-// delimited by sep, and whether lexicographical scan has passed target's
-// subtree. Sibling keys sorting between target and target+sep (such as /a-b
-// for /a) return (false, false) so scanning skips them and continues to
-// /a/... descendants.
-func subtreeMatch(key, target, sep string) (match, stop bool) {
-	if key == target {
-		return true, false
-	}
-	if strings.HasSuffix(target, sep) {
-		if strings.HasPrefix(key, target) {
-			return true, false
-		}
-		return false, true
-	}
-	childPrefix := target + sep
-	if strings.HasPrefix(key, childPrefix) {
-		return true, false
-	}
-	if !strings.HasPrefix(key, target) || key > childPrefix {
-		return false, true
-	}
-	return false, false
 }
 
 func (fc *findCmds) findFS(ctx context.Context, fwfs filewalk.FS, ff *findFlags, args []string) error {
@@ -102,38 +73,25 @@ func (fc *findCmds) findFS(ctx context.Context, fwfs filewalk.FS, ff *findFlags,
 		return err
 	}
 	defer db.Close(ctx)
-	sep := cfg.Separator
-	errs := &errors.M{}
-
-	err = db.Scan(ctx, target, func(_ context.Context, k string, v []byte) bool {
-		inSubtree, stop := subtreeMatch(k, target, sep)
-		if stop {
-			return false
+	sep := cfg.SeparatorOrDefault()
+	for p, err := range summary.New(db, cfg).Prefixes(ctx, target) {
+		if err != nil {
+			return err
 		}
-		if !inSubtree {
-			return true
+		if !p.Match(prefixMatch) {
+			continue
 		}
-		var pi prefixinfo.T
-		if err := pi.UnmarshalBinary(v); err != nil {
-			errs.Append(fmt.Errorf("failed to unmarshal value for %v: %v", k, err))
-			return false
+		if p.Match(match) {
+			printPrefix(p, ff.Long)
 		}
-		if !prefixMatch.Prefix(k, &pi) {
-			return true
-		}
-		if match.Prefix(k, &pi) {
-			printPrefix(pi, ff.Long, k)
-		}
-		for _, fi := range pi.InfoList() {
-			if fi.IsDir() {
+		for _, e := range p.Entries() {
+			if e.IsDir() {
 				continue
 			}
-			if match.Entry(k, &pi, fi) {
-				printEntry(pi, fi, ff.Long, sep, k)
+			if p.MatchEntry(match, e) {
+				printEntry(p, e, ff.Long, sep)
 			}
 		}
-		return true
-	})
-	errs.Append(err)
-	return errs.Err()
+	}
+	return nil
 }

@@ -239,13 +239,13 @@ func (st *statsCmds) computeFromPrefixes(ctx context.Context, db idudb.Reader, c
 			fmt.Fprintf(os.Stderr, "missing metadata for %v\n", e.prefix)
 			return
 		case e.decodeErr != nil:
-			fmt.Fprintf(os.Stderr, "failed to unmarshal value for %v: %v\n", e.prefix, e.decodeErr)
+			fmt.Fprintf(os.Stderr, "failed to unmarshal value: %v\n", e.decodeErr)
 			return
 		}
-		if !match.Prefix(e.prefix, &e.pi) {
+		if !e.pi.Match(match) {
 			return
 		}
-		totals, users, groups := stats.ComputeTotals(e.prefix, &e.pi, calc, match)
+		totals, users, groups := e.pi.Totals(calc, match)
 		sdb.RecordDirect(e.prefix, totals, users, groups)
 		agg.Step(e.summaryKey, e.prefix, totals)
 	})

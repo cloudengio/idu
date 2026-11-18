@@ -46,8 +46,8 @@ func checkPrefixEntry(t *testing.T, e *prefixEntry, nfiles int) {
 	if e.decodeErr != nil {
 		t.Errorf("%v: %v", e.prefix, e.decodeErr)
 	}
-	if e.prefix != stats.DecodeSummaryKey("/", e.summaryKey) || len(e.pi.InfoList()) != nfiles {
-		t.Errorf("unexpected entry for %v: %v, %v files", e.summaryKey, e.prefix, len(e.pi.InfoList()))
+	if e.prefix != stats.DecodeSummaryKey("/", e.summaryKey) || len(e.pi.Entries()) != nfiles {
+		t.Errorf("unexpected entry for %v: %v, %v files", e.summaryKey, e.prefix, len(e.pi.Entries()))
 	}
 }
 

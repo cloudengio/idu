@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"cloudeng.io/cmd/idu/internal/hardlinks"
-	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/internal/usernames"
 	"cloudeng.io/cmdutil/boolexpr"
 	"cloudeng.io/file"
@@ -178,7 +177,7 @@ func (m Matcher) IsHardlink(xattr file.XAttr) bool {
 }
 
 // Prefix evaluates the expression against prefix.
-func (m Matcher) Prefix(prefix string, pi *prefixinfo.T) bool {
+func (m Matcher) Prefix(prefix string, pi PrefixInfo) bool {
 	if m.expr.IsEmpty() {
 		return m.emptyValue
 	}
@@ -186,11 +185,11 @@ func (m Matcher) Prefix(prefix string, pi *prefixinfo.T) bool {
 	if m.fs != nil {
 		name = m.fs.Base(prefix)
 	}
-	return m.expr.Eval(MatchPrefix{T: pi, name: name, path: prefix})
+	return m.expr.Eval(MatchPrefix{PrefixInfo: pi, name: name, path: prefix})
 }
 
 // Entry evaluates the expression against the entry fi within prefix.
-func (m Matcher) Entry(prefix string, pi *prefixinfo.T, fi file.Info) bool {
+func (m Matcher) Entry(prefix string, pi PrefixInfo, fi file.Info) bool {
 	if m.expr.IsEmpty() {
 		return m.emptyValue
 	}
@@ -212,13 +211,16 @@ func (m Matcher) String() string {
 // MatchEntry is the value that expressions are evaluated against for
 // each entry (file or directory) within a prefix.
 type MatchEntry struct {
-	pi   *prefixinfo.T
+	pi   PrefixInfo
 	fi   file.Info
 	path string
 }
 
 // Info returns the file.Info for the entry.
 func (e MatchEntry) Info() file.Info { return e.fi }
+
+// Prefix returns the metadata for the prefix that contains the entry.
+func (e MatchEntry) Prefix() PrefixInfo { return e.pi }
 
 // XAttr returns the extended attributes (e.g. user and group) for the entry.
 func (e MatchEntry) XAttr() file.XAttr { return e.pi.XAttrInfo(e.fi) }
@@ -244,7 +246,7 @@ func (e MatchEntry) ModTime() time.Time { return e.fi.ModTime() }
 // MatchPrefix is the value that expressions are evaluated against
 // for each prefix (directory).
 type MatchPrefix struct {
-	*prefixinfo.T
+	PrefixInfo
 	name string
 	path string
 }

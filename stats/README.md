@@ -28,7 +28,7 @@ that derive the number of blocks from the file's size.
 ## Functions
 ### Func ComputeTotals
 ```go
-func ComputeTotals(prefix string, pi *prefixinfo.T, du diskusage.Calculator, match Matcher) (totals Totals, perUser, perGroup PerIDTotals)
+func ComputeTotals(prefix string, pi PrefixInfo, du diskusage.Calculator, match Matcher) (totals Totals, perUser, perGroup PerIDTotals)
 ```
 ComputeTotals computes the totals for the prefix itself and any
 non-directory contents. Hardlinks are handled as per match.IsHardlink.
@@ -53,6 +53,14 @@ It supports all of the operands provided by cloudeng.io/file/matcher as
 well as user and group operands that accept user/group names or IDs,
 and a hardlink operand that uses fs to determine the file referred to.
 Additional operands may be registered using WithOperand.
+
+### Func NormalizePath
+```go
+func NormalizePath(sep, path string) string
+```
+NormalizePath trims any trailing path separator from path using sep
+(defaulting to "/"), while preserving filesystem root paths such as "/" or
+"C:\".
 
 ### Func SparseBytes
 ```go
@@ -132,6 +140,12 @@ Path returns the full path name of the entry.
 
 
 ```go
+func (e MatchEntry) Prefix() PrefixInfo
+```
+Prefix returns the metadata for the prefix that contains the entry.
+
+
+```go
 func (e MatchEntry) Size() int64
 ```
 Size returns the size of the entry in bytes.
@@ -154,7 +168,7 @@ XAttr returns the extended attributes (e.g. user and group) for the entry.
 ### Type MatchPrefix
 ```go
 type MatchPrefix struct {
-	*prefixinfo.T
+	PrefixInfo
 	// contains filtered or unexported fields
 }
 ```
@@ -212,7 +226,7 @@ is specified.
 ### Methods
 
 ```go
-func (m Matcher) Entry(prefix string, pi *prefixinfo.T, fi file.Info) bool
+func (m Matcher) Entry(prefix string, pi PrefixInfo, fi file.Info) bool
 ```
 Entry evaluates the expression against the entry fi within prefix.
 
@@ -231,7 +245,7 @@ identified by xattr has been seen before.
 
 
 ```go
-func (m Matcher) Prefix(prefix string, pi *prefixinfo.T) bool
+func (m Matcher) Prefix(prefix string, pi PrefixInfo) bool
 ```
 Prefix evaluates the expression against prefix.
 
@@ -340,6 +354,47 @@ func (pid *PerIDTotals) UnmarshalBinary(data []byte) error
 
 
 
+### Type PrefixInfo
+```go
+type PrefixInfo interface {
+	// Size returns the size of the prefix itself.
+	Size() int64
+	// Blocks returns the number of blocks allocated to the prefix itself.
+	Blocks() int64
+	// Mode returns the mode of the prefix.
+	Mode() fs.FileMode
+	// Type returns the type bits of the prefix's mode.
+	Type() fs.FileMode
+	// ModTime returns the modification time of the prefix.
+	ModTime() time.Time
+	// UserGroup returns the user and group IDs of the prefix.
+	UserGroup() (uid, gid int64)
+	// DevIno returns the device and inode numbers of the prefix.
+	DevIno() (device, inode uint64)
+	// XAttr returns the user, group, device, inode etc. of the prefix.
+	XAttr() file.XAttr
+	// InfoList returns the prefix's entries, ie. its files and its
+	// immediate child prefixes, for which IsDir returns true.
+	InfoList() file.InfoList
+	// FilesOnly returns the entries that are files, ie. not prefixes.
+	FilesOnly() file.InfoList
+	// PrefixesOnly returns the entries that are prefixes.
+	PrefixesOnly() file.InfoList
+	// XAttrInfo returns the user, group, device, inode etc. of fi, which
+	// must be one of the entries returned by InfoList, FilesOnly or
+	// PrefixesOnly.
+	XAttrInfo(fi file.Info) file.XAttr
+}
+```
+PrefixInfo represents the metadata recorded for a single prefix (directory)
+that is needed to compute its statistics and to evaluate expressions
+against it and its entries. It is implemented by the representation used
+for prefixes in the database. The MatchPrefix values that expressions
+are evaluated against embed a PrefixInfo, and MatchEntry values provide
+access to the PrefixInfo for the entry's prefix, so that custom operands,
+see WithOperand, can use any of its methods.
+
+
 ### Type PrefixSummary
 ```go
 type PrefixSummary struct {
@@ -367,7 +422,7 @@ single prefix along with the calculator identifier used for StorageBytes.
 ### Functions
 
 ```go
-func ComputeSummary(prefix string, pi *prefixinfo.T, du diskusage.Calculator, match Matcher, hardlinkInfo bool) PrefixSummary
+func ComputeSummary(prefix string, pi PrefixInfo, du diskusage.Calculator, match Matcher, hardlinkInfo bool) PrefixSummary
 ```
 ComputeSummary computes a PrefixSummary for a single directory/prefix.
 If hardlinkInfo is true the summary records the information required for
