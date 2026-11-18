@@ -1,5 +1,4 @@
 # Package [cloudeng.io/cmd/idu/internal/prefixinfo](https://pkg.go.dev/cloudeng.io/cmd/idu/internal/prefixinfo?tab=doc)
-[![CircleCI](https://circleci.com/gh/cloudengio/go.gotools.svg?style=svg)](https://circleci.com/gh/cloudengio/go.gotools) [![Go Report Card](https://goreportcard.com/badge/cloudeng.io/cmd/idu/internal/prefixinfo)](https://goreportcard.com/report/cloudeng.io/cmd/idu/internal/prefixinfo)
 
 ```go
 import cloudeng.io/cmd/idu/internal/prefixinfo

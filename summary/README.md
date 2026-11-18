@@ -11,6 +11,21 @@ It hides the encoding of the database's keys and values and checks that the
 summaries were computed with the configuration that the database is being
 read with.
 
+## Variables
+### ErrNoTopN, ErrStaleTopN
+```go
+// ErrNoTopN is returned when the database contains no top-N rankings,
+// ie. when it was not analyzed with them enabled.
+ErrNoTopN = errors.New("the database contains no top-N rankings: rerun analyze")
+// ErrStaleTopN is returned when the stored top-N rankings may be out
+// of date because the most recent analysis was interrupted or failed,
+// or did not cover the entire filesystem after a configuration change.
+ErrStaleTopN = errors.New("the top-N rankings may be out of date: rerun analyze for the entire prefix")
+
+```
+
+
+
 ## Types
 ### Type Entry
 ```go
@@ -108,6 +123,16 @@ and matchers.
 
 
 
+### Type Ranked
+```go
+type Ranked struct {
+	Path  string
+	Value int64
+}
+```
+Ranked is a single entry in a ranking.
+
+
 ### Type Reader
 ```go
 type Reader struct {
@@ -192,6 +217,35 @@ first error, which is returned as the final value of the iterator.
 
 
 ```go
+func (r *Reader) TopNIDs(ctx context.Context) (users, groups []int64, err error)
+```
+TopNIDs returns the users and groups that have rankings, ie. those that own
+any of the files or prefixes in the database, in ascending order.
+
+
+```go
+func (r *Reader) TopPrefixes(ctx context.Context, metric stats.Metric, n int) (TopN, error)
+```
+TopPrefixes returns the top n prefixes by their own, ie. not recursive,
+value for metric. n of zero or less returns all of the stored entries.
+It returns ErrNoTopN or ErrStaleTopN if the rankings are not available or
+may be out of date.
+
+
+```go
+func (r *Reader) TopPrefixesForGroup(ctx context.Context, gid int64, metric stats.Metric, n int) (TopN, error)
+```
+TopPrefixesForGroup is like TopPrefixesForUser but for the group gid.
+
+
+```go
+func (r *Reader) TopPrefixesForUser(ctx context.Context, uid int64, metric stats.Metric, n int) (TopN, error)
+```
+TopPrefixesForUser is like TopPrefixes but ranks the prefixes by the value
+for metric of the files, and the prefixes themselves, owned by uid.
+
+
+```go
 func (r *Reader) Walk(ctx context.Context, path string, opts ...WalkOption) iter.Seq2[Entry, error]
 ```
 Walk returns an iterator over the summaries for path and all of its
@@ -202,6 +256,26 @@ counted. Iteration stops at the first error, which is returned as the final
 value of the iterator.
 
 
+
+
+### Type TopN
+```go
+type TopN struct {
+	// Entries are in descending order of Value.
+	Entries []Ranked
+	// Certified is the number of leading Entries that are known to be
+	// ranked exactly. The remaining entries may be out of order with
+	// respect to prefixes not included in the ranking. It is normally
+	// equal to len(Entries).
+	Certified int
+	// N is the number of entries that analyze maintains for this ranking,
+	// requests for more than N entries may return fewer, uncertified,
+	// entries.
+	N int
+}
+```
+TopN is a ranking of prefixes by a single stats.Metric, as maintained by
+analyze. Note that hardlinks are not deduplicated.
 
 
 ### Type WalkOption

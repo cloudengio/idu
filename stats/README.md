@@ -6,6 +6,12 @@ import cloudeng.io/cmd/idu/stats
 
 
 ## Constants
+### NumMetrics
+```go
+const NumMetrics = int(MetricSparseBytes) + 1
+```
+NumMetrics is the number of defined Metrics.
+
 ### PrefixSummaryVersion
 ```go
 const PrefixSummaryVersion = 0x3
@@ -293,6 +299,66 @@ WithHardlinkHandling enables incremental detection of hardlinks so as to
 avoid counting the second and subsequent file system entries that represent
 the same file. With this option enabled, IsHardlink will return true for any
 file that has already been seen (based on its device and inode numbers).
+
+
+
+
+### Type Metric
+```go
+type Metric int
+```
+Metric identifies one of the values recorded in Totals that prefixes,
+users and groups can be ranked by.
+
+### Constants
+### MetricBytes, MetricStorageBytes, MetricFiles, MetricPrefixes, MetricPrefixBytes, MetricSparseBytes
+```go
+const (
+	// MetricBytes ranks by Totals.Bytes.
+	MetricBytes Metric = iota
+	// MetricStorageBytes ranks by Totals.StorageBytes.
+	MetricStorageBytes
+	// MetricFiles ranks by Totals.Files.
+	MetricFiles
+	// MetricPrefixes ranks by Totals.SubPrefixes, ie. the number of
+	// prefixes (directories) contained in a prefix.
+	MetricPrefixes
+	// MetricPrefixBytes ranks by Totals.PrefixBytes.
+	MetricPrefixBytes
+	// MetricSparseBytes ranks by Totals.SparseBytes.
+	MetricSparseBytes
+)
+```
+
+
+
+### Functions
+
+```go
+func Metrics() []Metric
+```
+Metrics returns all of the defined Metrics.
+
+
+```go
+func ParseMetric(name string) (Metric, error)
+```
+ParseMetric returns the Metric whose String value is name.
+
+
+
+### Methods
+
+```go
+func (m Metric) String() string
+```
+String implements fmt.Stringer.
+
+
+```go
+func (m Metric) Value(t Totals) int64
+```
+Value returns the value of m in t.
 
 
 

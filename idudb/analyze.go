@@ -158,7 +158,7 @@ func (a *Analyzer) Analyze(ctx context.Context, target string) error {
 	w.lsi = a.newAsyncStat(w)
 	w.fw = a.newFilewalk(w)
 
-	obs := a.opts.observer
+	obs := a.observer()
 	if obs != nil {
 		if err := obs.ScanStarted(ctx, ScanInfo{
 			Root:    a.root,
@@ -168,6 +168,7 @@ func (a *Analyzer) Analyze(ctx context.Context, target string) error {
 			return fmt.Errorf("Observer.ScanStarted: %w", err)
 		}
 		a.db.observer = obs
+		a.db.previousSummaryFailed.Store(false)
 		defer func() { a.db.observer = nil }()
 	}
 
@@ -195,6 +196,26 @@ func (a *Analyzer) Analyze(ctx context.Context, target string) error {
 	}
 	errs.Append(obs.ScanDone(ctx, scanErr))
 	return errs.Err()
+}
+
+// observer returns the Observer, if any, to be notified of all changes,
+// ie. the one that maintains the top-N rankings and/or the one
+// supplied via WithObserver.
+func (a *Analyzer) observer() Observer {
+	var obs multiObserver
+	if a.db.topn.enabled() {
+		obs = append(obs, newTopNObserver(a.db))
+	}
+	if a.opts.observer != nil {
+		obs = append(obs, a.opts.observer)
+	}
+	switch len(obs) {
+	case 0:
+		return nil
+	case 1:
+		return obs[0]
+	}
+	return obs
 }
 
 // scanStore represents the database operations used by the walker.
