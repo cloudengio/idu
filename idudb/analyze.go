@@ -158,6 +158,19 @@ func (a *Analyzer) Analyze(ctx context.Context, target string) error {
 	w.lsi = a.newAsyncStat(w)
 	w.fw = a.newFilewalk(w)
 
+	obs := a.opts.observer
+	if obs != nil {
+		if err := obs.ScanStarted(ctx, ScanInfo{
+			Root:    a.root,
+			Target:  target,
+			Rewrite: a.db.rewriteSummaries,
+		}); err != nil {
+			return fmt.Errorf("Observer.ScanStarted: %w", err)
+		}
+		a.db.observer = obs
+		defer func() { a.db.observer = nil }()
+	}
+
 	errs := errors.M{}
 	errs.Append(w.fw.Walk(ctx, target))
 	// Summaries are only known to be consistent with the current configuration
@@ -165,6 +178,22 @@ func (a *Analyzer) Analyze(ctx context.Context, target string) error {
 	if errs.Err() == nil && ctx.Err() == nil && sameRoot(runtime.GOOS, target, a.root) {
 		errs.Append(a.db.markSummariesComplete(ctx))
 	}
+	if obs == nil {
+		return errs.Err()
+	}
+	scanErr := errs.Err()
+	if scanErr == nil {
+		scanErr = ctx.Err()
+	}
+	// Persist all of the changes before reporting that they are done,
+	// regardless of any errors or cancelation.
+	if err := a.db.db.Flush(context.WithoutCancel(ctx)); err != nil {
+		errs.Append(err)
+		if scanErr == nil {
+			scanErr = err
+		}
+	}
+	errs.Append(obs.ScanDone(ctx, scanErr))
 	return errs.Err()
 }
 
