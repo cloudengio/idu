@@ -23,7 +23,7 @@
 //	           config - show the configuration, and its documentation.
 //	         database - database management commands.
 //
-// global flags: [--config= --fs= --gcpercent=50 --http= --log-file= --log-format=json --log-level=0 --log-source-code=false --profile= --units=decimal]
+// global flags: [--config= --fs= --gcpercent=50 --http= --log-file= --log-format=json --log-level=0 --log-source-code=false --log-tempfile= --profile= --units=decimal]
 //
 //	-config value
 //	  configuration files (.yaml, .yml, .env) or comma-separated list; defaults
@@ -48,6 +48,10 @@
 //	  logging level: 0=error, 1=warn, 2=info, 3=debug
 //	-log-source-code
 //	  include source code file and line number in logs
+//	-log-tempfile string
+//	  create a unique log file from this os.CreateTemp pattern, eg. myapp-*.log,
+//	  in os.TempDir unless the pattern includes a directory, which is created
+//	  if needed. Mutually exclusive with log-file
 //	-profile value
 //	  write a profile on exit; the format is <profile-name>:<file> and the
 //	  flag may be repeated to request multiple profile types, use cpu to request

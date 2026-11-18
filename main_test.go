@@ -78,7 +78,7 @@ func TestHelp(t *testing.T) {
 	if err := containsAnyOf(out, base...); err != nil {
 		t.Fatal(err)
 	}
-	err := containsAnyOf(out, "[--config= --fs= --gcpercent=50 --http= --log-file= --log-format=json --log-level=0 --log-source-code=false --profile= --units=decimal]")
+	err := containsAnyOf(out, "[--config= --fs= --gcpercent=50 --http= --log-file= --log-format=json --log-level=0 --log-source-code=false --log-tempfile= --profile= --units=decimal]")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,6 +236,7 @@ func TestConfigFallbackAndCLIFlowByName(t *testing.T) {
 	if _, err := runIDUEnv(env, "--fs=mytree", "analyze", "--progress=false"); err != nil {
 		t.Fatal(err)
 	}
+	assertLogsRange(t, env)
 
 	out, err = runIDUEnv(env, "--fs=mytree", "find", ".")
 	if err != nil {
@@ -437,4 +438,27 @@ func TestDistributedSubtreeDetection(t *testing.T) {
 	verifyDistributedMode(t, home, confDir, treeDir, fanoutRoot, "dedup", false, "summaries")
 	// Rescan of all file metadata to deduplicate hardlinks (hardlink_dedup: rescan)
 	verifyDistributedMode(t, home, confDir, treeDir, fanoutRoot, "rescan", false, "rescan")
+}
+
+// assertLogsRange verifies that logs --range selects the logs written by the
+// preceding analyze of the mytree filesystem.
+func assertLogsRange(t *testing.T, env []string) {
+	t.Helper()
+	for rng, want := range map[string]bool{
+		"-1h..":        true,
+		"..+1h":        true,
+		"2020-01":      false,
+		"..2020-01-01": false,
+	} {
+		out, err := runIDUEnv(env, "--fs=mytree", "logs", "--range="+rng)
+		if err != nil {
+			t.Fatalf("logs --range=%v: %v", rng, err)
+		}
+		if got := strings.Contains(out, `"begin"`); got != want {
+			t.Errorf("logs --range=%v: got log entries %v, want %v: %q", rng, got, want, out)
+		}
+	}
+	if out, err := runIDUEnv(env, "--fs=mytree", "logs", "--range=2026-11-05..2026-11-01"); err == nil {
+		t.Errorf("expected an error for an invalid range, got %q", out)
+	}
 }

@@ -5,41 +5,10 @@
 package internal
 
 import (
-	"fmt"
 	"io/fs"
-	"time"
 
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
-	"cloudeng.io/cmdutil/flags"
 )
-
-type TimeRangeFlags struct {
-	Since time.Duration `subcmd:"since,0s,'display entries since the specified duration, it takes precedence over from/to'"`
-	From  flags.Time    `subcmd:"from,,display entries starting at this time/date"`
-	To    flags.Time    `subcmd:"to,,display entries ending at this time/date"`
-}
-
-func (tr *TimeRangeFlags) FromTo() (from, to time.Time, set bool, err error) {
-	set = tr.Since != 0 || !tr.From.IsDefault() || !tr.To.IsDefault()
-	to = time.Now()
-	if !set {
-		return
-	}
-	if tr.Since < 0 {
-		return time.Time{}, time.Time{}, false, fmt.Errorf("since duration must be non-negative: %v", tr.Since)
-	}
-	if tr.Since > 0 {
-		from = to.Add(-tr.Since)
-		return
-	}
-	if !tr.From.IsDefault() {
-		from = tr.From.Get().(time.Time)
-	}
-	if !tr.To.IsDefault() {
-		to = tr.To.Get().(time.Time)
-	}
-	return
-}
 
 type prefixInfo struct {
 	name string
