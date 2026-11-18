@@ -69,7 +69,7 @@ type Analyzer struct {
 
 // NewAnalyzer returns a new Analyzer for the filesystem rooted at root that
 // records its results in db. AnalyzeOptionsFromConfig can be used to
-// create options from an iduconfig.Prefix.
+// create options from an iduconfig.Settings.
 func NewAnalyzer(db *DB, root string, opts ...AnalyzeOption) *Analyzer {
 	a := &Analyzer{
 		db:   db,

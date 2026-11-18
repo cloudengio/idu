@@ -48,9 +48,10 @@ const (
 	EnvVars = "IDU_ENV"
 )
 
-type Prefix struct {
+// Settings contains the configuration settings that are common to all
+// filesystem configurations, ie. Root and KeyRange.
+type Settings struct {
 	Name                     string             `yaml:"name" doc:"optional name used to refer to this configuration"`
-	Prefix                   string             `yaml:"prefix" doc:"the prefix to be analyzed"`
 	Database                 string             `yaml:"database" doc:"the location of the database to use for this prefix"`
 	StatsDir                 string             `yaml:"stats_dir" doc:"the directory to use for stats files, defaults to stats"`
 	Separator                string             `yaml:"separator" doc:"filename separator to use, defaults to /"`
@@ -89,13 +90,13 @@ const (
 
 // RecordHardlinks returns true if analyze should record potential hardlinks
 // in the precomputed summaries.
-func (p *Prefix) RecordHardlinks() bool {
+func (p *Settings) RecordHardlinks() bool {
 	return !p.CountHardlinkAsFiles && p.HardlinkDedup != HardlinkDedupRescan
 }
 
 // CalculatorOrDefault returns the configured disk usage calculator or the
 // identity calculator if none is configured.
-func (p *Prefix) CalculatorOrDefault() diskusage.Calculator {
+func (p *Settings) CalculatorOrDefault() diskusage.Calculator {
 	if p.calculator == nil {
 		return diskusage.NewIdentity()
 	}
@@ -103,7 +104,7 @@ func (p *Prefix) CalculatorOrDefault() diskusage.Calculator {
 }
 
 // SeparatorOrDefault returns the configured separator or "/".
-func (p *Prefix) SeparatorOrDefault() string {
+func (p *Settings) SeparatorOrDefault() string {
 	if p.Separator == "" {
 		return "/"
 	}
@@ -112,16 +113,16 @@ func (p *Prefix) SeparatorOrDefault() string {
 
 // CompactionInterval returns the combined compaction interval computed by
 // converting CompactIntervalDays to a time.Duration and adding CompactInterval.
-func (p *Prefix) CompactionInterval() time.Duration {
+func (p *Settings) CompactionInterval() time.Duration {
 	return time.Duration(p.CompactIntervalDays)*24*time.Hour + p.CompactInterval
 }
 
 type Layout struct {
-	Calculator string    `yaml:"calculator" doc:"the type of disk usage calculator to use (allocated, bytes, block, raid0), defaults to allocated"`
+	Calculator string    `yaml:"calculator" doc:"the type of disk usage calculator to use (allocated, bytes, block, raid0), defaults to allocated for a root and bytes for a key range"`
 	Parameters yaml.Node `yaml:"parameters,omitempty" doc:"the layout parameters to use for this calculator"`
 }
 
-func (p *Prefix) Calculator() diskusage.Calculator {
+func (p *Settings) Calculator() diskusage.Calculator {
 	return p.calculator
 }
 
@@ -145,26 +146,39 @@ func (cf *Files) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// Filesystems is a list of filesystem Prefix configurations. Unmarshaling
-// appends decoded blocks into *fs so multiple config files merge cleanly.
-type Filesystems []Prefix
+// Filesystems is a list of filesystem configurations, each of which is
+// either a *Root or a *KeyRange. Unmarshaling appends decoded blocks into
+// *fs so multiple config files merge cleanly.
+type Filesystems []Filesystem
 
-var prefixYAMLFields = structYAMLFields(Prefix{})
+var filesystemYAMLFields = func() map[string]bool {
+	f := structYAMLFields(filesystemYAML{})
+	f[deprecatedRootKey] = true
+	return f
+}()
 
 func structYAMLFields(v any) map[string]bool {
 	fields := map[string]bool{}
-	t := reflect.TypeOf(v)
+	addStructYAMLFields(fields, reflect.TypeOf(v))
+	return fields
+}
+
+func addStructYAMLFields(fields map[string]bool, t reflect.Type) {
 	for i := range t.NumField() {
-		tag := t.Field(i).Tag.Get("yaml")
+		f := t.Field(i)
+		tag := f.Tag.Get("yaml")
 		if tag == "" || tag == "-" {
 			continue
 		}
-		name, _, _ := strings.Cut(tag, ",")
+		name, opts, _ := strings.Cut(tag, ",")
+		if f.Anonymous && opts == "inline" {
+			addStructYAMLFields(fields, f.Type)
+			continue
+		}
 		if name != "" {
 			fields[name] = true
 		}
 	}
-	return fields
 }
 
 func validateMappingKeys(node *yaml.Node, allowed map[string]bool, typeName string) error {
@@ -219,16 +233,18 @@ func (fs *Filesystems) UnmarshalYAML(value *yaml.Node) error {
 		for elem.Kind == yaml.AliasNode && elem.Alias != nil {
 			elem = elem.Alias
 		}
-		var p Prefix
-		if elem.Tag != "!!null" {
-			if err := validateMappingKeys(elem, prefixYAMLFields, "config.Prefix"); err != nil {
-				return err
-			}
-			if err := elem.Decode(&p); err != nil {
-				return err
-			}
+		if elem.Tag == "!!null" {
+			*fs = append(*fs, &Root{})
+			continue
 		}
-		*fs = append(*fs, p)
+		if err := validateMappingKeys(elem, filesystemYAMLFields, "config.Filesystem"); err != nil {
+			return err
+		}
+		f, err := decodeFilesystem(elem)
+		if err != nil {
+			return err
+		}
+		*fs = append(*fs, f)
 	}
 	return nil
 }
@@ -282,54 +298,46 @@ func (t *T) UnmarshalYAML(value *yaml.Node) error {
 	}
 }
 
-// ForName returns the prefix configuration with the given Name.
-func (t T) ForName(name string) (Prefix, bool) {
+// ForName returns the filesystem configuration with the given Name.
+func (t T) ForName(name string) (Filesystem, bool) {
 	if name == "" {
-		return Prefix{}, false
+		return nil, false
 	}
-	for _, p := range t.Filesystems {
-		if p.Name == name {
-			return p, true
+	for _, f := range t.Filesystems {
+		if f.Config().Name == name {
+			return f, true
 		}
 	}
-	return Prefix{}, false
+	return nil, false
 }
 
-// ForPrefix returns the prefix configuration that corresponds to path. The
-// prefix is the longest matching prefix in the configuration. The boolean
-// return value is true if a match is found.
-func (t T) ForPrefix(path string) (Prefix, bool) {
-	var longest *Prefix
-	for i := range t.Filesystems {
-		p := &t.Filesystems[i]
-		if p.Prefix == "" {
+// ForPrefix returns the Root configuration that corresponds to path. The
+// Root is the one with the longest matching root in the configuration,
+// KeyRange configurations are ignored. The boolean return value is true
+// if a match is found.
+func (t T) ForPrefix(path string) (*Root, bool) {
+	var longest *Root
+	longestLen := 0
+	path = cleanPath(path)
+	for _, f := range t.Filesystems {
+		r, ok := f.(*Root)
+		if !ok || r.Root == "" {
 			continue
 		}
-		if hasPathPrefix(path, p.Prefix, caseInsensitivePaths) && (longest == nil || len(p.Prefix) > len(longest.Prefix)) {
-			longest = p
+		root := cleanPath(r.Root)
+		if containsPath(root, path, caseInsensitivePaths) && (longest == nil || len(root) > longestLen) {
+			longest, longestLen = r, len(root)
 		}
 	}
-	if longest == nil {
-		return Prefix{}, false
-	}
-	return *longest, true
+	return longest, longest != nil
 }
 
 // caseInsensitivePaths is true on Windows, whose filenames are not case
 // sensitive.
 var caseInsensitivePaths = runtime.GOOS == "windows"
 
-// hasPathPrefix reports whether path starts with prefix, ignoring case
-// if caseInsensitive is true.
-func hasPathPrefix(path, prefix string, caseInsensitive bool) bool {
-	if caseInsensitive {
-		return len(path) >= len(prefix) && strings.EqualFold(path[:len(prefix)], prefix)
-	}
-	return strings.HasPrefix(path, prefix)
-}
-
 // Exclude returns true if path should be excluded/ignored.
-func (p *Prefix) Exclude(path string) bool {
+func (p *Settings) Exclude(path string) bool {
 	for _, re := range p.Exclusions {
 		if re.Regexp != nil && re.MatchString(path) {
 			return true
@@ -347,10 +355,10 @@ var (
 
 // SetDefaults populates default values for any unset fields in t.
 func (t *T) SetDefaults() {
-	for i := range t.Filesystems {
-		p := &t.Filesystems[i]
+	for _, f := range t.Filesystems {
+		f.setDefaults()
+		p := f.Config()
 		p.Name = os.ExpandEnv(p.Name)
-		p.Prefix = os.ExpandEnv(p.Prefix)
 		p.Database = os.ExpandEnv(p.Database)
 		p.StatsDir = os.ExpandEnv(p.StatsDir)
 		if len(p.StatsDir) == 0 {
@@ -381,44 +389,37 @@ func (t *T) SetDefaults() {
 // the disk usage calculator for each prefix.
 func (t *T) Validate() error {
 	seenNames := map[string]int{}
-	for i := range t.Filesystems {
-		p := &t.Filesystems[i]
+	for i, f := range t.Filesystems {
+		p := f.Config()
 		if p.Name != "" {
 			if prev, ok := seenNames[p.Name]; ok {
 				return fmt.Errorf("duplicate configuration name %q (filesystem entries %d and %d)", p.Name, prev, i)
 			}
 			seenNames[p.Name] = i
 		}
-		if p.Prefix == "" {
-			return fmt.Errorf("filesystem entry %d (%q) has an empty prefix path", i, p.Name)
+		if err := f.validate(); err != nil {
+			return fmt.Errorf("filesystem entry %d (%q): %w", i, p.Name, err)
 		}
 		if err := validateCompactIntervals(p); err != nil {
-			return fmt.Errorf("filesystem %q: %w", prefixLabel(p), err)
+			return fmt.Errorf("filesystem %q: %w", Label(f), err)
 		}
 		switch p.HardlinkDedup {
 		case "":
 			p.HardlinkDedup = HardlinkDedupSummaries
 		case HardlinkDedupSummaries, HardlinkDedupRescan:
 		default:
-			return fmt.Errorf("filesystem %q: hardlink_dedup must be %q or %q, not %q", prefixLabel(p), HardlinkDedupSummaries, HardlinkDedupRescan, p.HardlinkDedup)
+			return fmt.Errorf("filesystem %q: hardlink_dedup must be %q or %q, not %q", Label(f), HardlinkDedupSummaries, HardlinkDedupRescan, p.HardlinkDedup)
 		}
-		calc, err := parseLayout(p.Prefix, &p.Layout)
+		calc, err := parseLayout(f.layoutPath(), &p.Layout)
 		if err != nil {
-			return fmt.Errorf("filesystem %q: %w", prefixLabel(p), err)
+			return fmt.Errorf("filesystem %q: %w", Label(f), err)
 		}
 		p.calculator = calc
 	}
 	return nil
 }
 
-func prefixLabel(p *Prefix) string {
-	if p.Name != "" {
-		return fmt.Sprintf("%s (%s)", p.Name, p.Prefix)
-	}
-	return p.Prefix
-}
-
-func validateCompactIntervals(p *Prefix) error {
+func validateCompactIntervals(p *Settings) error {
 	if p.CompactIntervalDays < 0 {
 		return fmt.Errorf("compact_interval_days must not be negative (%d)", p.CompactIntervalDays)
 	}
@@ -936,7 +937,7 @@ func DescribeHardlinkDedup(w io.Writer) error {
 // yaml configuration file.
 func Documentation() string {
 	out := &strings.Builder{}
-	desc, err := structdoc.Describe(&T{}, "doc", "YAML configuration file options\n")
+	desc, err := structdoc.Describe(&docT{}, "doc", "YAML configuration file options\n")
 	if err != nil {
 		panic(err)
 	}

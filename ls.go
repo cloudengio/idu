@@ -51,9 +51,9 @@ func errorGroupPrefix(ctx context.Context, db idudb.Reader, key, target, sep str
 func (l *lister) errors(ctx context.Context, values interface{}, args []string) error {
 	ef := values.(*errorFlags)
 	if ef.Erase {
-		return eraseEntries(ctx, args[0], idudb.EraseErrors)
+		return eraseEntries(ctx, prefixArg(args), idudb.EraseErrors)
 	}
-	ctx, cfg, target, db, err := openPrefixReadOnly(ctx, globalConfig, args[0])
+	ctx, cfg, target, db, err := openPrefixReadOnly(ctx, globalConfig, prefixArg(args))
 	if err != nil {
 		return err
 	}
@@ -87,9 +87,9 @@ func (l *lister) errors(ctx context.Context, values interface{}, args []string) 
 func (l *lister) logs(ctx context.Context, values interface{}, args []string) error {
 	lf := values.(*logFlags)
 	if lf.Erase {
-		return eraseEntries(ctx, args[0], idudb.EraseLogs)
+		return eraseEntries(ctx, prefixArg(args), idudb.EraseLogs)
 	}
-	ctx, _, _, db, err := openPrefixReadOnly(ctx, globalConfig, args[0])
+	ctx, _, _, db, err := openPrefixReadOnly(ctx, globalConfig, prefixArg(args))
 	if err != nil {
 		return err
 	}

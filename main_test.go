@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -77,14 +78,14 @@ func TestHelp(t *testing.T) {
 	if err := containsAnyOf(out, base...); err != nil {
 		t.Fatal(err)
 	}
-	err := containsAnyOf(out, "[--config= --gcpercent=50 --http= --log-file= --log-format=json --log-level=0 --log-source-code=false --profile= --units=decimal]")
+	err := containsAnyOf(out, "[--config= --fs= --gcpercent=50 --http= --log-file= --log-format=json --log-level=0 --log-source-code=false --profile= --units=decimal]")
 	if err != nil {
 		t.Fatal(err)
 	}
 	out, _ = runIDU("help", "analyze") // will return exit status 1 for help.
 
 	err = containsAnyOf(out, "Usage of command \"analyze\": analyze the file system to build a database of directory and file metadata.",
-		"analyze [--force=false --progress=true --show-defaults=false --slow-scan-duration=10s] <prefix>")
+		"analyze [--force=false --progress=true --show-defaults=false --slow-scan-duration=10s] [<prefix>]")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,18 +127,36 @@ func TestConfigSubcommandsAndUnits(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for name, wantDB := range map[string]string{
-		"fs-alpha": "/tmp/idu-dbs/a",
-		"fs-beta":  "/tmp/idu-dbs/b",
-		"/fs/a":    "/tmp/idu-dbs/a",
-		"/fs/b":    "/tmp/idu-dbs/b",
+	for _, tc := range []struct {
+		args   []string
+		wantDB string
+	}{
+		{[]string{"--fs=fs-alpha", "database", "locate"}, "/tmp/idu-dbs/a"},
+		{[]string{"--fs=fs-beta", "database", "locate"}, "/tmp/idu-dbs/b"},
+		{[]string{"--fs=fs-alpha", "database", "locate", "/fs/a"}, "/tmp/idu-dbs/a"},
+		{[]string{"--fs=fs-beta", "database", "locate", "/fs/b/sub"}, "/tmp/idu-dbs/b"},
+		{[]string{"--fs=fs-beta", "database", "locate", "sub"}, "/tmp/idu-dbs/b"},
 	} {
-		out, err = runIDUEnv(env, "database", "locate", name)
+		out, err = runIDUEnv(env, tc.args...)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.TrimSpace(out) != wantDB {
-			t.Fatalf("database locate %q: got %q, want %q", name, strings.TrimSpace(out), wantDB)
+		if strings.TrimSpace(out) != tc.wantDB {
+			t.Fatalf("%v: got %q, want %q", tc.args, strings.TrimSpace(out), tc.wantDB)
+		}
+	}
+
+	// --fs is required when more than one filesystem is configured and
+	// prefixes must be contained within the filesystem's prefix.
+	for _, args := range [][]string{
+		{"database", "locate"},
+		{"database", "locate", "/fs/a"},
+		{"--fs=fs-alpha", "database", "locate", "/fs/b"},
+		{"--fs=fs-alpha", "database", "locate", "../b"},
+		{"--fs=nosuch", "database", "locate"},
+	} {
+		if out, err := runIDUEnv(env, args...); err == nil {
+			t.Fatalf("%v: expected an error, got %q", args, out)
 		}
 	}
 
@@ -164,9 +183,10 @@ func TestConfigSubcommandsAndUnits(t *testing.T) {
 	}
 }
 
-func assertStatsViewOutput(t *testing.T, env []string, wantPrefix string, extraArgs ...string) {
+func assertStatsViewOutput(t *testing.T, env []string, wantPrefix string, globalArgs []string, extraArgs ...string) {
 	t.Helper()
-	args := append([]string{"stats", "view", "--info"}, extraArgs...)
+	args := append(slices.Clone(globalArgs), "stats", "view", "--info")
+	args = append(args, extraArgs...)
 	out, err := runIDUEnv(env, args...)
 	if err != nil {
 		t.Fatalf("stats view %v failed: %v\n%s", extraArgs, err, out)
@@ -213,11 +233,11 @@ func TestConfigFallbackAndCLIFlowByName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := runIDUEnv(env, "analyze", "--progress=false", "mytree"); err != nil {
+	if _, err := runIDUEnv(env, "--fs=mytree", "analyze", "--progress=false"); err != nil {
 		t.Fatal(err)
 	}
 
-	out, err = runIDUEnv(env, "find", "mytree")
+	out, err = runIDUEnv(env, "--fs=mytree", "find", ".")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,26 +245,40 @@ func TestConfigFallbackAndCLIFlowByName(t *testing.T) {
 		t.Fatalf("find mytree output %q does not contain expected file", out)
 	}
 
-	if _, err := runIDUEnv(env, "stats", "compute", "mytree"); err != nil {
+	if _, err := runIDUEnv(env, "--fs=mytree", "stats", "compute", "."); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(statsDir, "latest.idustats")); err != nil {
 		t.Fatalf("expected latest.idustats in configured stats_dir %s: %v", statsDir, err)
 	}
 
-	if _, err := runIDUEnv(env, "stats", "compute", "--stats-dir="+overrideStatsDir, "mytree"); err != nil {
+	if _, err := runIDUEnv(env, "--fs=mytree", "stats", "compute", "--stats-dir="+overrideStatsDir, "."); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(overrideStatsDir, "latest.idustats")); err != nil {
 		t.Fatalf("expected latest.idustats in --stats-dir override %s: %v", overrideStatsDir, err)
 	}
 
-	assertStatsViewOutput(t, env, treeDir, "mytree")
-	assertStatsViewOutput(t, env, treeDir, treeDir)
-	assertStatsViewOutput(t, env, treeDir, "--stats-dir="+overrideStatsDir, "mytree")
+	assertStatsViews(t, env, treeDir, statsDir, overrideStatsDir)
+}
+
+// assertStatsViews verifies the various ways that stats view can locate
+// the stats file for the mytree filesystem.
+func assertStatsViews(t *testing.T, env []string, treeDir, statsDir, overrideStatsDir string) {
+	t.Helper()
+	mytree := []string{"--fs=mytree"}
+	assertStatsViewOutput(t, env, treeDir, mytree)
+	assertStatsViewOutput(t, env, treeDir, nil, filepath.Join(statsDir, "latest.idustats"))
+	assertStatsViewOutput(t, env, treeDir, mytree, "--stats-dir="+overrideStatsDir)
 	if targetFile, err := os.Readlink(filepath.Join(statsDir, "latest.idustats")); err == nil {
-		assertStatsViewOutput(t, env, treeDir, "mytree", filepath.Base(targetFile))
+		assertStatsViewOutput(t, env, treeDir, mytree, filepath.Base(targetFile))
 	}
+	if out, err := runIDUEnv(env, "stats", "view"); err == nil {
+		t.Fatalf("expected stats view without --fs to fail, got %q", out)
+	}
+	// --fs is not required when --stats-dir is specified.
+	assertStatsViewOutput(t, env, treeDir, nil, "--stats-dir="+overrideStatsDir)
+	assertStatsViewOutput(t, env, treeDir, nil, "--stats-dir="+statsDir, "latest.idustats")
 }
 
 func TestConfigShowAndCommandsOnLoadError(t *testing.T) {
@@ -344,10 +378,10 @@ func verifyDistributedMode(t *testing.T, home, confDir, treeDir, fanoutRoot, nam
 	}
 	env := append(os.Environ(), "HOME="+home, "APPDATA="+filepath.Join(home, ".config"), "IDU_CONFIG="+cfgPath, "IDU_ENV=")
 
-	if out, err := runIDUEnv(env, "analyze", name); err != nil {
+	if out, err := runIDUEnv(env, "analyze"); err != nil {
 		t.Fatalf("%s analyze failed: %v\n%s", name, err, out)
 	}
-	if out, err := runIDUEnv(env, "stats", "compute", name); err != nil {
+	if out, err := runIDUEnv(env, "stats", "compute", "."); err != nil {
 		t.Fatalf("%s stats compute failed: %v\n%s", name, err, out)
 	}
 

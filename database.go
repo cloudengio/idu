@@ -105,7 +105,7 @@ func openReadOnlyDB(ctx context.Context, path string) (idudb.Reader, error) {
 }
 
 // openWritableDB opens the database specified by cfg for use by analyze.
-func openWritableDB(ctx context.Context, cfg iduconfig.Prefix) (*idudb.DB, error) {
+func openWritableDB(ctx context.Context, cfg *iduconfig.Settings) (*idudb.DB, error) {
 	raw, err := openDatabase(ctx, cfg.Database, false)
 	if err != nil {
 		return nil, err
@@ -120,31 +120,33 @@ func openWritableDB(ctx context.Context, cfg iduconfig.Prefix) (*idudb.DB, error
 
 // openPrefixReadOnly resolves prefix to its configuration and the target
 // path to operate on and opens the corresponding database for reading.
-func openPrefixReadOnly(ctx context.Context, all iduconfig.T, prefix string) (context.Context, iduconfig.Prefix, string, idudb.Reader, error) {
-	ctx, cfg, target, err := lookupPrefix(ctx, all, prefix)
+func openPrefixReadOnly(ctx context.Context, all iduconfig.T, prefix string) (context.Context, *iduconfig.Settings, string, idudb.Reader, error) {
+	ctx, f, target, err := lookupPrefix(ctx, all, prefix)
 	if err != nil {
-		return ctx, iduconfig.Prefix{}, "", nil, err
+		return ctx, nil, "", nil, err
 	}
+	cfg := f.Config()
 	db, err := openReadOnlyDB(ctx, cfg.Database)
 	if err != nil {
-		return ctx, iduconfig.Prefix{}, "", nil, fmt.Errorf("failed to open database for %v in %v: %w", cfg.Prefix, cfg.Database, err)
+		return ctx, nil, "", nil, fmt.Errorf("failed to open database for %v in %v: %w", iduconfig.Label(f), cfg.Database, err)
 	}
 	return ctx, cfg, target, db, nil
 }
 
 // eraseEntries opens the database for prefix and calls erase on it.
 func eraseEntries(ctx context.Context, prefix string, erase func(context.Context, idudb.Database) error) error {
-	ctx, cfg, _, err := lookupPrefix(ctx, globalConfig, prefix)
+	ctx, f, _, err := lookupPrefix(ctx, globalConfig, prefix)
 	if err != nil {
 		return err
 	}
+	cfg := f.Config()
 	db, err := openDatabase(ctx, cfg.Database, false)
 	if err != nil {
-		return fmt.Errorf("failed to open database for %v in %v: %w", cfg.Prefix, cfg.Database, err)
+		return fmt.Errorf("failed to open database for %v in %v: %w", iduconfig.Label(f), cfg.Database, err)
 	}
 	if err := erase(ctx, db); err != nil {
 		_ = db.Close(context.WithoutCancel(ctx))
-		return fmt.Errorf("failed to erase entries in the database for %v in %v: %w", cfg.Prefix, cfg.Database, err)
+		return fmt.Errorf("failed to erase entries in the database for %v in %v: %w", iduconfig.Label(f), cfg.Database, err)
 	}
 	return db.Close(ctx)
 }

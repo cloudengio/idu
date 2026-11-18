@@ -41,7 +41,7 @@ type analyzeFlags struct {
 
 type analyzeCmd struct {
 	// openDB may be overridden by tests.
-	openDB func(context.Context, iduconfig.Prefix) (*idudb.DB, error)
+	openDB func(context.Context, *iduconfig.Settings) (*idudb.DB, error)
 	// beforeClose, if set, is called by tests immediately before the
 	// database is closed.
 	beforeClose func()
@@ -64,10 +64,15 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *anal
 		return nil
 	}
 	start := time.Now()
-	ctx, cfg, target, err := lookupPrefix(ctx, globalConfig, args[0])
+	ctx, f, target, err := lookupPrefix(ctx, globalConfig, prefixArg(args))
 	if err != nil {
 		return err
 	}
+	root, ok := f.(*iduconfig.Root)
+	if !ok {
+		return fmt.Errorf("filesystem %v is a key range, analyzing key ranges is not yet supported", iduconfig.Label(f))
+	}
+	cfg := &root.Settings
 	if cfg.SetMaxThreads > 0 {
 		debug.SetMaxThreads(cfg.SetMaxThreads)
 		ctxlog.Info(ctx, "set max threads", "max-threads", cfg.SetMaxThreads)
@@ -117,7 +122,7 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *anal
 		idudb.WithForce(af.Force),
 		idudb.WithSlowScanThreshold(af.SlowScans),
 	)
-	analyzer := idudb.NewAnalyzer(db, cfg.Prefix, opts...)
+	analyzer := idudb.NewAnalyzer(db, root.Root, opts...)
 
 	c := analyzer.Configuration()
 	fmt.Printf("configuration: scan size %v, concurrent scans %v, concurrent stats %v, concurrent stats threshold %v\n", c.ScanSize, c.ConcurrentScans, c.ConcurrentStats, c.ConcurrentStatsThreshold)

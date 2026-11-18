@@ -113,8 +113,8 @@ func computeBoth(ctx context.Context, t *testing.T, cfg iduconfig.T, target stri
 	}
 	defer db.Close(ctx)
 	st := &statsCmds{}
-	fromSummaries, summaryErr = st.computeFromSummaries(ctx, db, &pcfg, target, 10, false)
-	fromPrefixes, err = st.computeFromPrefixes(ctx, db, &pcfg, hardlinkMatcher(ctx, t), target, 10, false)
+	fromSummaries, summaryErr = st.computeFromSummaries(ctx, db, pcfg, target, 10, false)
+	fromPrefixes, err = st.computeFromPrefixes(ctx, db, pcfg, hardlinkMatcher(ctx, t), target, 10, false)
 	if err != nil {
 		t.Fatal(err)
 	}

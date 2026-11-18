@@ -43,7 +43,7 @@ var (
 )
 
 var commands = `name: idu
-summary: analyze disk usage using a database for incremental updates. Commands that accept a <prefix> accept either a filesystem prefix path or a configured filesystem name. Many of the commands accept an expression that is used to restrict which prefixes/directories and files are processed.
+summary: analyze disk usage using a database for incremental updates. The filesystem to operate on is selected by name using the --fs flag, which may be omitted if only one filesystem is configured. Commands that accept a <prefix> interpret it relative to that filesystem's configured root, or as a key prefix for a filesystem configured as a key range, and it must be contained within that root or range; an omitted [<prefix>] refers to the entire filesystem. Many of the commands accept an expression that is used to restrict which prefixes/directories and files are processed.
 commands:
   - name: expression-syntax
     summary: display the syntax for the expression language supported by commands such as analyze, find etc.
@@ -51,17 +51,17 @@ commands:
   - name: analyze
     summary: analyze the file system to build a database of directory and file metadata.
     arguments:
-      - <prefix>
+      - '[<prefix>]'
 
   - name: logs
     summary: list the log of past operations stored in the database.
     arguments:
-      - <prefix>
+      - '[<prefix>]'
 
   - name: errors
     summary: list the errors stored in the database
     arguments:
-      - <prefix>
+      - '[<prefix>]'
 
   - name: find
     summary: find prefixes/files in the database that match the supplied expression.
@@ -81,10 +81,9 @@ commands:
           - <expression>...
 
       - name: view
-        summary: view the statistics stored in a file created using the compute command.
+        summary: view the statistics stored in a file created using the compute command. If no filename is specified then the latest statistics for the filesystem specified by --fs are displayed, otherwise the named file is displayed, a relative filename that does not exist is looked for in the stats directory, which is specified by --stats-dir or is the stats directory of the filesystem specified by --fs.
         arguments:
-          - <prefix-or-filename>
-          - ...
+          - '[<filename>]'
 
 
   - name: reports
@@ -110,7 +109,7 @@ commands:
     - name: locate
       summary: display the location of the database
       arguments:
-        - <prefix>
+        - '[<prefix>]'
 `
 
 type units int
@@ -129,6 +128,7 @@ func (u units) EnumValues() map[string]units {
 
 type GlobalFlags struct {
 	cmdutil.LoggingFlags
+	FS          string                `subcmd:"fs,,'the name of the configured filesystem to operate on, it may be omitted if only one filesystem is configured. For a filesystem configured with a root, any prefix arguments are interpreted relative to, and must be contained within, that root; for one configured with a key range they are key prefixes that must be contained within that range'"`
 	ExitProfile profiling.ProfileFlag `subcmd:"profile,,'write a profile on exit; the format is <profile-name>:<file> and the flag may be repeated to request multiple profile types, use cpu to request cpu profiling in addition to predefined profiles in runtime/pprof'"`
 	Config      cmdconfig.FilesFlag   `subcmd:"config,,'configuration files (.yaml, .yml, .env) or comma-separated list; defaults to config.yaml (and its filesystem_config_files) in the idu search path or all .yaml/.yml files in $HOME/.config/idu'"`
 	Units       flags.Enum[units]     `subcmd:"units,decimal,display usage in decimal (KB) or binary (KiB) formats"`
@@ -156,6 +156,7 @@ func cli() *subcmd.CommandSetYAML {
 	cmdSet := subcmd.MustFromYAMLTemplate(commands, newConfigExtension())
 	cmdSet.MustAddExtensions()
 	cmdSet.Set("config", "show").MustRunner(configShow, &struct{}{})
+	cmdSet.Set("config", "describe").MustRunner(configDescribe, &struct{}{})
 
 	expr := &exprCmd{}
 	cmdSet.Set("expression-syntax").MustRunner(expr.explain, &struct{}{})

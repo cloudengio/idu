@@ -353,15 +353,16 @@ func TestAnalyzeByName(t *testing.T) {
 		t.Fatal(err)
 	}
 	globalConfig = cfg
+	withFS(t, "testtree")
 
 	fs := localfs.New()
 	alz := &analyzeCmd{}
 	af := analyzeFlags{}
-	if err := alz.analyzeFS(ctx, fs, &af, []string{"testtree"}); err != nil {
+	if err := alz.analyzeFS(ctx, fs, &af, nil); err != nil {
 		t.Fatal(err)
 	}
 
-	_, resolvedCfg, target, db, err := openPrefixReadOnly(ctx, cfg, "testtree")
+	_, resolvedCfg, target, db, err := openPrefixReadOnly(ctx, cfg, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -71,7 +71,7 @@ filesystem_config_files:
 
 filesystems:
   - name: tmp
-    prefix: /tmp
+    root: /tmp
     database: ${db_root}/tmp
 ```
 
@@ -80,9 +80,27 @@ filesystem entries or a mapping with `filesystems:`):
 
 ```yaml
 - name: home
-  prefix: /my/home/tree
+  root: /my/home/tree
   database: ${db_root}/home
 ```
+
+Each filesystem entry specifies either a `root:` for a hierarchical
+filesystem (`prefix:` is accepted as a deprecated alias for `root:`), or a
+range of keys in a key oriented store, such as an object store, using
+`start_prefix:` and, optionally, `stop_prefix:`. The range includes
+`start_prefix` and excludes `stop_prefix`, which is the first key, in
+lexicographic order, outside of the range. If `stop_prefix` is omitted the
+range contains exactly those keys that start with `start_prefix`:
+
+```yaml
+- name: alpha-objects
+  start_prefix: projects/alpha/
+  database: ${db_root}/alpha-objects
+```
+
+For a root, a `<prefix>` argument is a path relative to, or within, the root;
+for a key range it is a key prefix whose keys must all lie within the range.
+Note that `analyze` does not yet support key ranges.
 
 Common concurrency and batching options per filesystem entry:
 
@@ -131,17 +149,22 @@ Given a valid configuration file:
 ```yaml
 filesystems:
   - name: shared-project
-    prefix: /projects/yourshared-project/
+    root: /projects/yourshared-project/
     database: /projects/yourshared-project/.idu/database
 ```
 
-Any command taking `<prefix>` accepts either the filesystem prefix path or its
-configured `name`:
+The filesystem to operate on is selected by its configured `name` using the
+global `--fs` flag; `--fs` may be omitted when only one filesystem is
+configured. Any command taking a `<prefix>` interprets it relative to the
+filesystem's configured root (an absolute path may also be used) and it must
+be contained within that root. Commands that take an optional `[<prefix>]`
+default to the filesystem's root:
 
 ```sh
-$ idu analyze shared-project
-$ idu errors shared-project
-$ idu stats compute --stats-dir=./stats /projects/yourshared-project/
+$ idu --fs=shared-project analyze
+$ idu --fs=shared-project analyze some/subdir
+$ idu --fs=shared-project errors
+$ idu --fs=shared-project stats compute --stats-dir=./stats .
 $ idu stats view ./stats/latest.idustats
 $ idu reports generate ./stats/latest.idustats
 ```
@@ -151,7 +174,7 @@ You can also inspect the current configuration and database location:
 ```sh
 $ idu config show
 $ idu config describe
-$ idu database locate shared-project
+$ idu --fs=shared-project database locate
 ```
 
 As `idu` runs it will print statistics that follow its progress. `idu` may be

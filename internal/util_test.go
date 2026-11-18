@@ -5,15 +5,11 @@
 package internal_test
 
 import (
-	"context"
 	"flag"
 	"io/fs"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmdutil/flags"
@@ -50,97 +46,6 @@ func TestTimeRange(t *testing.T) {
 		t.Errorf("got %v, want 24h", got)
 	}
 
-}
-
-const simple = `filesystems:
-  - name: mytmp
-    prefix: /tmp
-  - name: root
-    prefix: /
-`
-
-func TestPrefixLookup(t *testing.T) {
-	ctx := context.Background()
-	cfg, err := iduconfig.ParseConfig([]byte(simple))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, prefix, target, err := internal.LookupPrefix(ctx, cfg, "/tmp")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := prefix.Prefix, "/tmp"; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-	if got, want := target, "/tmp"; got != want {
-		t.Errorf("got target %v, want %v", got, want)
-	}
-
-	_, prefix, target, err = internal.LookupPrefix(ctx, cfg, "/tmp/xx")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := prefix.Prefix, "/tmp"; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-	if got, want := target, "/tmp/xx"; got != want {
-		t.Errorf("got target %v, want %v", got, want)
-	}
-
-	_, prefix, target, err = internal.LookupPrefix(ctx, cfg, "mytmp")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := prefix.Prefix, "/tmp"; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-	if got, want := target, "/tmp"; got != want {
-		t.Errorf("got target %v, want %v", got, want)
-	}
-
-	_, prefix, target, err = internal.LookupPrefix(ctx, cfg, "root")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := prefix.Prefix, "/"; got != want {
-		t.Errorf("got %v, want %v", got, want)
-	}
-	if got, want := target, "/"; got != want {
-		t.Errorf("got target %v, want %v", got, want)
-	}
-}
-
-func TestPrefixLookupRelative(t *testing.T) {
-	ctx := context.Background()
-	pwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, tc := range []string{".", "", "./"} {
-		here := "filesystems:\n  - prefix: " + pwd + "\n"
-		cfg, err := iduconfig.ParseConfig([]byte(here))
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, prefix, _, err := internal.LookupPrefix(ctx, cfg, tc)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got, want := prefix.Prefix, pwd; got != want {
-			t.Errorf("got %v, want %v", got, want)
-		}
-
-		_, prefix, _, err = internal.LookupPrefix(ctx, cfg, "config")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got, want := prefix.Prefix, pwd; got != want {
-			t.Errorf("got %v, want %v", got, want)
-		}
-
-	}
 }
 
 func TestTimeRangeEdgesAndErrors(t *testing.T) {
@@ -185,51 +90,10 @@ func TestTimeRangeEdgesAndErrors(t *testing.T) {
 		}
 	})
 
-	t.Run("LookupPrefix missing config returns error", func(t *testing.T) {
-		t.Parallel()
-		cfg, err := iduconfig.ParseConfig([]byte("filesystems:\n  - name: mytmp\n    prefix: /tmp\n"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, _, _, err := internal.LookupPrefix(context.Background(), cfg, "/nonexistent/path"); err == nil {
-			t.Fatal("expected error for unmatched prefix")
-		}
-	})
 }
 
-func TestLookupPrefixCleanAndNegativeSince(t *testing.T) {
+func TestNegativeSince(t *testing.T) {
 	t.Parallel()
-
-	t.Run("LookupPrefix cleans trailing slash", func(t *testing.T) {
-		t.Parallel()
-		root := filepath.Join(t.TempDir(), "tree")
-		cfg, err := iduconfig.ParseConfig([]byte(
-			"filesystems:\n" +
-				"  - name: mytree\n    prefix: " + root + string(filepath.Separator) + "\n" +
-				"  - name: posix\n    prefix: /fs/a\n",
-		))
-		if err != nil {
-			t.Fatal(err)
-		}
-		sub := filepath.Join(root, "sub")
-		for _, tc := range []struct {
-			in, want string
-		}{
-			{sub + string(filepath.Separator), sub},
-			{"mytree", root},
-			{"/fs/a", "/fs/a"},
-			{"/fs/a/", "/fs/a"},
-			{"posix", "/fs/a"},
-		} {
-			_, _, target, err := internal.LookupPrefix(context.Background(), cfg, tc.in)
-			if err != nil {
-				t.Fatalf("LookupPrefix(%q): %v", tc.in, err)
-			}
-			if target != tc.want {
-				t.Errorf("LookupPrefix(%q) target = %q, want %q", tc.in, target, tc.want)
-			}
-		}
-	})
 
 	t.Run("negative since returns error", func(t *testing.T) {
 		t.Parallel()

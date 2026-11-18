@@ -57,7 +57,7 @@ filesystems:
 	}
 
 	// Logging as configured in the config file.
-	if _, err := runIDU("--config="+cfgFile, "analyze", "--progress=false", "tree"); err != nil {
+	if _, err := runIDU("--config="+cfgFile, "analyze", "--progress=false"); err != nil {
 		t.Fatal(err)
 	}
 	var prefixDone, badger bool
@@ -78,7 +78,7 @@ filesystems:
 	if err := os.Remove(cfgLog); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runIDU("--config="+cfgFile, "--log-level=0", "--log-file="+flagLog, "analyze", "--progress=false", "tree"); err != nil {
+	if _, err := runIDU("--config="+cfgFile, "--log-level=0", "--log-file="+flagLog, "analyze", "--progress=false"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(cfgLog); !os.IsNotExist(err) {
@@ -131,7 +131,7 @@ filesystems:
 	}
 
 	// The filesystem's own logging configuration is used for one.
-	if _, err := runIDU("--config="+cfgFile, "analyze", "--progress=false", "one"); err != nil {
+	if _, err := runIDU("--config="+cfgFile, "--fs=one", "analyze", "--progress=false"); err != nil {
 		t.Fatal(err)
 	}
 	if !hasMsg(readLogRecords(t, oneLog), "prefix done") {
@@ -142,7 +142,7 @@ filesystems:
 	}
 
 	// The top-level configuration is used for two.
-	if _, err := runIDU("--config="+cfgFile, "analyze", "--progress=false", "two"); err != nil {
+	if _, err := runIDU("--config="+cfgFile, "--fs=two", "analyze", "--progress=false"); err != nil {
 		t.Fatal(err)
 	}
 	if !hasMsg(readLogRecords(t, globalLog), "prefix done") {
@@ -154,7 +154,7 @@ filesystems:
 	if err := os.Remove(oneLog); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runIDU("--config="+cfgFile, "--log-file="+flagLog, "analyze", "--progress=false", "one"); err != nil {
+	if _, err := runIDU("--config="+cfgFile, "--fs=one", "--log-file="+flagLog, "analyze", "--progress=false"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(oneLog); !os.IsNotExist(err) {

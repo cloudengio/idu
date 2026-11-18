@@ -19,7 +19,6 @@ import (
 	"cloudeng.io/algo/container/heap"
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
-	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/hardlinks"
 	"cloudeng.io/cmd/idu/internal/reports"
 	"cloudeng.io/cmd/idu/internal/usernames"
@@ -121,7 +120,7 @@ type computeFlags struct {
 
 type viewFlags struct {
 	StatsFlags
-	StatsDir string `subcmd:"stats-dir,,'directory that stats files are read from, defaults to stats_dir from the configuration or stats'"`
+	StatsDir string `subcmd:"stats-dir,,'directory that stats files are read from, defaults to stats_dir from the configuration of the filesystem specified by --fs; --fs is not required if this flag is set'"`
 	User     string `subcmd:"user,,display stats for the specified user"`
 	Group    string `subcmd:"group,,display stats for the specified group"`
 	Info     bool   `subcmd:"info,false,display metadata for the stats file"`
@@ -173,14 +172,14 @@ func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *comput
 // unless they cannot be used, in which case all of the file metadata is
 // rescanned: summaries are computed without any filter expression and only
 // record what's needed to deduplicate hardlinks if configured to do so.
-func (st *statsCmds) computeStats(ctx context.Context, db idudb.Reader, cfg iduconfig.Prefix, match stats.Matcher, prefix string, topN int, progress bool) (*reports.AllStats, error) {
+func (st *statsCmds) computeStats(ctx context.Context, db idudb.Reader, cfg *iduconfig.Settings, match stats.Matcher, prefix string, topN int, progress bool) (*reports.AllStats, error) {
 	if match.HasExpression() || !cfg.CountHardlinkAsFiles && !cfg.RecordHardlinks() {
-		return st.computeFromPrefixes(ctx, db, &cfg, match, prefix, topN, progress)
+		return st.computeFromPrefixes(ctx, db, cfg, match, prefix, topN, progress)
 	}
-	return st.computeFromSummaries(ctx, db, &cfg, prefix, topN, progress)
+	return st.computeFromSummaries(ctx, db, cfg, prefix, topN, progress)
 }
 
-func (st *statsCmds) computeFromSummaries(ctx context.Context, db idudb.Reader, cfg *iduconfig.Prefix, prefix string, topN int, progress bool) (*reports.AllStats, error) {
+func (st *statsCmds) computeFromSummaries(ctx context.Context, db idudb.Reader, cfg *iduconfig.Settings, prefix string, topN int, progress bool) (*reports.AllStats, error) {
 	calcID, sep := cfg.CalculatorOrDefault().String(), cfg.SeparatorOrDefault()
 	dedup := !cfg.CountHardlinkAsFiles
 	if err := idudb.CheckSummaries(ctx, db, calcID, dedup); err != nil {
@@ -241,7 +240,7 @@ func (st *statsCmds) computeFromSummaries(ctx context.Context, db idudb.Reader, 
 // the depth of the tree and hardlinks are attributed to the same prefixes as
 // when using the summaries. The metadata is read and decoded concurrently,
 // but the stats, including hardlink deduplication, are computed in order.
-func (st *statsCmds) computeFromPrefixes(ctx context.Context, db idudb.Reader, cfg *iduconfig.Prefix, match stats.Matcher, prefix string, topN int, progress bool) (*reports.AllStats, error) {
+func (st *statsCmds) computeFromPrefixes(ctx context.Context, db idudb.Reader, cfg *iduconfig.Settings, match stats.Matcher, prefix string, topN int, progress bool) (*reports.AllStats, error) {
 	if err := idudb.CheckSummaryKeys(ctx, db); err != nil {
 		return nil, err
 	}
@@ -313,34 +312,37 @@ func resolveDirectStatsFile(statsDirFlag, arg string) (string, bool) {
 	return "", false
 }
 
+// resolveStatsFilename returns the stats file to be viewed. With no
+// arguments it is the latest.idustats file in the stats directory. With a
+// single argument it is that file if it exists (or is -), otherwise it is
+// the named file in the stats directory. The stats directory is the one
+// specified by --stats-dir, if set, in which case --fs is not required,
+// otherwise it is the stats directory for the filesystem specified by --fs.
 func resolveStatsFilename(ctx context.Context, cfg iduconfig.T, statsDirFlag string, args []string) (string, error) {
-	if len(args) == 0 {
-		return "", fmt.Errorf("missing prefix or stats filename")
+	if len(args) > 1 {
+		return "", fmt.Errorf("too many arguments: expected [<filename>]")
 	}
-	if len(args) > 2 {
-		return "", fmt.Errorf("too many arguments: expected <prefix> [<filename>] or <filename>")
-	}
+	name := "latest.idustats"
 	if len(args) == 1 {
 		if f, ok := resolveDirectStatsFile(statsDirFlag, args[0]); ok {
 			return f, nil
 		}
+		name = args[0]
+		if filepath.IsAbs(name) {
+			return name, nil
+		}
 	}
-	_, pcfg, _, err := internal.LookupPrefix(ctx, cfg, args[0])
+	if len(statsDirFlag) > 0 {
+		return filepath.Join(statsDirFlag, name), nil
+	}
+	pcfg, _, err := lookupFS(cfg, "")
 	if err != nil {
 		if loadErr, ok := cmdutil.ContextValue[configLoadError](ctx); ok && loadErr.err != nil {
 			return "", loadErr.err
 		}
 		return "", err
 	}
-	dir := selectStatsDir(statsDirFlag, pcfg.StatsDir)
-	if len(args) == 1 {
-		return filepath.Join(dir, "latest.idustats"), nil
-	}
-	name := args[1]
-	if name == "-" || filepath.IsAbs(name) {
-		return name, nil
-	}
-	return filepath.Join(dir, name), nil
+	return filepath.Join(selectStatsDir(statsDirFlag, pcfg.Config().StatsDir), name), nil
 }
 
 func (st *statsCmds) view(ctx context.Context, values interface{}, args []string) error {

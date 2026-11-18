@@ -64,7 +64,7 @@ func TestScanDBCompactionInterval(t *testing.T) {
 		}
 	}
 
-	runScan := func(cfg iduconfig.Prefix) int {
+	runScan := func(cfg iduconfig.Settings) int {
 		latestSpy = nil
 		sdb, err := newTestDB(ctx, cfg)
 		if err != nil {
@@ -80,21 +80,20 @@ func TestScanDBCompactionInterval(t *testing.T) {
 	// 1. Zero interval: never compacts even with an old write log.
 	dbZero := filepath.Join(t.TempDir(), "db-zero")
 	seedLog(dbZero, time.Now().Add(-10*24*time.Hour))
-	if got := runScan(iduconfig.Prefix{Prefix: "/a", Database: dbZero}); got != 0 {
+	if got := runScan(iduconfig.Settings{Database: dbZero}); got != 0 {
 		t.Fatalf("zero interval: compacted=%d, want 0", got)
 	}
 
 	// 2. Non-zero interval on a new DB with no prior writes: does not compact.
 	dbFresh := filepath.Join(t.TempDir(), "db-fresh")
-	if got := runScan(iduconfig.Prefix{Prefix: "/b", Database: dbFresh, CompactInterval: time.Millisecond}); got != 0 {
+	if got := runScan(iduconfig.Settings{Database: dbFresh, CompactInterval: time.Millisecond}); got != 0 {
 		t.Fatalf("fresh db: compacted=%d, want 0", got)
 	}
 
 	// 3. Recent write within combined interval (1d + 2h = 26h, last write 25h ago): does not compact.
 	dbRecent := filepath.Join(t.TempDir(), "db-recent")
 	seedLog(dbRecent, time.Now().Add(-25*time.Hour))
-	if got := runScan(iduconfig.Prefix{
-		Prefix:              "/c",
+	if got := runScan(iduconfig.Settings{
 		Database:            dbRecent,
 		CompactIntervalDays: 1,
 		CompactInterval:     2 * time.Hour,
@@ -105,8 +104,7 @@ func TestScanDBCompactionInterval(t *testing.T) {
 	// 4. Stale write beyond combined interval (1d + 2h = 26h, last write 27h ago): compacts.
 	dbStale := filepath.Join(t.TempDir(), "db-stale")
 	seedLog(dbStale, time.Now().Add(-27*time.Hour))
-	if got := runScan(iduconfig.Prefix{
-		Prefix:              "/d",
+	if got := runScan(iduconfig.Settings{
 		Database:            dbStale,
 		CompactIntervalDays: 1,
 		CompactInterval:     2 * time.Hour,
@@ -124,7 +122,7 @@ func makeTestPrefixInfo(size int64) prefixinfo.T {
 	return pi
 }
 
-func readSummaryKeys(ctx context.Context, t *testing.T, cfg iduconfig.Prefix) ([]string, Database) {
+func readSummaryKeys(ctx context.Context, t *testing.T, cfg iduconfig.Settings) ([]string, Database) {
 	t.Helper()
 	rodb, err := openDatabase(ctx, cfg.Database, true)
 	if err != nil {
@@ -144,7 +142,7 @@ func readSummaryKeys(ctx context.Context, t *testing.T, cfg iduconfig.Prefix) ([
 func TestScanDBSummariesAndMeta(t *testing.T) {
 	ctx := context.Background()
 	dbDir := filepath.Join(t.TempDir(), "db-fresh")
-	cfg := iduconfig.Prefix{Prefix: "/a", Database: dbDir, Separator: "/"}
+	cfg := iduconfig.Settings{Database: dbDir, Separator: "/"}
 
 	sdb, err := newTestDB(ctx, cfg)
 	if err != nil {
@@ -196,7 +194,7 @@ func TestScanDBSummariesAndMeta(t *testing.T) {
 func TestScanDBCalculatorChange(t *testing.T) {
 	ctx := context.Background()
 	dbDir := filepath.Join(t.TempDir(), "db-calc")
-	cfg := iduconfig.Prefix{Prefix: "/a", Database: dbDir, Separator: "/"}
+	cfg := iduconfig.Settings{Database: dbDir, Separator: "/"}
 	calcID := diskusage.NewIdentity().String()
 
 	sdb, err := newTestDB(ctx, cfg)
@@ -249,7 +247,7 @@ func TestScanDBCalculatorChange(t *testing.T) {
 
 func TestScanDBSummaryFormatChange(t *testing.T) {
 	ctx := context.Background()
-	cfg := iduconfig.Prefix{Prefix: "/a", Database: filepath.Join(t.TempDir(), "db-format"), Separator: "/"}
+	cfg := iduconfig.Settings{Database: filepath.Join(t.TempDir(), "db-format"), Separator: "/"}
 	calcID := diskusage.NewIdentity().String()
 
 	sdb, err := newTestDB(ctx, cfg)
@@ -294,7 +292,7 @@ func TestScanDBSummaryFormatChange(t *testing.T) {
 	}
 }
 
-func stampStaleSummary(ctx context.Context, t *testing.T, cfg iduconfig.Prefix, key, staleCalcID string) {
+func stampStaleSummary(ctx context.Context, t *testing.T, cfg iduconfig.Settings, key, staleCalcID string) {
 	t.Helper()
 	rawDB, err := openDatabase(ctx, cfg.Database, false)
 	if err != nil {
@@ -311,7 +309,7 @@ func stampStaleSummary(ctx context.Context, t *testing.T, cfg iduconfig.Prefix, 
 	}
 }
 
-func readSummaryCalcIDs(ctx context.Context, t *testing.T, cfg iduconfig.Prefix, calcID string) (bool, []string) {
+func readSummaryCalcIDs(ctx context.Context, t *testing.T, cfg iduconfig.Settings, calcID string) (bool, []string) {
 	t.Helper()
 	rodb, err := openDatabase(ctx, cfg.Database, true)
 	if err != nil {
@@ -334,7 +332,7 @@ func readSummaryCalcIDs(ctx context.Context, t *testing.T, cfg iduconfig.Prefix,
 
 func TestLegacyDatabaseRejected(t *testing.T) {
 	ctx := context.Background()
-	cfg := iduconfig.Prefix{Prefix: "/legacy", Database: filepath.Join(t.TempDir(), "db-legacy")}
+	cfg := iduconfig.Settings{Database: filepath.Join(t.TempDir(), "db-legacy")}
 	rawDB, err := openDatabase(ctx, cfg.Database, false)
 	if err != nil {
 		t.Fatal(err)
@@ -357,7 +355,7 @@ func TestLegacyDatabaseRejected(t *testing.T) {
 
 func TestScanDBDeletePrefixSiblings(t *testing.T) {
 	ctx := context.Background()
-	cfg := iduconfig.Prefix{Prefix: "/", Database: filepath.Join(t.TempDir(), "db"), Separator: "/"}
+	cfg := iduconfig.Settings{Database: filepath.Join(t.TempDir(), "db"), Separator: "/"}
 	sdb, err := newTestDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -404,7 +402,7 @@ func TestScanDBDeletePrefixSiblings(t *testing.T) {
 }
 
 // readAllKeys returns the keys in the summary, prefix and error buckets.
-func readAllKeys(ctx context.Context, t *testing.T, cfg iduconfig.Prefix) (summaries, prefixes, errs []string) {
+func readAllKeys(ctx context.Context, t *testing.T, cfg iduconfig.Settings) (summaries, prefixes, errs []string) {
 	t.Helper()
 	summaries, rodb := readSummaryKeys(ctx, t, cfg)
 	defer rodb.Close(ctx)
@@ -570,7 +568,7 @@ func TestScanDBSummaryInvalidation(t *testing.T) {
 	ctx := context.Background()
 	fdbPtr := newFaultScanDBFactory(t)
 
-	cfg := iduconfig.Prefix{Prefix: "/a", Database: filepath.Join(t.TempDir(), "db-inv"), Separator: "/"}
+	cfg := iduconfig.Settings{Database: filepath.Join(t.TempDir(), "db-inv"), Separator: "/"}
 	sdb, err := newTestDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -598,7 +596,7 @@ func TestScanDBGetSetPrefixInfoErrors(t *testing.T) {
 	ctx := context.Background()
 	fdbPtr := newFaultScanDBFactory(t)
 
-	cfg := iduconfig.Prefix{Prefix: "/a", Database: filepath.Join(t.TempDir(), "db-gs"), Separator: "/"}
+	cfg := iduconfig.Settings{Database: filepath.Join(t.TempDir(), "db-gs"), Separator: "/"}
 	sdb, err := newTestDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -645,7 +643,7 @@ func TestScanDBDeletePrefixAndErrorsPropagation(t *testing.T) {
 	ctx := context.Background()
 	fdbPtr := newFaultScanDBFactory(t)
 
-	cfg := iduconfig.Prefix{Prefix: "/", Database: filepath.Join(t.TempDir(), "db"), Separator: "/"}
+	cfg := iduconfig.Settings{Database: filepath.Join(t.TempDir(), "db"), Separator: "/"}
 	sdb, err := newTestDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -694,7 +692,7 @@ func TestScanDBMarkCompleteAndLogCloseErrors(t *testing.T) {
 	fdbPtr := newFaultScanDBFactory(t)
 
 	dbDir := filepath.Join(t.TempDir(), "db-close")
-	cfg := iduconfig.Prefix{Prefix: "/a", Database: dbDir, Separator: "/"}
+	cfg := iduconfig.Settings{Database: dbDir, Separator: "/"}
 	sdb, err := newTestDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -778,7 +776,7 @@ func TestScanDBCompactError(t *testing.T) {
 	_ = raw.Close(ctx)
 
 	fdbPtr := newFaultScanDBFactory(t)
-	cfg := iduconfig.Prefix{Prefix: "/a", Database: dbDir, CompactInterval: time.Hour}
+	cfg := iduconfig.Settings{Database: dbDir, CompactInterval: time.Hour}
 	sdb, err := newTestDB(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -795,7 +793,7 @@ func TestScanDBCompactError(t *testing.T) {
 	}
 }
 
-func writeScanDBPrefixes(ctx context.Context, t *testing.T, cfg iduconfig.Prefix, unchanged bool, complete bool, keys ...string) {
+func writeScanDBPrefixes(ctx context.Context, t *testing.T, cfg iduconfig.Settings, unchanged bool, complete bool, keys ...string) {
 	t.Helper()
 	sdb, err := newTestDB(ctx, cfg)
 	if err != nil {
@@ -821,12 +819,12 @@ func TestScanDBPartialRewriteInvalidatesOldSpec(t *testing.T) {
 	calcID := diskusage.NewIdentity().String()
 
 	// 1. Build a complete DB recording hardlinks.
-	cfgOld := iduconfig.Prefix{Prefix: "/a", Database: dbDir, Separator: "/", CountHardlinkAsFiles: false}
+	cfgOld := iduconfig.Settings{Database: dbDir, Separator: "/", CountHardlinkAsFiles: false}
 	writeScanDBPrefixes(ctx, t, cfgOld, false, true, "/a", "/a/sub")
 
 	// 2. Switch to CountHardlinkAsFiles: true and rewrite only /a/sub
 	// (simulating a sub-prefix analyze or an interrupted full analyze).
-	cfgNew := iduconfig.Prefix{Prefix: "/a", Database: dbDir, Separator: "/", CountHardlinkAsFiles: true}
+	cfgNew := iduconfig.Settings{Database: dbDir, Separator: "/", CountHardlinkAsFiles: true}
 	writeScanDBPrefixes(ctx, t, cfgNew, false, false, "/a/sub")
 
 	// 3. The old spec (needLinks=true) and new spec must both be rejected
@@ -864,8 +862,8 @@ func TestScanDBPartialRewriteInvalidatesOldSpec(t *testing.T) {
 
 // newTestDB opens the database specified by cfg using the options
 // derived from cfg.
-func newTestDB(ctx context.Context, cfg iduconfig.Prefix) (*DB, error) {
-	return openTestDB(ctx, cfg.Database, OptionsFromConfig(cfg)...)
+func newTestDB(ctx context.Context, cfg iduconfig.Settings) (*DB, error) {
+	return openTestDB(ctx, cfg.Database, OptionsFromConfig(&cfg)...)
 }
 
 // databaseFactory creates the database backend used by tests and may be
