@@ -97,6 +97,43 @@ func (h *Heaps[T]) addTotals(t stats.Totals) {
 	h.TotalSparseBytes += t.SparseBytes
 }
 
+// PushValue pushes item, whose value for m is v, into the top N heap for
+// m. It is used to construct h from existing rankings, eg. those
+// maintained by analyze, rather than from the totals of every item, and
+// hence does not update the totals for h, see SetTotals.
+func (h *Heaps[T]) PushValue(m stats.Metric, item T, v int64) {
+	var hp *heap.MinMax[int64, T]
+	switch m {
+	case stats.MetricBytes:
+		hp = h.Bytes
+	case stats.MetricStorageBytes:
+		hp = h.StorageBytes
+	case stats.MetricFiles:
+		hp = h.Files
+	case stats.MetricPrefixes:
+		hp = h.Prefixes
+	case stats.MetricPrefixBytes:
+		hp = h.PrefixBytes
+	case stats.MetricSparseBytes:
+		if v <= 0 {
+			return
+		}
+		hp = h.SparseBytes
+	}
+	if hp != nil {
+		hp.PushMaxN(v, item, h.MaxN)
+	}
+}
+
+// SetTotals sets the totals for h to t, other than its hardlink counts,
+// as if the totals of every item had been pushed, see PushValue.
+func (h *Heaps[T]) SetTotals(t stats.Totals) {
+	h.TotalBytes, h.TotalStorageBytes, h.TotalPrefixBytes = 0, 0, 0
+	h.TotalFiles, h.TotalPrefixes = 0, 0
+	h.TotalSparseFiles, h.TotalSparseBytes = 0, 0
+	h.addTotals(t)
+}
+
 // Push pushes item into the top N heaps and adds t, other than its
 // hardlink counts, to the totals for h.
 func (h *Heaps[T]) Push(item T, t stats.Totals) {
@@ -205,11 +242,16 @@ func newPerIDStats(prefix string, n int) PerIDStats {
 	}
 }
 
-func (s *PerIDStats) Push(id int64, prefix string, t stats.Totals) {
+// ForID returns the heaps for id, creating them if necessary.
+func (s *PerIDStats) ForID(id int64) *Heaps[string] {
 	if _, ok := s.ByPrefix[id]; !ok {
 		s.ByPrefix[id] = newHeaps[string](s.Prefix, s.MaxN)
 	}
-	s.ByPrefix[id].Push(prefix, t)
+	return s.ByPrefix[id]
+}
+
+func (s *PerIDStats) Push(id int64, prefix string, t stats.Totals) {
+	s.ForID(id).Push(prefix, t)
 }
 
 func NewAllStats(prefix string, n int) *AllStats {

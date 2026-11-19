@@ -263,3 +263,41 @@ func TestSubtreesUnavailable(t *testing.T) {
 		t.Errorf("got %v, want %v", err, summary.ErrNoTopN)
 	}
 }
+
+func TestSubtrees(t *testing.T) {
+	ctx := context.Background()
+	root, cfg := createTree(t, false)
+	analyze(ctx, t, root, cfg)
+	sr := openReader(ctx, t, cfg)
+	a := filepath.Join(root, "a")
+	missing := filepath.Join(root, "missing")
+
+	totals, found, err := sr.Subtrees(ctx, []string{root + string(filepath.Separator), missing, a})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(found, []bool{true, false, true}) {
+		t.Fatalf("found = %v, want [true false true]", found)
+	}
+	if totals[0].Files != 4 || totals[1] != (stats.Totals{}) || totals[2].Files != 2 {
+		t.Errorf("totals = %+v", totals)
+	}
+
+	emptyTotals, emptyFound, err := sr.Subtrees(ctx, nil)
+	if err != nil || len(emptyTotals) != 0 || len(emptyFound) != 0 {
+		t.Errorf("empty Subtrees = %v %v %v", emptyTotals, emptyFound, err)
+	}
+
+	if _, _, err := summary.New(nil, cfg).Subtrees(ctx, []string{root}); err == nil {
+		t.Errorf("expected error for nil reader")
+	}
+
+	// Disabled derived state must return ErrStaleSubtrees.
+	root2, cfg2 := createTree(t, false)
+	cfg2.TopN = -1
+	analyze(ctx, t, root2, cfg2)
+	sr2 := openReader(ctx, t, cfg2)
+	if _, _, err := sr2.Subtrees(ctx, []string{root2}); !errors.Is(err, idudb.ErrStaleSubtrees) {
+		t.Errorf("got %v, want %v", err, idudb.ErrStaleSubtrees)
+	}
+}

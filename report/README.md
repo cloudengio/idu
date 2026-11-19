@@ -191,6 +191,22 @@ Push pushes item into the top N heaps and adds t, other than its hardlink
 counts, to the totals for h.
 
 
+```go
+func (h *Heaps[T]) PushValue(m stats.Metric, item T, v int64)
+```
+PushValue pushes item, whose value for m is v, into the top N heap for m.
+It is used to construct h from existing rankings, eg. those maintained
+by analyze, rather than from the totals of every item, and hence does not
+update the totals for h, see SetTotals.
+
+
+```go
+func (h *Heaps[T]) SetTotals(t stats.Totals)
+```
+SetTotals sets the totals for h to t, other than its hardlink counts,
+as if the totals of every item had been pushed, see PushValue.
+
+
 
 
 ### Type MergedStats
@@ -220,6 +236,12 @@ type PerIDStats struct {
 PerIDStats is a collection of statistics on a per user/group basis.
 
 ### Methods
+
+```go
+func (s *PerIDStats) ForID(id int64) *Heaps[string]
+```
+ForID returns the heaps for id, creating them if necessary.
+
 
 ```go
 func (s *PerIDStats) Push(id int64, prefix string, t stats.Totals)
