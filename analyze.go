@@ -33,10 +33,11 @@ func showDefaults() {
 }
 
 type analyzeFlags struct {
-	Progress  bool          `subcmd:"progress,true,show progress"`
-	Force     bool          `subcmd:"force,false,reanalyze even if the database is up to date"`
-	SlowScans time.Duration `subcmd:"slow-scan-duration,10s,duration at which scans are reported as slow"`
-	Defaults  bool          `subcmd:"show-defaults,false,display default scanning options and exit"`
+	Progress    bool          `subcmd:"progress,true,show progress"`
+	Force       bool          `subcmd:"force,false,reanalyze even if the database is up to date"`
+	SlowScans   time.Duration `subcmd:"slow-scan-duration,10s,duration at which scans are reported as slow"`
+	Defaults    bool          `subcmd:"show-defaults,false,display default scanning options and exit"`
+	RefreshTopN bool          `subcmd:"refresh-topn,false,recompute the top-N rankings from scratch once the analysis is complete; they are otherwise maintained incrementally and refreshed automatically when needed"`
 }
 
 type analyzeCmd struct {
@@ -129,6 +130,9 @@ func (alz *analyzeCmd) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *anal
 
 	errs := errors.M{}
 	errs.Append(analyzer.Analyze(ctx, target))
+	if af.RefreshTopN && errs.Err() == nil {
+		errs.Append(db.RefreshTopN(ctx))
+	}
 	pcancel() // cancel progress tracker.
 	wg.Wait()
 

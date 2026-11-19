@@ -22,6 +22,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
@@ -48,6 +49,12 @@ type DB struct {
 	// observer, if set, is notified of every change to the summaries. It
 	// is set by Analyze for the duration of an analysis.
 	observer Observer
+	topn     topnConfig
+	// previousSummaryFailed is set if the summary replaced by a new one
+	// could not be read during the current analysis, in which case any
+	// state derived from it, such as the top-N rankings, may contain
+	// stale entries.
+	previousSummaryFailed atomic.Bool
 }
 
 // New returns a DB that uses the supplied, writable, database backend. The
@@ -83,6 +90,7 @@ func New(ctx context.Context, db Database, opts ...Option) (*DB, error) {
 		spec:             spec,
 		hardlinkInfo:     o.hardlinks,
 		rewriteSummaries: rewrite,
+		topn:             o.topn,
 	}, nil
 }
 

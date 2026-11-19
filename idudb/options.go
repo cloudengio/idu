@@ -21,6 +21,7 @@ type options struct {
 	sep             string
 	hardlinks       bool
 	compactInterval time.Duration
+	topn            topnConfig
 }
 
 func newOptions(opts []Option) options {
@@ -71,6 +72,24 @@ func WithCompactionInterval(d time.Duration) Option {
 	}
 }
 
+// WithTopN requests that the top n prefixes, by each stats.Metric, be
+// maintained incrementally by every analysis, both overall and for each
+// user and group, using heaps that hold capacity and perIDCapacity entries
+// respectively. The capacities should exceed n and perIDN so that entries
+// that shrink or are deleted can be replaced without recomputing the
+// heaps, see iduconfig.Settings.TopNCapacity. A value of zero for n
+// disables the maintenance of the rankings.
+func WithTopN(n, capacity, perIDN, perIDCapacity int) Option {
+	return func(o *options) {
+		o.topn = topnConfig{
+			n:             max(n, 0),
+			capacity:      max(capacity, n, 0),
+			perIDN:        max(perIDN, 0),
+			perIDCapacity: max(perIDCapacity, perIDN, 0),
+		}
+	}
+}
+
 // OptionsFromConfig returns the database options specified by cfg.
 func OptionsFromConfig(cfg *iduconfig.Settings) []Option {
 	return []Option{
@@ -78,6 +97,7 @@ func OptionsFromConfig(cfg *iduconfig.Settings) []Option {
 		WithSeparator(cfg.SeparatorOrDefault()),
 		WithRecordHardlinks(cfg.RecordHardlinks()),
 		WithCompactionInterval(cfg.CompactionInterval()),
+		WithTopN(cfg.TopNOrDefault(), cfg.TopNCapacity(), cfg.TopNPerIDOrDefault(), cfg.TopNPerIDCapacity()),
 	}
 }
 

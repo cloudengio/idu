@@ -98,12 +98,14 @@ func (sdb *DB) getSummary(ctx context.Context, exactKey string) (*stats.PrefixSu
 }
 
 // previousSummary returns the summary stored for exactKey, if any, for
-// reporting to the observer. Errors are logged rather than returned since
-// they should not prevent the new summary from being written.
+// reporting to the observer. Errors are logged and recorded in
+// previousSummaryFailed, rather than returned, since they should not
+// prevent the new summary from being written.
 func (sdb *DB) previousSummary(ctx context.Context, key, exactKey string) *stats.PrefixSummary {
 	ps, err := sdb.getSummary(ctx, exactKey)
 	if err != nil {
 		ctxlog.Warn(ctx, "failed to read previous summary", "path", key, "error", err)
+		sdb.previousSummaryFailed.Store(true)
 		return nil
 	}
 	return ps

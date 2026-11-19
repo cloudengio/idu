@@ -52,6 +52,14 @@ ErrStaleSummaries = errors.New("summaries are incomplete or were computed with a
 ErrStaleSummaries is returned when the precomputed summaries are incomplete
 or were computed using a different configuration.
 
+### ErrTopNDisabled
+```go
+ErrTopNDisabled = errors.New("top-N rankings are not enabled for this database")
+
+```
+ErrTopNDisabled is returned by RefreshTopN if the DB was not created with
+WithTopN.
+
 
 
 ## Functions
@@ -304,6 +312,15 @@ stop with the supplied detail, performs any required maintenance (such as
 compaction or garbage collection) and closes the database.
 
 
+```go
+func (sdb *DB) RefreshTopN(ctx context.Context) error
+```
+RefreshTopN recomputes all of the top-N rankings from the summaries
+stored in the database. It returns ErrStaleSummaries if the summaries are
+incomplete or were computed with a different configuration, ie. if the
+entire filesystem needs to be analyzed first.
+
+
 
 
 ### Type Database
@@ -445,6 +462,18 @@ func WithSeparator(sep string) Option
 ```
 WithSeparator sets the filename separator, it defaults to
 filepath.Separator.
+
+
+```go
+func WithTopN(n, capacity, perIDN, perIDCapacity int) Option
+```
+WithTopN requests that the top n prefixes, by each stats.Metric,
+be maintained incrementally by every analysis, both overall and for each
+user and group, using heaps that hold capacity and perIDCapacity entries
+respectively. The capacities should exceed n and perIDN so that entries
+that shrink or are deleted can be replaced without recomputing the heaps,
+see iduconfig.Settings.TopNCapacity. A value of zero for n disables the
+maintenance of the rankings.
 
 
 
