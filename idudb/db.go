@@ -42,6 +42,12 @@ type DB struct {
 	match           stats.Matcher
 	spec            string
 	hardlinkInfo    stats.HardlinkRecording
+	// recordAll, if set, returns true for the prefixes whose summaries
+	// record every file when hardlinkInfo is stats.RecordLinkedFiles.
+	recordAll func(prefix string) bool
+	// links, if set, records the link counts of the files recorded by
+	// the summaries written during an analysis, see missingLinks.
+	links *linkCounts
 	// rewriteSummaries is set when the stored summaries were computed with
 	// a different specification and must be recomputed for unchanged prefixes.
 	rewriteSummaries bool
@@ -68,6 +74,12 @@ func New(ctx context.Context, db Database, opts ...Option) (*DB, error) {
 		return nil, err
 	}
 	spec := summarySpec(o.calc.String(), o.hardlinks)
+	recordAll := o.recordAll
+	if o.hardlinks == stats.RecordLinkedFiles {
+		spec = withRecordAll(spec, o.recordAllID)
+	} else {
+		recordAll = nil
+	}
 	rewrite, err := initSummaryMeta(ctx, db, spec)
 	if err != nil {
 		return nil, err
@@ -89,6 +101,7 @@ func New(ctx context.Context, db Database, opts ...Option) (*DB, error) {
 		match:            stats.AlwaysMatch(),
 		spec:             spec,
 		hardlinkInfo:     o.hardlinks,
+		recordAll:        recordAll,
 		rewriteSummaries: rewrite,
 		topn:             o.topn,
 	}, nil
@@ -176,6 +189,9 @@ func (sdb *DB) deletePrefix(ctx context.Context, prefix string) error {
 	if err := sdb.db.Flush(ctx); err != nil {
 		return err
 	}
+	if sdb.links != nil {
+		sdb.links.deleted(prefix)
+	}
 	if sdb.observer != nil {
 		var scanErr error
 		sdb.observer.SubtreeDeleted(ctx, prefix, sdb.deletedSummaries(ctx, prefix, &scanErr))
@@ -251,7 +267,11 @@ func (sdb *DB) setPrefixInfo(ctx context.Context, key string, unchanged bool, pi
 }
 
 func (sdb *DB) setSummary(ctx context.Context, key string, pi *prefixinfo.T) error {
-	summary := stats.ComputeSummary(key, pi, sdb.calc, sdb.match, sdb.hardlinkInfo)
+	rec := sdb.hardlinkInfo
+	if sdb.recordAll != nil && sdb.recordAll(key) {
+		rec = stats.RecordAllFiles
+	}
+	summary := stats.ComputeSummary(key, pi, sdb.calc, sdb.match, rec)
 	exactKey, _ := stats.SummaryKeys(sdb.sep, key)
 	var old *stats.PrefixSummary
 	if sdb.observer != nil {
@@ -263,6 +283,9 @@ func (sdb *DB) setSummary(ctx context.Context, key string, pi *prefixinfo.T) err
 	err := sdb.db.SetSummary(ctx, exactKey, summary.AppendBinary(nil), true)
 	if err == nil && sdb.observer != nil {
 		sdb.observer.PrefixChanged(ctx, key, old, &summary)
+	}
+	if err == nil && sdb.links != nil {
+		sdb.links.record(key, pi)
 	}
 	if err != nil {
 		// Ensure that stats will not use the now incomplete summaries

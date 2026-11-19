@@ -1,4 +1,5 @@
 # Package [cloudeng.io/cmd/idu/idudb](https://pkg.go.dev/cloudeng.io/cmd/idu/idudb?tab=doc)
+[![CircleCI](https://circleci.com/gh/cloudengio/go.gotools.svg?style=svg)](https://circleci.com/gh/cloudengio/go.gotools) [![Go Report Card](https://goreportcard.com/badge/cloudeng.io/cmd/idu/idudb)](https://goreportcard.com/report/cloudeng.io/cmd/idu/idudb)
 
 ```go
 import cloudeng.io/cmd/idu/idudb
@@ -130,6 +131,14 @@ func HardlinkRecording(cfg *iduconfig.Settings) stats.HardlinkRecording
 HardlinkRecording returns the files that the summaries record, as specified
 by cfg, so that hardlinks can be deduplicated.
 
+### Func PatternsID
+```go
+func PatternsID(rl cmdyaml.RegexpList) string
+```
+PatternsID returns an identifier for the supplied regular expressions
+suitable for use with WithRecordAllFiles, or the empty string if there are
+none.
+
 
 
 ## Types
@@ -204,6 +213,15 @@ func WithProgress(p ScanProgress) AnalyzeOption
 ```
 WithProgress sets the ScanProgress implementation to be notified of the
 progress of the analysis.
+
+
+```go
+func WithRestat(restat func(path string) bool) AnalyzeOption
+```
+WithRestat sets a function that is called for every file in a prefix that
+is otherwise unchanged; those for which it returns true are re-stat'ed so
+that changes to files modified in place, which do not change their prefix,
+are detected. A nil function disables re-stat'ing.
 
 
 ```go
@@ -379,6 +397,48 @@ check the format of the database, see CheckFormat.
 
 
 
+### Type MissingLinks
+```go
+type MissingLinks struct {
+	Prefixes []MissingLinksPrefix `json:"prefixes"`
+}
+```
+MissingLinks describes all of the prefixes known to contain files with more
+links than are recorded in the link index, as found by the analyses that
+last wrote the summaries of those prefixes.
+
+### Functions
+
+```go
+func ReadMissingLinks(ctx context.Context, db Reader) (MissingLinks, error)
+```
+ReadMissingLinks returns the prefixes found to contain files with more links
+than are recorded in the link index. They are only found when the summaries
+record the files that may be hardlinks and the top-N rankings are enabled,
+since the link index is maintained along with them.
+
+
+
+
+### Type MissingLinksPrefix
+```go
+type MissingLinksPrefix struct {
+	Prefix string `json:"prefix"`
+	// Files is the number of such files.
+	Files int `json:"files"`
+	// Links is the total number of links to those files that are not
+	// recorded.
+	Links uint64 `json:"links"`
+	// Examples contains the names of some of those files.
+	Examples []string `json:"examples,omitempty"`
+	// Updated is the time of the analysis that found them.
+	Updated time.Time `json:"updated"`
+}
+```
+MissingLinksPrefix describes the files in a prefix that have more links than
+are recorded in the link index.
+
+
 ### Type Observer
 ```go
 type Observer interface {
@@ -489,6 +549,18 @@ func WithHardlinkRecording(r stats.HardlinkRecording) Option
 WithHardlinkRecording determines which files, if any, the precomputed
 summaries record so that hardlinks can be deduplicated without rescanning
 the database. It defaults to stats.RecordNoFiles.
+
+
+```go
+func WithRecordAllFiles(id string, recordAll func(prefix string) bool) Option
+```
+WithRecordAllFiles requests that, when the hardlink recording is
+stats.RecordLinkedFiles, the summaries of the prefixes for which
+recordAll returns true record every file, as for stats.RecordAllFiles.
+id identifies recordAll, eg. a hash of the patterns it matches, and is
+included in the specification of the summaries so that changing it causes
+all of the summaries to be rewritten by the next analysis. An empty id,
+or a nil recordAll, disables it.
 
 
 ```go
@@ -631,6 +703,10 @@ type ScanProgress interface {
 	SlowScan()
 	// SyncScans is called with the running total of synchronous scans.
 	SyncScans(n int64)
+	// Restated is called when files in an unchanged prefix are re-stat'ed,
+	// see WithRestat, with the number of files re-stat'ed and the number
+	// of those that had changed.
+	Restated(files, changed int)
 }
 ```
 ScanProgress is notified of the progress of an analysis. Its methods may be

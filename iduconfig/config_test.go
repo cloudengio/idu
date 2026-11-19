@@ -852,6 +852,65 @@ filesystems:
 	}
 }
 
+func TestRestatAndRecordAll(t *testing.T) {
+	cfg, err := iduconfig.ParseConfig([]byte(`
+filesystems:
+  - name: summaries
+    root: /s
+    restat:
+      - '\.log$'
+      - '^/s/db/'
+    hardlinks_record_all:
+      - '^/s/backups(/|$)'
+  - name: all
+    root: /a
+    hardlink_dedup: summaries-all
+  - name: rescan
+    root: /r
+    hardlink_dedup: rescan
+    hardlinks_record_all:
+      - '.*'
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, _ := settingsForName(cfg, "summaries")
+	for path, want := range map[string]bool{
+		"/s/x/app.log": true, "/s/x/app.log.1": false, "/s/db/data": true, "/s/dbx": false,
+	} {
+		if got := s.RestatFile(path); got != want {
+			t.Errorf("RestatFile(%v): got %v, want %v", path, got, want)
+		}
+	}
+	for _, tc := range []struct {
+		name, prefix string
+		want         bool
+	}{
+		{"summaries", "/s/backups", true},
+		{"summaries", "/s/backups/daily.0", true},
+		{"summaries", "/s/backups-old", false},
+		{"summaries", "/s/home", false},
+		{"all", "/a/x", true},
+		{"rescan", "/r/x", false},
+	} {
+		p, _ := settingsForName(cfg, tc.name)
+		if got := p.RecordAllFilesFor(tc.prefix); got != tc.want {
+			t.Errorf("%v: RecordAllFilesFor(%v): got %v, want %v", tc.name, tc.prefix, got, tc.want)
+		}
+	}
+	if a, _ := settingsForName(cfg, "all"); a.RestatFile("/a/x.log") {
+		t.Errorf("unexpected restat")
+	}
+	if _, err := iduconfig.ParseConfig([]byte(`
+filesystems:
+  - root: /bad
+    restat:
+      - '('
+`)); err == nil {
+		t.Errorf("expected an error for an invalid regular expression")
+	}
+}
+
 func rootOf(t *testing.T, f iduconfig.Filesystem) *iduconfig.Root {
 	t.Helper()
 	r, ok := f.(*iduconfig.Root)

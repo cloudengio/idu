@@ -41,6 +41,16 @@ filesystems:
     exclusions:
       - <<: *common_exclusions
       - '^/Users/cnicolaou/Library/CloudStorage'
+    # Files that are modified in place, such as logs and databases, do not
+    # change their directory and hence are not noticed by analyze unless
+    # they are re-stat'ed. Each pattern is matched against a file's full
+    # path; every match costs a stat on every analyze, which is reported as
+    # "files restated" in analyze's summary. None are restat'ed by default.
+    # restat:
+    #   - '\.log$'
+    #   - '\.sqlite3?$'
+    #   - '\.(vmdk|qcow2|vdi)$'
+    #   - '^/Users/cnicolaou/Library/Mail/'
     compact_interval_days: 7
     # Optional, replaces the top-level logging configuration for this
     # filesystem; the --log-* flags still override it.
@@ -71,6 +81,14 @@ filesystems:
     # summaries (default), summaries-all or rescan, see hardlink_dedup in
     # iduconfig.
     hardlink_dedup: summaries
+    # Directories (prefixes) whose summaries record every file, as for
+    # summaries-all, so that links created to their files from elsewhere
+    # are deduplicated even though the directories are not rescanned.
+    # Each pattern is matched against a directory's full path; idu stats
+    # suggest lists candidates. Changing the list causes the next analyze
+    # to rewrite all of the summaries.
+    # hardlinks_record_all:
+    #   - '^/usr/local/backups(/|$)'
 
   - name: tmp
     root: /tmp

@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"cloudeng.io/cmd/idu/stats"
 )
@@ -22,6 +23,10 @@ const (
 	hardlinksSpecSuffix = ";hardlinks"
 	// allFilesSpecSuffix denotes summaries that record every file.
 	allFilesSpecSuffix = ";hardlinks-all"
+	// recordAllSpecSep precedes the identifier of the prefixes whose
+	// summaries record every file when only the files that may be
+	// hardlinks are otherwise recorded, see WithRecordAllFiles.
+	recordAllSpecSep = ";record-all="
 	// invalidSummariesSpec is stored when a summary could not be written
 	// so that the next analyze rewrites them all.
 	invalidSummariesSpec = "invalid"
@@ -43,6 +48,16 @@ func summarySpec(calcID string, rec stats.HardlinkRecording) string {
 		spec += allFilesSpecSuffix
 	}
 	return spec
+}
+
+// withRecordAll returns spec, a specification for summaries that record
+// the files that may be hardlinks, extended to identify the prefixes whose
+// summaries record every file.
+func withRecordAll(spec, recordAllID string) string {
+	if recordAllID == "" {
+		return spec
+	}
+	return spec + recordAllSpecSep + recordAllID
 }
 
 // ErrStaleSummaries is returned when the precomputed summaries are
@@ -95,6 +110,11 @@ func CheckSummaryRecording(ctx context.Context, db Reader, calcID string, rec st
 		return err
 	}
 	stored := metaBuf.String()
+	if base, _, ok := strings.Cut(stored, recordAllSpecSep); ok && rec != stats.RecordAllFiles {
+		// Recording every file for some prefixes satisfies the
+		// requirements for recording those that may be hardlinks.
+		stored = base
+	}
 	switch rec {
 	case stats.RecordAllFiles:
 		if stored == summarySpec(calcID, stats.RecordAllFiles) {
