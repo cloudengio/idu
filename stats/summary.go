@@ -173,14 +173,16 @@ type FileEntry struct {
 }
 
 // ComputeSummary computes a PrefixSummary for a single directory/prefix.
-// Unless rec is RecordNoFiles the summary records the information required
-// for hardlinks to be deduplicated by ApplyHardlinks. match should not
-// perform hardlink handling itself.
+// Unless rec is RecordNoFiles (or unrecognized) the summary records the
+// information required for hardlinks to be deduplicated by ApplyHardlinks.
+// match should not perform hardlink handling itself.
 func ComputeSummary(prefix string, pi PrefixInfo, du diskusage.Calculator, match Matcher, rec HardlinkRecording) PrefixSummary {
 	direct, users, groups := ComputeTotals(prefix, pi, du, match)
 	calcID := ""
 	if du != nil {
 		calcID = du.String()
+	} else {
+		du = diskusage.NewIdentity()
 	}
 	ps := PrefixSummary{
 		CalcID:   calcID,
@@ -188,7 +190,7 @@ func ComputeSummary(prefix string, pi PrefixInfo, du diskusage.Calculator, match
 		PerUser:  users,
 		PerGroup: groups,
 	}
-	if rec != RecordNoFiles {
+	if rec == RecordLinkedFiles || rec == RecordAllFiles {
 		ps.HardlinkInfo = true
 		xattr := pi.XAttr()
 		ps.Device, ps.FileID = xattr.Device, xattr.FileID
@@ -203,7 +205,13 @@ func computeFileEntries(prefix string, pi PrefixInfo, du diskusage.Calculator, m
 	if !match.Prefix(prefix, pi) {
 		return nil
 	}
+	if du == nil {
+		du = diskusage.NewIdentity()
+	}
 	var files []FileEntry
+	if rec == RecordAllFiles {
+		files = make([]FileEntry, 0, len(pi.InfoList()))
+	}
 	for _, fi := range pi.InfoList() {
 		if fi.IsDir() || !match.Entry(prefix, pi, fi) {
 			continue

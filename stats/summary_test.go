@@ -208,9 +208,16 @@ func TestComputeSummaryRecordsFiles(t *testing.T) {
 		newLinkTestFile("linked", 20, 3, 2),
 		newLinkTestFile("unknown", 30, 4, 0),
 	)
-	ps := stats.ComputeSummary("/dir", &pi, calc, match, stats.RecordNoFiles)
-	if ps.HardlinkInfo || ps.Files != nil {
-		t.Errorf("hardlink info recorded when not requested: %+v", ps)
+	for _, rec := range []stats.HardlinkRecording{stats.RecordNoFiles, stats.HardlinkRecording(99)} {
+		ps := stats.ComputeSummary("/dir", &pi, calc, match, rec)
+		if ps.HardlinkInfo || ps.Files != nil {
+			t.Errorf("%v: hardlink info recorded when not requested: %+v", rec, ps)
+		}
+	}
+	// nil Calculator must not panic when recording file entries.
+	ps := stats.ComputeSummary("/dir", &pi, nil, match, stats.RecordAllFiles)
+	if !ps.HardlinkInfo || ps.CalcID != "" || len(ps.Files) != 3 {
+		t.Errorf("nil calculator summary: %+v", ps)
 	}
 	for _, tc := range []struct {
 		rec  stats.HardlinkRecording

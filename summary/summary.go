@@ -42,6 +42,7 @@ type Reader struct {
 	sep    string
 	calcID string
 	dedup  bool
+	rec    stats.HardlinkRecording
 	err    error
 }
 
@@ -55,11 +56,19 @@ func New(db idudb.Reader, cfg *iduconfig.Settings) *Reader {
 	if cfg == nil {
 		return &Reader{db: db, err: errors.New("summary: nil settings configuration")}
 	}
+	rec := stats.RecordNoFiles
+	if !cfg.CountHardlinkAsFiles {
+		rec = stats.RecordLinkedFiles
+		if cfg.HardlinkDedup == iduconfig.HardlinkDedupSummariesAll {
+			rec = stats.RecordAllFiles
+		}
+	}
 	return &Reader{
 		db:     db,
 		sep:    cfg.SeparatorOrDefault(),
 		calcID: cfg.CalculatorOrDefault().String(),
 		dedup:  !cfg.CountHardlinkAsFiles,
+		rec:    rec,
 	}
 }
 
@@ -97,7 +106,7 @@ func (r *Reader) Check(ctx context.Context) error {
 	if r.err != nil {
 		return r.err
 	}
-	return idudb.CheckSummaries(ctx, r.db, r.calcID, r.dedup)
+	return idudb.CheckSummaryRecording(ctx, r.db, r.calcID, r.rec)
 }
 
 func (r *Reader) decode(path string, val []byte, ps *stats.PrefixSummary) error {

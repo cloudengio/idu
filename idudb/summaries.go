@@ -78,15 +78,37 @@ func initSummaryMeta(ctx context.Context, db Database, spec string) (bool, error
 // precomputed summaries computed with calcID that also record hardlinks,
 // either the files that may be linked or all files, if needLinks is true.
 func CheckSummaries(ctx context.Context, db Reader, calcID string, needLinks bool) error {
+	rec := stats.RecordNoFiles
+	if needLinks {
+		rec = stats.RecordLinkedFiles
+	}
+	return CheckSummaryRecording(ctx, db, calcID, rec)
+}
+
+// CheckSummaryRecording returns ErrStaleSummaries unless db contains complete
+// precomputed summaries computed with calcID that satisfy the hardlink
+// recording requirement rec. RecordAllFiles satisfies RecordLinkedFiles, and
+// both satisfy RecordNoFiles.
+func CheckSummaryRecording(ctx context.Context, db Reader, calcID string, rec stats.HardlinkRecording) error {
 	var metaBuf bytes.Buffer
 	if err := db.GetMeta(ctx, metaKeySummaries, &metaBuf); err != nil {
 		return err
 	}
-	switch metaBuf.String() {
-	case summarySpec(calcID, stats.RecordLinkedFiles), summarySpec(calcID, stats.RecordAllFiles):
-		return nil
-	case summarySpec(calcID, stats.RecordNoFiles):
-		if !needLinks {
+	stored := metaBuf.String()
+	switch rec {
+	case stats.RecordAllFiles:
+		if stored == summarySpec(calcID, stats.RecordAllFiles) {
+			return nil
+		}
+	case stats.RecordLinkedFiles:
+		if stored == summarySpec(calcID, stats.RecordLinkedFiles) || stored == summarySpec(calcID, stats.RecordAllFiles) {
+			return nil
+		}
+	case stats.RecordNoFiles:
+		switch stored {
+		case summarySpec(calcID, stats.RecordNoFiles),
+			summarySpec(calcID, stats.RecordLinkedFiles),
+			summarySpec(calcID, stats.RecordAllFiles):
 			return nil
 		}
 	}

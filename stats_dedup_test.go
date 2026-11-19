@@ -239,12 +239,13 @@ func TestHardlinkDedupSummariesAllMatchRescan(t *testing.T) {
 	analyzeWithConfig(ctx, t, allCfg, root)
 	verifyHardlinkTree(ctx, t, allCfg, root, true, 4, 4, 3)
 
-	// Switching between summaries and summaries-all rewrites the summaries
-	// from the stored metadata, and the stale link count of b/h is again
-	// not recorded.
+	// Switching from summaries to summaries-all requires reanalyzing.
 	summariesCfg := writeHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupSummaries)
 	analyzeWithConfig(ctx, t, summariesCfg, root)
 	verifyHardlinkTree(ctx, t, summariesCfg, root, false, 5, 3, 3)
+	if _, _, err := computeBoth(ctx, t, allCfg, root); !errors.Is(err, idudb.ErrStaleSummaries) {
+		t.Fatalf("expected %v before reanalyzing with summaries-all, got %v", idudb.ErrStaleSummaries, err)
+	}
 	analyzeWithConfig(ctx, t, allCfg, root)
 	verifyHardlinkTree(ctx, t, allCfg, root, true, 4, 4, 3)
 }

@@ -140,12 +140,14 @@ func TestCorruptLinkCounts(t *testing.T) {
 	v3 := append([]byte{}, v2...)
 	v3[0] = 0x3
 	for name, trailer := range map[string][]byte{
-		"missing":      nil,
-		"too-many":     {1, 4},
-		"truncated":    {1, 1, 0},
-		"out-of-range": {1, 1, 3, 2},
-		"directory":    {1, 1, 1, 2},
-		"repeated":     {1, 2, 0, 2, 0, 3},
+		"missing":        nil,
+		"too-many":       {1, 4},
+		"truncated":      {1, 1, 0},
+		"out-of-range":   {1, 1, 3, 2},
+		"directory":      {1, 1, 1, 2},
+		"repeated":       {1, 2, 0, 2, 0, 3},
+		"delta-overflow": {1, 2, 2, 2, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01, 3},
+		"trailing":       {1, 0, 0},
 	} {
 		assertUnmarshalFailsNoPanic(t, name, append(append([]byte{}, v3...), trailer...))
 	}

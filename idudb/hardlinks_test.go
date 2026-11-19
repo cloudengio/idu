@@ -139,6 +139,12 @@ func TestHardlinkRecordingSpecs(t *testing.T) {
 	if len(slices.Compact(slices.Sorted(maps.Values(specs)))) != 3 {
 		t.Errorf("specs are not distinct: %v", specs)
 	}
+	recordingOrder := []stats.HardlinkRecording{stats.RecordNoFiles, stats.RecordLinkedFiles, stats.RecordAllFiles}
+	wantByStored := map[stats.HardlinkRecording][3]error{
+		stats.RecordNoFiles:     {nil, ErrStaleSummaries, ErrStaleSummaries},
+		stats.RecordLinkedFiles: {nil, nil, ErrStaleSummaries},
+		stats.RecordAllFiles:    {nil, nil, nil},
+	}
 	for stored, wantErr := range map[stats.HardlinkRecording][2]error{
 		stats.RecordNoFiles:     {nil, ErrStaleSummaries},
 		stats.RecordLinkedFiles: {nil, nil},
@@ -155,6 +161,11 @@ func TestHardlinkRecordingSpecs(t *testing.T) {
 		for i, needLinks := range []bool{false, true} {
 			if err := CheckSummaries(ctx, db, calc, needLinks); !errors.Is(err, wantErr[i]) {
 				t.Errorf("%v: needLinks %v: got %v, want %v", stored, needLinks, err, wantErr[i])
+			}
+		}
+		for i, req := range recordingOrder {
+			if err := CheckSummaryRecording(ctx, db, calc, req); !errors.Is(err, wantByStored[stored][i]) {
+				t.Errorf("%v: CheckSummaryRecording(%v): got %v, want %v", stored, req, err, wantByStored[stored][i])
 			}
 		}
 		if err := db.Close(ctx); err != nil {

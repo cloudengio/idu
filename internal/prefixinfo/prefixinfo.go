@@ -292,11 +292,17 @@ func (pi *T) decodeLinks(data []byte) error {
 		if links, data, err = readUvarint(data); err != nil {
 			return fmt.Errorf("PrefixInfo: link[%d]: %w", j, err)
 		}
+		if (j > 0 && delta == 0) || delta >= uint64(len(pi.entries))-pos {
+			return fmt.Errorf("PrefixInfo: link[%d]: invalid position delta %d (pos %d)", j, delta, pos)
+		}
 		pos += delta
-		if pos >= uint64(len(pi.entries)) || (j > 0 && delta == 0) || pi.entries[pos].IsDir() {
+		if pi.entries[pos].IsDir() {
 			return fmt.Errorf("PrefixInfo: link[%d]: invalid position %d", j, pos)
 		}
 		pi.links[pos] = links
+	}
+	if len(data) != 0 {
+		return fmt.Errorf("PrefixInfo: trailing link data (%d bytes)", len(data))
 	}
 	return nil
 }
