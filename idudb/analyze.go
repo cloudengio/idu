@@ -158,6 +158,13 @@ func (a *Analyzer) Analyze(ctx context.Context, target string) error {
 	w.lsi = a.newAsyncStat(w)
 	w.fw = a.newFilewalk(w)
 
+	if !a.db.topn.enabled() {
+		// The rankings and recursive totals, if any, will not reflect the
+		// changes made by this analysis.
+		if _, err := a.db.invalidateTopN(ctx); err != nil {
+			return err
+		}
+	}
 	obs := a.observer()
 	if obs != nil {
 		if err := obs.ScanStarted(ctx, ScanInfo{

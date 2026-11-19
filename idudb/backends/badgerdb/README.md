@@ -46,6 +46,12 @@ func (db *Database) Clear(ctx context.Context, logs, errors bool) error
 
 
 ```go
+func (db *Database) ClearSubtrees(ctx context.Context) error
+```
+ClearSubtrees deletes all of the entries in the subtree bucket.
+
+
+```go
 func (db *Database) Close(_ context.Context) error
 ```
 Close closes the database.
@@ -78,6 +84,13 @@ func (db *Database) DeleteErrors(ctx context.Context, prefix string) error
 ```go
 func (db *Database) DeletePrefix(ctx context.Context, prefix string) error
 ```
+
+
+```go
+func (db *Database) DeleteSubtrees(ctx context.Context, exactKey, childPrefix string) error
+```
+DeleteSubtrees deletes exactKey and any descendant keys matching childPrefix
+from the subtree bucket without affecting sibling prefixes.
 
 
 ```go
@@ -114,6 +127,12 @@ GetMeta retrieves a metadata entry from the metadata bucket into buf.
 
 
 ```go
+func (db *Database) GetSubtrees(ctx context.Context, keys []string, fn func(i int, val []byte) error) error
+```
+GetSubtrees is like GetBatch but for the subtree bucket.
+
+
+```go
 func (db *Database) LastLog(ctx context.Context) (start, stop time.Time, detail []byte, err error)
 ```
 
@@ -141,6 +160,13 @@ func (db *Database) Scan(ctx context.Context, path string, visitor func(ctx cont
 
 
 ```go
+func (db *Database) ScanSubtrees(ctx context.Context, exactKey, childPrefix string, visitor func(ctx context.Context, key string, val []byte) bool) error
+```
+ScanSubtrees iterates over entries in the subtree bucket starting at
+exactKey and stopping once keys no longer match exactKey or childPrefix.
+
+
+```go
 func (db *Database) ScanSummaries(ctx context.Context, exactKey, childPrefix string, visitor func(ctx context.Context, key string, val []byte) bool) error
 ```
 ScanSummaries iterates over entries in the summary bucket starting at
@@ -156,6 +182,12 @@ func (db *Database) Set(ctx context.Context, prefix string, val []byte, batch bo
 func (db *Database) SetMeta(ctx context.Context, key string, val []byte) error
 ```
 SetMeta stores a metadata entry in the metadata bucket.
+
+
+```go
+func (db *Database) SetSubtree(ctx context.Context, key string, val []byte, batch bool) error
+```
+SetSubtree stores the recursive totals for key in the subtree bucket.
 
 
 ```go

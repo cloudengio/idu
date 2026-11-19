@@ -50,6 +50,18 @@ type Reader interface {
 	// childPrefix (when either is non-empty).
 	ScanSummaries(ctx context.Context, exactKey, childPrefix string, visitor func(ctx context.Context, key string, val []byte) bool) error
 
+	// GetSubtrees calls fn with the recursive totals stored in the
+	// subtree bucket for each of keys, which are summary keys, or nil if
+	// there are none, in order. val is only valid for the duration of the
+	// call to fn.
+	GetSubtrees(ctx context.Context, keys []string, fn func(i int, val []byte) error) error
+
+	// ScanSubtrees iterates over the recursive totals in the subtree bucket
+	// in lexicographical key order, starting at exactKey and stopping once
+	// keys no longer match exactKey or childPrefix (when either is
+	// non-empty).
+	ScanSubtrees(ctx context.Context, exactKey, childPrefix string, visitor func(ctx context.Context, key string, val []byte) bool) error
+
 	// GetMeta retrieves a metadata value from the metadata bucket into buf.
 	GetMeta(ctx context.Context, key string, buf *bytes.Buffer) error
 
@@ -96,6 +108,16 @@ type Writer interface {
 	// DeleteSummary deletes the summary entry matching exactKey and any
 	// descendant summary entries matching childPrefix.
 	DeleteSummary(ctx context.Context, exactKey, childPrefix string) error
+
+	// SetSubtree stores the recursive totals for key in the subtree bucket.
+	SetSubtree(ctx context.Context, key string, value []byte, batch bool) error
+
+	// DeleteSubtrees deletes the subtree entry matching exactKey and any
+	// descendant subtree entries matching childPrefix.
+	DeleteSubtrees(ctx context.Context, exactKey, childPrefix string) error
+
+	// ClearSubtrees deletes all of the entries in the subtree bucket.
+	ClearSubtrees(ctx context.Context) error
 
 	// SetMeta stores a metadata value in the metadata bucket.
 	SetMeta(ctx context.Context, key string, value []byte) error

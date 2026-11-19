@@ -63,6 +63,41 @@ func DecodeSummaryKey(sep, key string) string {
 	return strings.ReplaceAll(key, "\x00", sep)
 }
 
+// ParentSummaryKey returns the summary key of the parent of the prefix
+// with summary key key, or false if key is that of a filesystem root.
+func ParentSummaryKey(key string) (string, bool) {
+	idx := strings.LastIndexByte(key, 0)
+	if idx < 0 {
+		return "", false
+	}
+	parent := key[:idx]
+	if strings.IndexByte(parent, 0) < 0 {
+		// The parent is a root, eg. "/" or "C:\", whose key retains its
+		// trailing separator.
+		parent = key[:idx+1]
+	}
+	if parent == key {
+		return "", false
+	}
+	return parent, true
+}
+
+// IsSummaryDescendant returns true if childKey is the summary key of a
+// descendant of the prefix with summary key parentKey.
+func IsSummaryDescendant(parentKey, childKey string) bool {
+	if parentKey == "" {
+		return false
+	}
+	// Only a root key (e.g. "/" encoded as "\x00") ends with the separator,
+	// in which case every longer key with that prefix is a descendant.
+	if strings.HasSuffix(parentKey, "\x00") {
+		return len(childKey) > len(parentKey) && strings.HasPrefix(childKey, parentKey)
+	}
+	return len(childKey) > len(parentKey)+1 &&
+		strings.HasPrefix(childKey, parentKey) &&
+		childKey[len(parentKey)] == '\x00'
+}
+
 // PrefixSummary stores precomputed direct (non-recursive) statistics for a
 // single prefix along with the calculator identifier used for StorageBytes.
 type PrefixSummary struct {

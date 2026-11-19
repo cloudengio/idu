@@ -288,3 +288,59 @@ func TestPrefixSummaryFilesRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestParentSummaryKey(t *testing.T) {
+	for _, tc := range []struct {
+		sep, path, parent string
+	}{
+		{"/", "/", ""},
+		{"/", "/a", "/"},
+		{"/", "/a/b", "/a"},
+		{"/", "/a/b/c", "/a/b"},
+		{`\`, `C:\`, ""},
+		{`\`, `C:\a`, `C:\`},
+		{`\`, `C:\a\b`, `C:\a`},
+	} {
+		key, _ := stats.SummaryKeys(tc.sep, tc.path)
+		parent, ok := stats.ParentSummaryKey(key)
+		if tc.parent == "" {
+			if ok {
+				t.Errorf("%q: unexpected parent %q", tc.path, parent)
+			}
+			continue
+		}
+		want, _ := stats.SummaryKeys(tc.sep, tc.parent)
+		if !ok || parent != want {
+			t.Errorf("%q: got %q %v, want %q", tc.path, parent, ok, want)
+		}
+		if !stats.IsSummaryDescendant(parent, key) {
+			t.Errorf("%q is not a descendant of %q", key, parent)
+		}
+		if stats.IsSummaryDescendant(key, parent) {
+			t.Errorf("%q is a descendant of %q", parent, key)
+		}
+	}
+}
+
+func TestTotalsArithmetic(t *testing.T) {
+	a := stats.Totals{ID: 1, Files: 3, Bytes: 10, Prefix: 1}
+	b := stats.Totals{ID: 2, Files: 1, Bytes: 4}
+	c := a
+	c.Add(b)
+	c.Sub(b)
+	if c != a {
+		t.Errorf("got %+v, want %+v", c, a)
+	}
+	c.Sub(a)
+	if !c.IsZero() || c.IsNegative() {
+		t.Errorf("got %+v", c)
+	}
+	c.Sub(b)
+	if c.IsZero() || !c.IsNegative() {
+		t.Errorf("got %+v", c)
+	}
+	var d stats.Totals
+	if err := d.UnmarshalBinary([]byte{0x7f}); err == nil {
+		t.Errorf("expected an error")
+	}
+}

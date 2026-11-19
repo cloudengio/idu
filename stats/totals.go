@@ -106,9 +106,11 @@ func (t *Totals) DecodeBinary(data []byte) []byte {
 	return data[n:]
 }
 
+// UnmarshalBinary decodes Totals encoded by AppendBinary, returning an
+// error, rather than panicking, if data is invalid.
 func (t *Totals) UnmarshalBinary(data []byte) error {
-	t.DecodeBinary(data)
-	return nil
+	_, err := decodeTotalsChecked(t, data)
+	return err
 }
 
 func (pid PerIDTotals) AppendBinary(data []byte) []byte {
@@ -134,9 +136,17 @@ func (pid *PerIDTotals) DecodeBinary(data []byte) []byte {
 	return data
 }
 
+// UnmarshalBinary decodes PerIDTotals encoded by AppendBinary, returning
+// an error, rather than panicking, if data is invalid.
 func (pid *PerIDTotals) UnmarshalBinary(data []byte) error {
-	pid.DecodeBinary(data)
-	return nil
+	_, err := decodePerIDChecked(pid, data)
+	return err
+}
+
+// DecodeBinaryChecked decodes PerIDTotals encoded by AppendBinary from data
+// and returns the remaining data.
+func (pid *PerIDTotals) DecodeBinaryChecked(data []byte) ([]byte, error) {
+	return decodePerIDChecked(pid, data)
 }
 
 func (t Totals) update(bytes, storageBytes, sparseBytes int64) Totals {
@@ -172,6 +182,40 @@ func (t *Totals) Add(other Totals) {
 	t.HardlinkDirs += other.HardlinkDirs
 	t.SparseFiles += other.SparseFiles
 	t.SparseBytes += other.SparseBytes
+}
+
+// Sub subtracts the counts and byte totals in other from t.
+func (t *Totals) Sub(other Totals) {
+	t.Files -= other.Files
+	t.Prefix -= other.Prefix
+	t.SubPrefixes -= other.SubPrefixes
+	t.Bytes -= other.Bytes
+	t.StorageBytes -= other.StorageBytes
+	t.PrefixBytes -= other.PrefixBytes
+	t.Hardlinks -= other.Hardlinks
+	t.HardlinkDirs -= other.HardlinkDirs
+	t.SparseFiles -= other.SparseFiles
+	t.SparseBytes -= other.SparseBytes
+}
+
+// IsZero returns true if all of the counts and byte totals in t, ie.
+// ignoring its ID, are zero.
+func (t Totals) IsZero() bool {
+	return t == Totals{ID: t.ID}
+}
+
+// IsNegative returns true if any of the counts or byte totals in t are
+// negative, which can only be the result of subtracting totals that were
+// never added.
+func (t Totals) IsNegative() bool {
+	for _, v := range [...]int64{t.Files, t.Prefix, t.SubPrefixes, t.Bytes,
+		t.StorageBytes, t.PrefixBytes, t.Hardlinks, t.HardlinkDirs,
+		t.SparseFiles, t.SparseBytes} {
+		if v < 0 {
+			return true
+		}
+	}
+	return false
 }
 
 type perID map[int64]Totals

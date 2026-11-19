@@ -191,6 +191,11 @@ const (
 	keyPrefix   = "topn/v1/"
 	StateKey    = keyPrefix + "state"
 	PrefixesKey = keyPrefix + "prefixes"
+	// SubtreesKey is the key for the rankings of the prefixes by their
+	// recursive totals.
+	SubtreesKey = keyPrefix + "subtrees"
+	// IDTotalsKey is the key for the IDTotals.
+	IDTotalsKey = keyPrefix + "ids"
 )
 
 // UserKey returns the key for the rankings of the prefixes used by uid.

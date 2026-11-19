@@ -6,7 +6,6 @@ package report
 
 import (
 	"sort"
-	"strings"
 
 	"cloudeng.io/algo/container/heap"
 	"cloudeng.io/cmd/idu/stats"
@@ -141,24 +140,10 @@ func NewSubtreeAggregator(prefix string, n int) *SubtreeAggregator {
 	}
 }
 
-func isSummaryDescendant(parentKey, childKey string) bool {
-	if parentKey == "" {
-		return false
-	}
-	// Only the root key (e.g. "/" encoded as "\x00") ends with the separator,
-	// in which case every longer key with that prefix is a descendant.
-	if strings.HasSuffix(parentKey, "\x00") {
-		return len(childKey) > len(parentKey) && strings.HasPrefix(childKey, parentKey)
-	}
-	return len(childKey) > len(parentKey)+1 &&
-		strings.HasPrefix(childKey, parentKey) &&
-		childKey[len(parentKey)] == '\x00'
-}
-
 // Step feeds the next directory in DFS pre-order (summaryKey ordered) into
 // the aggregator.
 func (sa *SubtreeAggregator) Step(summaryKey, path string, direct stats.Totals) {
-	for len(sa.stack) > 0 && !isSummaryDescendant(sa.stack[len(sa.stack)-1].summaryKey, summaryKey) {
+	for len(sa.stack) > 0 && !stats.IsSummaryDescendant(sa.stack[len(sa.stack)-1].summaryKey, summaryKey) {
 		sa.popOne()
 	}
 	frame := subtreeFrame{

@@ -190,7 +190,10 @@ func (sdb *DB) deletePrefix(ctx context.Context, prefix string) error {
 		return err
 	}
 	exactKey, childPrefix := stats.SummaryKeys(sdb.sep, prefix)
-	return sdb.db.DeleteSummary(ctx, exactKey, childPrefix)
+	if err := sdb.db.DeleteSummary(ctx, exactKey, childPrefix); err != nil {
+		return err
+	}
+	return sdb.db.DeleteSubtrees(ctx, exactKey, childPrefix)
 }
 
 // deleteErrors deletes the errors logged for prefix and all of the prefixes

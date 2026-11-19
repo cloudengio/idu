@@ -132,3 +132,112 @@ func TestTopPrefixesUnavailable(t *testing.T) {
 		t.Errorf("got %v, want %v", err, summary.ErrStaleTopN)
 	}
 }
+
+func TestTopSubtrees(t *testing.T) {
+	ctx := context.Background()
+	root, cfg := createTree(t, false)
+	analyze(ctx, t, root, cfg)
+	sr := openReader(ctx, t, cfg)
+	a, b, c := filepath.Join(root, "a"), filepath.Join(root, "a", "b"), filepath.Join(root, "c")
+
+	tn, err := sr.TopSubtrees(ctx, stats.MetricFiles, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := rankedPaths(tn), []string{root, a, b, c}; !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if tn.Entries[0].Value != 4 || tn.Entries[1].Value != 2 || tn.Certified != 4 {
+		t.Errorf("got %+v", tn)
+	}
+
+	for _, tc := range []struct {
+		path string
+		n    int
+		want []string
+	}{
+		{root, 10, []string{root, a, b, c}},
+		{root, 2, []string{root, a}},
+		{a, 10, []string{a, b}},
+		{b, 10, []string{b}},
+		{filepath.Join(root, "missing"), 10, nil},
+		{root, 0, nil},
+	} {
+		within, err := sr.TopSubtreesWithin(ctx, tc.path, stats.MetricFiles, tc.n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, e := range within {
+			got = append(got, e.Path)
+			tot, ok, err := sr.Subtree(ctx, e.Path)
+			if err != nil || !ok || tot.Files != e.Value {
+				t.Errorf("%v: got %+v %v %v, want %v files", e.Path, tot, ok, err, e.Value)
+			}
+		}
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("%v %v: got %v, want %v", tc.path, tc.n, got, tc.want)
+		}
+	}
+}
+
+// The best-first search and the stored ranking must agree.
+func TestTopSubtreesAgree(t *testing.T) {
+	ctx := context.Background()
+	root, cfg := createTree(t, false)
+	analyze(ctx, t, root, cfg)
+	sr := openReader(ctx, t, cfg)
+	within, err := sr.TopSubtreesWithin(ctx, root, stats.MetricBytes, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tn, err := sr.TopSubtrees(ctx, stats.MetricBytes, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(within, tn.Entries) {
+		t.Errorf("got %v, want %v", within, tn.Entries)
+	}
+}
+
+func TestTopIDs(t *testing.T) {
+	ctx := context.Background()
+	root, cfg := createTree(t, false)
+	analyze(ctx, t, root, cfg)
+	sr := openReader(ctx, t, cfg)
+	users, err := sr.TopUsers(ctx, stats.MetricFiles, 0)
+	if err != nil || len(users) != 1 || users[0].Value != 4 || users[0].Totals.Files != 4 {
+		t.Fatalf("got %+v %v", users, err)
+	}
+	if runtime.GOOS != "windows" && users[0].ID != int64(os.Getuid()) {
+		t.Errorf("got %v, want %v", users[0].ID, os.Getuid())
+	}
+	groups, err := sr.TopGroups(ctx, stats.MetricFiles, 1)
+	if err != nil || len(groups) != 1 || groups[0].Value != 4 {
+		t.Errorf("got %+v %v", groups, err)
+	}
+	all, found, err := sr.Subtree(ctx, root)
+	if err != nil || !found {
+		t.Fatal(found, err)
+	}
+	if users[0].Totals.Bytes != all.Bytes {
+		t.Errorf("got %v, want %v", users[0].Totals.Bytes, all.Bytes)
+	}
+}
+
+func TestSubtreesUnavailable(t *testing.T) {
+	ctx := context.Background()
+	root, cfg := createTree(t, false)
+	cfg.TopN = -1 // disables the derived state, normally rejected by Validate
+	analyze(ctx, t, root, cfg)
+	sr := openReader(ctx, t, cfg)
+	if _, _, err := sr.Subtree(ctx, root); !errors.Is(err, idudb.ErrStaleSubtrees) {
+		t.Errorf("got %v, want %v", err, idudb.ErrStaleSubtrees)
+	}
+	if _, err := sr.TopSubtreesWithin(ctx, root, stats.MetricBytes, 1); !errors.Is(err, idudb.ErrStaleSubtrees) {
+		t.Errorf("got %v, want %v", err, idudb.ErrStaleSubtrees)
+	}
+	if _, err := sr.TopUsers(ctx, stats.MetricBytes, 1); !errors.Is(err, summary.ErrNoTopN) {
+		t.Errorf("got %v, want %v", err, summary.ErrNoTopN)
+	}
+}
