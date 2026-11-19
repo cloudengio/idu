@@ -183,7 +183,7 @@ func TestAnalyzerPartialScanDoesNotMarkComplete(t *testing.T) {
 	// marked as complete.
 	analyzeOnce(ctx, t, dbDir, root)
 
-	db, err := openTestDB(ctx, dbDir, WithRecordHardlinks(true))
+	db, err := openTestDB(ctx, dbDir, WithHardlinkRecording(stats.RecordLinkedFiles))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -41,7 +41,7 @@ type DB struct {
 	sep             string
 	match           stats.Matcher
 	spec            string
-	hardlinkInfo    bool
+	hardlinkInfo    stats.HardlinkRecording
 	// rewriteSummaries is set when the stored summaries were computed with
 	// a different specification and must be recomputed for unchanged prefixes.
 	rewriteSummaries bool

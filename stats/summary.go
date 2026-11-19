@@ -114,11 +114,52 @@ type PrefixSummary struct {
 	HardlinkInfo bool
 	// Device and FileID identify the prefix itself.
 	Device, FileID uint64
-	// Files lists every file counted in Direct. All files are recorded,
-	// rather than only those with a link count greater than one, since
-	// a hardlink may be created to a file in a prefix that is not rescanned
-	// because it is unchanged.
+	// Files lists the files counted in Direct that are recorded so that
+	// hardlinks can be deduplicated, see HardlinkRecording.
 	Files []FileEntry
+}
+
+// HardlinkRecording determines which files, if any, a PrefixSummary
+// records so that hardlinks can be deduplicated by ApplyHardlinks.
+type HardlinkRecording int
+
+const (
+	// RecordNoFiles records no hardlink information.
+	RecordNoFiles HardlinkRecording = iota
+	// RecordLinkedFiles records the files that may be hardlinks, ie. those
+	// whose link count is greater than one or is unknown (zero). Link
+	// counts can be stale: a file's link count changes when a link to it
+	// is created, but its directory does not, and hence a file may still
+	// be recorded as having a single link if its directory has not been
+	// rescanned since. Such a file is then not deduplicated.
+	RecordLinkedFiles
+	// RecordAllFiles records every file, and hence deduplication does
+	// not depend on the link counts being up to date.
+	RecordAllFiles
+)
+
+// String implements fmt.Stringer.
+func (r HardlinkRecording) String() string {
+	switch r {
+	case RecordNoFiles:
+		return "none"
+	case RecordLinkedFiles:
+		return "linked"
+	case RecordAllFiles:
+		return "all"
+	}
+	return fmt.Sprintf("HardlinkRecording(%d)", int(r))
+}
+
+// records returns true if a file whose link count is links is recorded.
+func (r HardlinkRecording) records(links uint64) bool {
+	switch r {
+	case RecordLinkedFiles:
+		return links != 1
+	case RecordAllFiles:
+		return true
+	}
+	return false
 }
 
 // FileEntry records the contribution of a file to the totals of the prefix
@@ -132,10 +173,10 @@ type FileEntry struct {
 }
 
 // ComputeSummary computes a PrefixSummary for a single directory/prefix.
-// If hardlinkInfo is true the summary records the information required
+// Unless rec is RecordNoFiles the summary records the information required
 // for hardlinks to be deduplicated by ApplyHardlinks. match should not
 // perform hardlink handling itself.
-func ComputeSummary(prefix string, pi PrefixInfo, du diskusage.Calculator, match Matcher, hardlinkInfo bool) PrefixSummary {
+func ComputeSummary(prefix string, pi PrefixInfo, du diskusage.Calculator, match Matcher, rec HardlinkRecording) PrefixSummary {
 	direct, users, groups := ComputeTotals(prefix, pi, du, match)
 	calcID := ""
 	if du != nil {
@@ -147,17 +188,18 @@ func ComputeSummary(prefix string, pi PrefixInfo, du diskusage.Calculator, match
 		PerUser:  users,
 		PerGroup: groups,
 	}
-	if hardlinkInfo {
+	if rec != RecordNoFiles {
 		ps.HardlinkInfo = true
 		xattr := pi.XAttr()
 		ps.Device, ps.FileID = xattr.Device, xattr.FileID
-		ps.Files = computeFileEntries(prefix, pi, du, match)
+		ps.Files = computeFileEntries(prefix, pi, du, match, rec)
 	}
 	return ps
 }
 
-// computeFileEntries returns the files counted by ComputeTotals.
-func computeFileEntries(prefix string, pi PrefixInfo, du diskusage.Calculator, match Matcher) []FileEntry {
+// computeFileEntries returns the files counted by ComputeTotals that are
+// recorded by rec.
+func computeFileEntries(prefix string, pi PrefixInfo, du diskusage.Calculator, match Matcher, rec HardlinkRecording) []FileEntry {
 	if !match.Prefix(prefix, pi) {
 		return nil
 	}
@@ -167,6 +209,9 @@ func computeFileEntries(prefix string, pi PrefixInfo, du diskusage.Calculator, m
 			continue
 		}
 		xattr := pi.XAttrInfo(fi)
+		if !rec.records(xattr.Hardlinks) {
+			continue
+		}
 		files = append(files, FileEntry{
 			FileID:       xattr.FileID,
 			UID:          xattr.UID,

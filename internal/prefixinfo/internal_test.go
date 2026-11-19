@@ -125,3 +125,16 @@ func TestValidateIDMapsAndXAttrPanic(t *testing.T) {
 		pi.xAttrFromSys("invalid")
 	})
 }
+
+// MarshalV2 returns the version 2 encoding of pi, ie. the current encoding
+// without the link counts.
+func MarshalV2(t *testing.T, pi *T) []byte {
+	buf, err := pi.MarshalBinary()
+	if err != nil {
+		t.Fatalf("%s: %v", caller(), err)
+	}
+	trailer := pi.appendLinks(nil)
+	buf = buf[:len(buf)-len(trailer)]
+	buf[0] = 0x2
+	return buf
+}

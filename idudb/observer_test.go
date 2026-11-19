@@ -207,7 +207,7 @@ func TestObserverRewriteAndStartError(t *testing.T) {
 
 	// A configuration change rewrites every summary.
 	obs := &recordingObserver{}
-	db, err := openTestDB(ctx, dbDir, WithRecordHardlinks(true))
+	db, err := openTestDB(ctx, dbDir, WithHardlinkRecording(stats.RecordLinkedFiles))
 	if err != nil {
 		t.Fatal(err)
 	}

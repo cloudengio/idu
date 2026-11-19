@@ -75,27 +75,25 @@ type Database struct {
 	closeErr  error
 }
 
-// The database is partitioned into 7 'buckets':
-// 1. inode bucket, keyed by inode and device numbers. This is by far
-//    the largest since it has an entry for every file.
-// 2. the prefix bucket, keyed by prefix. This contains an entry for
-//    every prefix.
-// 3. the log bucket, keyed by timestamp. This contains an entry for
+// The database is partitioned into 6 'buckets':
+// 1. the prefix bucket, keyed by prefix. This contains an entry for
+//    every prefix, which includes the metadata for all of its files, and
+//    is by far the largest.
+// 2. the log bucket, keyed by timestamp. This contains an entry for
 //    every log entry, ie. iteration of updates of the database.
-// 4. the error bucket, keyed by timestamp. This contains an entry for
+// 3. the error bucket, keyed by timestamp. This contains an entry for
 //    every error encountered in the most recent update of the database.
-// 5. the summary bucket, keyed by summary key. This contains a precomputed
+// 4. the summary bucket, keyed by summary key. This contains a precomputed
 //    summary for every prefix.
-// 6. the meta bucket, keyed by name. This contains metadata describing
+// 5. the meta bucket, keyed by name. This contains metadata describing
 //    the database, such as how its summaries were computed.
-// 7. the subtree bucket, keyed by summary key. This contains the recursive
+// 6. the subtree bucket, keyed by summary key. This contains the recursive
 //    totals for every prefix.
 //
 // Keys are assigned to each bucket by prepending an identifying byte
 // to the key.
 
 const (
-	inodeBucket      = 0xf0
 	prefixBucket     = 0xf1
 	logBucket        = 0xf2
 	errorBucket      = 0xf3

@@ -815,21 +815,30 @@ filesystems:
   - name: counted
     prefix: /counted
     count_hardlinks_as_files: true
+  - name: all
+    prefix: /all
+    hardlink_dedup: summaries-all
+  - name: all-counted
+    prefix: /all-counted
+    hardlink_dedup: summaries-all
+    count_hardlinks_as_files: true
 `))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for name, want := range map[string]struct {
-		dedup  iduconfig.HardlinkDedup
-		record bool
+		dedup       iduconfig.HardlinkDedup
+		record, all bool
 	}{
-		"default": {iduconfig.HardlinkDedupSummaries, true},
-		"rescan":  {iduconfig.HardlinkDedupRescan, false},
-		"counted": {iduconfig.HardlinkDedupSummaries, false},
+		"default":     {iduconfig.HardlinkDedupSummaries, true, false},
+		"rescan":      {iduconfig.HardlinkDedupRescan, false, false},
+		"counted":     {iduconfig.HardlinkDedupSummaries, false, false},
+		"all":         {iduconfig.HardlinkDedupSummariesAll, true, true},
+		"all-counted": {iduconfig.HardlinkDedupSummariesAll, false, false},
 	} {
 		p, _ := settingsForName(cfg, name)
-		if p.HardlinkDedup != want.dedup || p.RecordHardlinks() != want.record {
-			t.Errorf("%s: got %q, %v, want %q, %v", name, p.HardlinkDedup, p.RecordHardlinks(), want.dedup, want.record)
+		if p.HardlinkDedup != want.dedup || p.RecordHardlinks() != want.record || p.RecordAllFiles() != want.all {
+			t.Errorf("%s: got %q, %v, %v, want %q, %v, %v", name, p.HardlinkDedup, p.RecordHardlinks(), p.RecordAllFiles(), want.dedup, want.record, want.all)
 		}
 	}
 

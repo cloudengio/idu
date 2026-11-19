@@ -62,7 +62,7 @@ type Settings struct {
 	ScanSize                 int                `yaml:"scan_size" doc:"maximum number of items to fetch from the filesystem in a single operation"`
 	Exclusions               cmdyaml.RegexpList `yaml:"exclusions" doc:"prefixes and files matching these regular expressions will be ignored when building a database"`
 	CountHardlinkAsFiles     bool               `yaml:"count_hardlinks_as_files" doc:"if true, hardlinks will be counted as separate files"`
-	HardlinkDedup            HardlinkDedup      `yaml:"hardlink_dedup" doc:"the strategy used to deduplicate hardlinks when count_hardlinks_as_files is false (summaries, rescan), defaults to summaries, see Hardlink deduplication strategies below"`
+	HardlinkDedup            HardlinkDedup      `yaml:"hardlink_dedup" doc:"the strategy used to deduplicate hardlinks when count_hardlinks_as_files is false (summaries, summaries-all, rescan), defaults to summaries, see Hardlink deduplication strategies below"`
 	CompactIntervalDays      int                `yaml:"compact_interval_days" doc:"number of days after the last database write before running compaction, added to compact_interval"`
 	CompactInterval          time.Duration      `yaml:"compact_interval" doc:"duration after the last database write before running compaction, added to compact_interval_days"`
 	TopN                     int                `yaml:"topn" doc:"the number of top entries, N, maintained incrementally by analyze for each top-N report, ie. by prefix, subtree, user and group, reports for more entries than this require a scan of the database, it defaults to 2000"`
@@ -81,10 +81,17 @@ type Settings struct {
 type HardlinkDedup string
 
 const (
-	// HardlinkDedupSummaries records potential hardlinks in the precomputed
-	// per-prefix summaries when analyzing so that stats can deduplicate them
-	// without rescanning all of the file metadata. This is the default.
+	// HardlinkDedupSummaries records potential hardlinks, ie. files with
+	// more than one link, in the precomputed per-prefix summaries when
+	// analyzing so that stats can deduplicate them without rescanning all
+	// of the file metadata. The link counts are only refreshed when a
+	// prefix is rescanned, see stats.RecordLinkedFiles. This is the default.
 	HardlinkDedupSummaries HardlinkDedup = "summaries"
+	// HardlinkDedupSummariesAll is like HardlinkDedupSummaries but records
+	// every file rather than only those that may be hardlinks, ie. those
+	// with more than one link. It requires more storage but does not
+	// depend on the link counts being up to date.
+	HardlinkDedupSummariesAll HardlinkDedup = "summaries-all"
 	// HardlinkDedupRescan computes stats from all of the file metadata
 	// stored for each prefix, which requires no additional storage but is
 	// considerably slower.
@@ -95,6 +102,12 @@ const (
 // in the precomputed summaries.
 func (p *Settings) RecordHardlinks() bool {
 	return !p.CountHardlinkAsFiles && p.HardlinkDedup != HardlinkDedupRescan
+}
+
+// RecordAllFiles returns true if analyze should record every file, rather
+// than only those that may be hardlinks, in the precomputed summaries.
+func (p *Settings) RecordAllFiles() bool {
+	return p.RecordHardlinks() && p.HardlinkDedup == HardlinkDedupSummariesAll
 }
 
 // CalculatorOrDefault returns the configured disk usage calculator or the
@@ -482,9 +495,9 @@ func (t *T) Validate() error {
 		switch p.HardlinkDedup {
 		case "":
 			p.HardlinkDedup = HardlinkDedupSummaries
-		case HardlinkDedupSummaries, HardlinkDedupRescan:
+		case HardlinkDedupSummaries, HardlinkDedupSummariesAll, HardlinkDedupRescan:
 		default:
-			return fmt.Errorf("filesystem %q: hardlink_dedup must be %q or %q, not %q", Label(f), HardlinkDedupSummaries, HardlinkDedupRescan, p.HardlinkDedup)
+			return fmt.Errorf("filesystem %q: hardlink_dedup must be %q, %q or %q, not %q", Label(f), HardlinkDedupSummaries, HardlinkDedupSummariesAll, HardlinkDedupRescan, p.HardlinkDedup)
 		}
 		calc, err := parseLayout(f.layoutPath(), &p.Layout)
 		if err != nil {
@@ -1009,14 +1022,20 @@ var hardlinkDedupStrategies = []struct {
 	desc string
 }{
 	{HardlinkDedupSummaries, `(default) analyze records the inode, owner, group, size and storage
-  used by every file in the precomputed per-directory summaries so that
-  stats can deduplicate hardlinks using the summaries alone. This is
-  considerably faster than rescan but adds roughly 12-16 bytes per file to
-  the database.`},
+  used by every file that may be a hardlink, ie. that has more than one
+  link, in the precomputed per-directory summaries so that stats can
+  deduplicate hardlinks using the summaries alone. This is considerably
+  faster than rescan and adds roughly 12-16 bytes to the database for each
+  such file. The link counts are only refreshed when a directory is
+  rescanned, so a file in an unchanged directory that has since been
+  linked to from elsewhere is counted twice until its directory changes
+  or analyze --force is run.`},
+	{HardlinkDedupSummariesAll, `as for summaries, but every file is recorded, whatever its link count,
+  which adds roughly 12-16 bytes per file to the database. The results
+  are always identical to those obtained using rescan.`},
 	{HardlinkDedupRescan, `stats recomputes all statistics from the complete file metadata stored
   for each directory, deduplicating hardlinks as it does so. This requires
-  no additional storage but is considerably slower for large filesystems.
-  The results are identical to those obtained using summaries.`},
+  no additional storage but is considerably slower for large filesystems.`},
 }
 
 // DescribeHardlinkDedup writes documentation for the supported hardlink

@@ -208,21 +208,33 @@ func TestComputeSummaryRecordsFiles(t *testing.T) {
 		newLinkTestFile("linked", 20, 3, 2),
 		newLinkTestFile("unknown", 30, 4, 0),
 	)
-	ps := stats.ComputeSummary("/dir", &pi, calc, match, false)
+	ps := stats.ComputeSummary("/dir", &pi, calc, match, stats.RecordNoFiles)
 	if ps.HardlinkInfo || ps.Files != nil {
 		t.Errorf("hardlink info recorded when not requested: %+v", ps)
 	}
-	ps = stats.ComputeSummary("/dir", &pi, calc, match, true)
-	if !ps.HardlinkInfo || ps.Device != 7 || ps.FileID != 1 {
-		t.Fatalf("unexpected prefix identity: %+v", ps)
-	}
-	var inodes []uint64
-	for _, f := range ps.Files {
-		inodes = append(inodes, f.FileID)
-	}
-	// All files are recorded since any file may later become a hardlink.
-	if got, want := inodes, []uint64{2, 3, 4}; !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v, want %v", got, want)
+	for _, tc := range []struct {
+		rec  stats.HardlinkRecording
+		want []uint64
+	}{
+		// Files with a single link cannot be hardlinks, but those whose
+		// link count is unknown may be.
+		{stats.RecordLinkedFiles, []uint64{3, 4}},
+		{stats.RecordAllFiles, []uint64{2, 3, 4}},
+	} {
+		ps = stats.ComputeSummary("/dir", &pi, calc, match, tc.rec)
+		if !ps.HardlinkInfo || ps.Device != 7 || ps.FileID != 1 {
+			t.Fatalf("%v: unexpected prefix identity: %+v", tc.rec, ps)
+		}
+		var inodes []uint64
+		for _, f := range ps.Files {
+			inodes = append(inodes, f.FileID)
+		}
+		if got := inodes; !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%v: got %v, want %v", tc.rec, got, tc.want)
+		}
+		if got, want := ps.Direct.Files, int64(3); got != want {
+			t.Errorf("%v: got %v, want %v", tc.rec, got, want)
+		}
 	}
 }
 
@@ -235,18 +247,20 @@ func TestApplyHardlinks(t *testing.T) {
 		newSparseTestFile("sl", 1<<30, 8, 7, 2))
 	dupDir := newLinkTestPrefix(7, 1, newLinkTestFile("x", 9, 6, 2))
 
-	hl := &hardlinks.Incremental{}
-	dedup := hardlinkMatcher(t)
-	for _, pi := range []prefixinfo.T{first, second, dupDir} {
-		ps := stats.ComputeSummary("/dir", &pi, calc, match, true)
-		ps.ApplyHardlinks(hl)
-		// ApplyHardlinks must match ComputeTotals with hardlink handling.
-		totals, users, groups := stats.ComputeTotals("/dir", &pi, calc, dedup)
-		if !reflect.DeepEqual(ps.Direct, totals) {
-			t.Errorf("direct: got %+v, want %+v", ps.Direct, totals)
-		}
-		if !reflect.DeepEqual(ps.PerUser, users) || !reflect.DeepEqual(ps.PerGroup, groups) {
-			t.Errorf("per id: got %+v %+v, want %+v %+v", ps.PerUser, ps.PerGroup, users, groups)
+	for _, rec := range []stats.HardlinkRecording{stats.RecordLinkedFiles, stats.RecordAllFiles} {
+		hl := &hardlinks.Incremental{}
+		dedup := hardlinkMatcher(t)
+		for _, pi := range []prefixinfo.T{first, second, dupDir} {
+			ps := stats.ComputeSummary("/dir", &pi, calc, match, rec)
+			ps.ApplyHardlinks(hl)
+			// ApplyHardlinks must match ComputeTotals with hardlink handling.
+			totals, users, groups := stats.ComputeTotals("/dir", &pi, calc, dedup)
+			if !reflect.DeepEqual(ps.Direct, totals) {
+				t.Errorf("%v: direct: got %+v, want %+v", rec, ps.Direct, totals)
+			}
+			if !reflect.DeepEqual(ps.PerUser, users) || !reflect.DeepEqual(ps.PerGroup, groups) {
+				t.Errorf("%v: per id: got %+v %+v, want %+v %+v", rec, ps.PerUser, ps.PerGroup, users, groups)
+			}
 		}
 	}
 }

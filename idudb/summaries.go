@@ -16,7 +16,12 @@ import (
 const metaKeySummaries = "summaries/v1"
 
 const (
+	// hardlinksSpecSuffix denotes summaries that record the files that may
+	// be hardlinks. It was previously used for summaries that record every
+	// file, which are a superset of those, and hence remain valid.
 	hardlinksSpecSuffix = ";hardlinks"
+	// allFilesSpecSuffix denotes summaries that record every file.
+	allFilesSpecSuffix = ";hardlinks-all"
 	// invalidSummariesSpec is stored when a summary could not be written
 	// so that the next analyze rewrites them all.
 	invalidSummariesSpec = "invalid"
@@ -28,11 +33,14 @@ const (
 var summaryFormatSuffix = fmt.Sprintf(";v%d", stats.PrefixSummaryVersion)
 
 // summarySpec returns the specification for summaries computed with
-// calcID that record hardlinks if hardlinks is true.
-func summarySpec(calcID string, hardlinks bool) string {
+// calcID that record the files specified by rec.
+func summarySpec(calcID string, rec stats.HardlinkRecording) string {
 	spec := calcID + summaryFormatSuffix
-	if hardlinks {
+	switch rec {
+	case stats.RecordLinkedFiles:
 		spec += hardlinksSpecSuffix
+	case stats.RecordAllFiles:
+		spec += allFilesSpecSuffix
 	}
 	return spec
 }
@@ -67,17 +75,17 @@ func initSummaryMeta(ctx context.Context, db Database, spec string) (bool, error
 }
 
 // CheckSummaries returns ErrStaleSummaries unless db contains complete
-// precomputed summaries computed with calcID that also record hardlinks
-// if needLinks is true.
+// precomputed summaries computed with calcID that also record hardlinks,
+// either the files that may be linked or all files, if needLinks is true.
 func CheckSummaries(ctx context.Context, db Reader, calcID string, needLinks bool) error {
 	var metaBuf bytes.Buffer
 	if err := db.GetMeta(ctx, metaKeySummaries, &metaBuf); err != nil {
 		return err
 	}
 	switch metaBuf.String() {
-	case summarySpec(calcID, true):
+	case summarySpec(calcID, stats.RecordLinkedFiles), summarySpec(calcID, stats.RecordAllFiles):
 		return nil
-	case summarySpec(calcID, false):
+	case summarySpec(calcID, stats.RecordNoFiles):
 		if !needLinks {
 			return nil
 		}

@@ -92,8 +92,8 @@ date, recursive totals.
 func CheckSummaries(ctx context.Context, db Reader, calcID string, needLinks bool) error
 ```
 CheckSummaries returns ErrStaleSummaries unless db contains complete
-precomputed summaries computed with calcID that also record hardlinks if
-needLinks is true.
+precomputed summaries computed with calcID that also record hardlinks,
+either the files that may be linked or all files, if needLinks is true.
 
 ### Func CheckSummaryKeys
 ```go
@@ -113,6 +113,13 @@ EraseErrors deletes all of the error entries in db. It does not close db.
 func EraseLogs(ctx context.Context, db Database) error
 ```
 EraseLogs deletes all of the log entries in db. It does not close db.
+
+### Func HardlinkRecording
+```go
+func HardlinkRecording(cfg *iduconfig.Settings) stats.HardlinkRecording
+```
+HardlinkRecording returns the files that the summaries record, as specified
+by cfg, so that hardlinks can be deduplicated.
 
 
 
@@ -467,10 +474,11 @@ it was last written. A zero value disables compaction.
 
 
 ```go
-func WithRecordHardlinks(v bool) Option
+func WithHardlinkRecording(r stats.HardlinkRecording) Option
 ```
-WithRecordHardlinks requests that the precomputed summaries record potential
-hardlinks so that they can be deduplicated without rescanning the database.
+WithHardlinkRecording determines which files, if any, the precomputed
+summaries record so that hardlinks can be deduplicated without rescanning
+the database. It defaults to stats.RecordNoFiles.
 
 
 ```go
