@@ -50,6 +50,13 @@ func DecodeSummaryKey(sep, key string) string
 ```
 DecodeSummaryKey reverses SummaryKeys back to a filesystem path.
 
+### Func IsSummaryDescendant
+```go
+func IsSummaryDescendant(parentKey, childKey string) bool
+```
+IsSummaryDescendant returns true if childKey is the summary key of a
+descendant of the prefix with summary key parentKey.
+
 ### Func NewParser
 ```go
 func NewParser(ctx context.Context, fs filewalk.FS, opts ...ParserOption) *boolexpr.Parser
@@ -67,6 +74,13 @@ func NormalizePath(sep, path string) string
 NormalizePath trims any trailing path separator from path using sep
 (defaulting to "/"), while preserving filesystem root paths such as "/" or
 "C:\".
+
+### Func ParentSummaryKey
+```go
+func ParentSummaryKey(key string) (string, bool)
+```
+ParentSummaryKey returns the summary key of the parent of the prefix with
+summary key key, or false if key is that of a filesystem root.
 
 ### Func SparseBytes
 ```go
@@ -409,6 +423,13 @@ func (pid *PerIDTotals) DecodeBinary(data []byte) []byte
 
 
 ```go
+func (pid *PerIDTotals) DecodeBinaryChecked(data []byte) ([]byte, error)
+```
+DecodeBinaryChecked decodes PerIDTotals encoded by AppendBinary from data
+and returns the remaining data.
+
+
+```go
 func (pid PerIDTotals) MarshalBinary() (data []byte, err error)
 ```
 
@@ -416,6 +437,8 @@ func (pid PerIDTotals) MarshalBinary() (data []byte, err error)
 ```go
 func (pid *PerIDTotals) UnmarshalBinary(data []byte) error
 ```
+UnmarshalBinary decodes PerIDTotals encoded by AppendBinary, returning an
+error, rather than panicking, if data is invalid.
 
 
 
@@ -567,13 +590,36 @@ func (t *Totals) DecodeBinary(data []byte) []byte
 
 
 ```go
+func (t Totals) IsNegative() bool
+```
+IsNegative returns true if any of the counts or byte totals in t are
+negative, which can only be the result of subtracting totals that were never
+added.
+
+
+```go
+func (t Totals) IsZero() bool
+```
+IsZero returns true if all of the counts and byte totals in t, ie. ignoring
+its ID, are zero.
+
+
+```go
 func (t *Totals) MarshalBinary() (data []byte, err error)
 ```
 
 
 ```go
+func (t *Totals) Sub(other Totals)
+```
+Sub subtracts the counts and byte totals in other from t.
+
+
+```go
 func (t *Totals) UnmarshalBinary(data []byte) error
 ```
+UnmarshalBinary decodes Totals encoded by AppendBinary, returning an error,
+rather than panicking, if data is invalid.
 
 
 

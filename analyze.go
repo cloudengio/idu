@@ -37,7 +37,7 @@ type analyzeFlags struct {
 	Force       bool          `subcmd:"force,false,reanalyze even if the database is up to date"`
 	SlowScans   time.Duration `subcmd:"slow-scan-duration,10s,duration at which scans are reported as slow"`
 	Defaults    bool          `subcmd:"show-defaults,false,display default scanning options and exit"`
-	RefreshTopN bool          `subcmd:"refresh-topn,false,recompute the top-N rankings from scratch once the analysis is complete; they are otherwise maintained incrementally and refreshed automatically when needed"`
+	RefreshTopN bool          `subcmd:"refresh-topn,false,recompute the recursive totals and top-N rankings from scratch once the analysis is complete; they are otherwise maintained incrementally and rebuilt automatically when needed"`
 }
 
 type analyzeCmd struct {

@@ -133,6 +133,17 @@ type Ranked struct {
 Ranked is a single entry in a ranking.
 
 
+### Type RankedID
+```go
+type RankedID struct {
+	ID     int64
+	Value  int64
+	Totals stats.Totals
+}
+```
+RankedID is a single entry in a ranking of users or groups.
+
+
 ### Type Reader
 ```go
 type Reader struct {
@@ -217,6 +228,21 @@ first error, which is returned as the final value of the iterator.
 
 
 ```go
+func (r *Reader) Subtree(ctx context.Context, path string) (stats.Totals, bool, error)
+```
+Subtree returns the recursive totals for path, ie. the sum of the direct
+totals of path and all of its descendants, if path exists. It returns
+idudb.ErrStaleSubtrees if the recursive totals are missing or may be out of
+date. Note that hardlinks are not deduplicated.
+
+
+```go
+func (r *Reader) TopGroups(ctx context.Context, metric stats.Metric, n int) ([]RankedID, error)
+```
+TopGroups is like TopUsers but for groups.
+
+
+```go
 func (r *Reader) TopNIDs(ctx context.Context) (users, groups []int64, err error)
 ```
 TopNIDs returns the users and groups that have rankings, ie. those that own
@@ -243,6 +269,38 @@ func (r *Reader) TopPrefixesForUser(ctx context.Context, uid int64, metric stats
 ```
 TopPrefixesForUser is like TopPrefixes but ranks the prefixes by the value
 for metric of the files, and the prefixes themselves, owned by uid.
+
+
+```go
+func (r *Reader) TopSubtrees(ctx context.Context, metric stats.Metric, n int) (TopN, error)
+```
+TopSubtrees is like TopPrefixes but ranks the prefixes by their recursive
+value for metric, ie. that of the prefix and all of its descendants.
+See TopSubtreesWithin for the top subtrees within a prefix.
+
+
+```go
+func (r *Reader) TopSubtreesWithin(ctx context.Context, path string, metric stats.Metric, n int) ([]Ranked, error)
+```
+TopSubtreesWithin returns the top n prefixes, path itself included,
+by their recursive value for metric among path and its descendants,
+in descending order of Value with ties broken by Path. Since a subtree's
+value can never exceed that of its parent, it performs a best-first search
+of the stored recursive totals whose cost is proportional to n times the
+fanout of the prefixes visited, rather than to the size of the subtree,
+and its results are always exact. Prefixes with a zero value are omitted.
+It returns idudb.ErrStaleSubtrees if the recursive totals are missing or may
+be out of date.
+
+
+```go
+func (r *Reader) TopUsers(ctx context.Context, metric stats.Metric, n int) ([]RankedID, error)
+```
+TopUsers returns the top n users, or all users if n is zero or less,
+by their value for metric across the entire filesystem, in descending order
+of Value. Unlike the rankings of prefixes, the totals for every user are
+stored and hence the result is always exact. Note that hardlinks are not
+deduplicated.
 
 
 ```go

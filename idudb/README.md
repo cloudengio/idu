@@ -44,6 +44,14 @@ ErrNoBackend = errors.New("no database backend specified, see idudb.WithBackendF
 ErrNoBackend is returned when a database is opened without specifying a
 BackendFactory, see WithBackendFactory.
 
+### ErrStaleSubtrees
+```go
+ErrStaleSubtrees = errors.New("the recursive totals are missing or may be out of date: rerun analyze for the entire prefix")
+
+```
+ErrStaleSubtrees is returned when the recursive totals are missing or may be
+out of date.
+
 ### ErrStaleSummaries
 ```go
 ErrStaleSummaries = errors.New("summaries are incomplete or were computed with a different configuration (layout or hardlink settings): rerun analyze for the entire prefix")
@@ -71,6 +79,13 @@ CheckFormat returns ErrLegacyDatabase if db contains prefix data but
 no summary metadata, i.e. it was created by an older version of idu.
 It should be called on every newly opened database before it is used; New,
 EraseLogs and EraseErrors call it automatically.
+
+### Func CheckSubtrees
+```go
+func CheckSubtrees(ctx context.Context, db Reader) error
+```
+CheckSubtrees returns ErrStaleSubtrees unless db contains complete, up to
+date, recursive totals.
 
 ### Func CheckSummaries
 ```go
@@ -315,10 +330,11 @@ compaction or garbage collection) and closes the database.
 ```go
 func (sdb *DB) RefreshTopN(ctx context.Context) error
 ```
-RefreshTopN recomputes all of the top-N rankings from the summaries
-stored in the database. It returns ErrStaleSummaries if the summaries are
-incomplete or were computed with a different configuration, ie. if the
-entire filesystem needs to be analyzed first.
+RefreshTopN rebuilds the recursive totals, and recomputes all of the top-N
+rankings and per-id totals, from the summaries stored in the database. It
+returns ErrStaleSummaries if the summaries are incomplete or were computed
+with a different configuration, ie. if the entire filesystem needs to be
+analyzed first.
 
 
 
@@ -518,6 +534,18 @@ type Reader interface {
 	// childPrefix (when either is non-empty).
 	ScanSummaries(ctx context.Context, exactKey, childPrefix string, visitor func(ctx context.Context, key string, val []byte) bool) error
 
+	// GetSubtrees calls fn with the recursive totals stored in the
+	// subtree bucket for each of keys, which are summary keys, or nil if
+	// there are none, in order. val is only valid for the duration of the
+	// call to fn.
+	GetSubtrees(ctx context.Context, keys []string, fn func(i int, val []byte) error) error
+
+	// ScanSubtrees iterates over the recursive totals in the subtree bucket
+	// in lexicographical key order, starting at exactKey and stopping once
+	// keys no longer match exactKey or childPrefix (when either is
+	// non-empty).
+	ScanSubtrees(ctx context.Context, exactKey, childPrefix string, visitor func(ctx context.Context, key string, val []byte) bool) error
+
 	// GetMeta retrieves a metadata value from the metadata bucket into buf.
 	GetMeta(ctx context.Context, key string, buf *bytes.Buffer) error
 
@@ -625,6 +653,16 @@ type Writer interface {
 	// DeleteSummary deletes the summary entry matching exactKey and any
 	// descendant summary entries matching childPrefix.
 	DeleteSummary(ctx context.Context, exactKey, childPrefix string) error
+
+	// SetSubtree stores the recursive totals for key in the subtree bucket.
+	SetSubtree(ctx context.Context, key string, value []byte, batch bool) error
+
+	// DeleteSubtrees deletes the subtree entry matching exactKey and any
+	// descendant subtree entries matching childPrefix.
+	DeleteSubtrees(ctx context.Context, exactKey, childPrefix string) error
+
+	// ClearSubtrees deletes all of the entries in the subtree bucket.
+	ClearSubtrees(ctx context.Context) error
 
 	// SetMeta stores a metadata value in the metadata bucket.
 	SetMeta(ctx context.Context, key string, value []byte) error

@@ -898,3 +898,98 @@ func TestLogSubsecondAndTimezoneOrdering(t *testing.T) {
 }
 
 var _ idudb.Database = (*badgerdb.Database)(nil)
+
+func TestSubtrees(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := openTestBadger(t, t.TempDir())
+	defer db.Close(ctx)
+
+	keys := []string{"\x00s1", "\x00s1\x00c1", "\x00s2", "\x00s2\x00c1"}
+	for i, k := range keys {
+		// Batch half of the writes.
+		if err := db.SetSubtree(ctx, k, []byte(k), i%2 == 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// The subtree and summary buckets are distinct.
+	if err := db.SetSummary(ctx, "\x00s1", []byte("summary"), false); err != nil {
+		t.Fatal(err)
+	}
+	scan := func(exactKey, childPrefix string) []string {
+		var got []string
+		if err := db.ScanSubtrees(ctx, exactKey, childPrefix, func(_ context.Context, k string, v []byte) bool {
+			if string(v) != k {
+				t.Errorf("%q: got %q", k, v)
+			}
+			got = append(got, k)
+			return true
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := scan("", ""); !slices.Equal(got, keys) {
+		t.Errorf("got %q, want %q", got, keys)
+	}
+	if got, want := scan("\x00s2", "\x00s2\x00"), keys[2:]; !slices.Equal(got, want) {
+		t.Errorf("got %q, want %q", got, want)
+	}
+
+	checkGetSubtrees(ctx, t, db)
+
+	if err := db.DeleteSubtrees(ctx, "\x00s1", "\x00s1\x00"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := scan("", ""), keys[2:]; !slices.Equal(got, want) {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if err := db.ClearSubtrees(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := scan("", ""); len(got) != 0 {
+		t.Errorf("got %q", got)
+	}
+	var buf []string
+	if err := db.ScanSummaries(ctx, "", "", func(_ context.Context, k string, _ []byte) bool {
+		buf = append(buf, k)
+		return true
+	}); err != nil || !slices.Equal(buf, []string{"\x00s1"}) {
+		t.Errorf("summaries: %q %v", buf, err)
+	}
+}
+
+func checkGetSubtrees(ctx context.Context, t *testing.T, db idudb.Database) {
+	t.Helper()
+	var got []string
+	if err := db.GetSubtrees(ctx, []string{"\x00s2", "\x00missing", "\x00s1"}, func(_ int, v []byte) error {
+		got = append(got, string(v))
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"\x00s2", "", "\x00s1"}; !slices.Equal(got, want) {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestSubtreesReadOnly(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+	_ = openTestBadger(t, dir).Close(ctx)
+	rdb := openTestBadger(t, dir, badgerdb.ReadOnly())
+	defer rdb.Close(ctx)
+	if err := rdb.SetSubtree(ctx, "\x00x", []byte("1"), false); !errors.Is(err, badger.ErrReadOnlyTxn) {
+		t.Errorf("readonly SetSubtree = %v, want ErrReadOnlyTxn", err)
+	}
+	if err := rdb.DeleteSubtrees(ctx, "\x00x", ""); !errors.Is(err, badger.ErrReadOnlyTxn) {
+		t.Errorf("readonly DeleteSubtrees = %v, want ErrReadOnlyTxn", err)
+	}
+	if err := rdb.ClearSubtrees(ctx); !errors.Is(err, badger.ErrReadOnlyTxn) {
+		t.Errorf("readonly ClearSubtrees = %v, want ErrReadOnlyTxn", err)
+	}
+}

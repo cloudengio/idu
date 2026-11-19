@@ -1,4 +1,5 @@
 # Package [cloudeng.io/cmd/idu/internal/topn](https://pkg.go.dev/cloudeng.io/cmd/idu/internal/topn?tab=doc)
+[![CircleCI](https://circleci.com/gh/cloudengio/go.gotools.svg?style=svg)](https://circleci.com/gh/cloudengio/go.gotools) [![Go Report Card](https://goreportcard.com/badge/cloudeng.io/cmd/idu/internal/topn)](https://goreportcard.com/report/cloudeng.io/cmd/idu/internal/topn)
 
 ```go
 import cloudeng.io/cmd/idu/internal/topn
@@ -19,11 +20,16 @@ to all keys, including those not in the heap. The number of such entries is
 reported by Certified.
 
 ## Constants
-### StateKey, PrefixesKey
+### StateKey, PrefixesKey, SubtreesKey, IDTotalsKey
 ```go
 const (
 	StateKey    = keyPrefix + "state"
 	PrefixesKey = keyPrefix + "prefixes"
+	// SubtreesKey is the key for the rankings of the prefixes by their
+	// recursive totals.
+	SubtreesKey = keyPrefix + "subtrees"
+	// IDTotalsKey is the key for the IDTotals.
+	IDTotalsKey = keyPrefix + "ids"
 )
 ```
 The keys, in the database's metadata bucket, used to store the state and the
@@ -37,6 +43,13 @@ rankings.
 func GroupKey(gid int64) string
 ```
 GroupKey returns the key for the rankings of the prefixes used by gid.
+
+### Func Sorted
+```go
+func Sorted(m map[int64]stats.Totals, metric stats.Metric) []stats.Totals
+```
+Sorted returns the totals in m in descending order of metric, with ties
+broken by ascending id. Ids with a zero value for metric are omitted.
 
 ### Func UserKey
 ```go
@@ -150,6 +163,61 @@ in descending order of value, with ties broken by key.
 func (h *Heap) Value(key string) (int64, bool)
 ```
 Value returns the value of key if it is in the heap.
+
+
+
+
+### Type IDTotals
+```go
+type IDTotals struct {
+	Users, Groups map[int64]stats.Totals
+}
+```
+IDTotals records the totals, across an entire filesystem, for every user and
+group that owns any of its files or prefixes. They are exact, rather than
+bounded rankings, since the number of ids is small compared with the number
+of prefixes.
+
+### Functions
+
+```go
+func NewIDTotals() *IDTotals
+```
+NewIDTotals returns an empty IDTotals.
+
+
+
+### Methods
+
+```go
+func (t *IDTotals) Add(users, groups stats.PerIDTotals)
+```
+Add adds the per-user and per-group totals for a prefix.
+
+
+```go
+func (t *IDTotals) AppendBinary(data []byte) []byte
+```
+AppendBinary appends the binary encoding of t to data.
+
+
+```go
+func (t *IDTotals) IsNegative() bool
+```
+IsNegative returns true if any of the totals are negative, ie. if more was
+subtracted than was ever added.
+
+
+```go
+func (t *IDTotals) Sub(users, groups stats.PerIDTotals)
+```
+Sub subtracts the per-user and per-group totals for a prefix.
+
+
+```go
+func (t *IDTotals) UnmarshalBinary(data []byte) error
+```
+UnmarshalBinary decodes IDTotals encoded by AppendBinary.
 
 
 

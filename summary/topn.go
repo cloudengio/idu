@@ -6,10 +6,12 @@ package summary
 
 import (
 	"bytes"
+	"container/heap"
 	"context"
 	"errors"
 	"fmt"
 
+	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/internal/topn"
 	"cloudeng.io/cmd/idu/stats"
 )
@@ -67,9 +69,16 @@ func (r *Reader) topNState(ctx context.Context) (topn.State, error) {
 	return s, nil
 }
 
-func (r *Reader) topN(ctx context.Context, key string, metric stats.Metric, n, maintained int) (TopN, error) {
+func checkMetric(metric stats.Metric) error {
 	if metric < 0 || int(metric) >= stats.NumMetrics {
-		return TopN{}, fmt.Errorf("invalid metric: %v", metric)
+		return fmt.Errorf("invalid metric: %v", metric)
+	}
+	return nil
+}
+
+func (r *Reader) topN(ctx context.Context, key string, metric stats.Metric, n, maintained int) (TopN, error) {
+	if err := checkMetric(metric); err != nil {
+		return TopN{}, err
 	}
 	res := TopN{N: maintained}
 	var buf bytes.Buffer
@@ -77,7 +86,7 @@ func (r *Reader) topN(ctx context.Context, key string, metric stats.Metric, n, m
 		return TopN{}, err
 	}
 	if buf.Len() == 0 {
-		return res, nil
+		return TopN{}, ErrNoTopN
 	}
 	var rk topn.Rankings
 	if err := rk.UnmarshalBinary(buf.Bytes()); err != nil {
@@ -139,4 +148,211 @@ func (r *Reader) TopNIDs(ctx context.Context) (users, groups []int64, err error)
 		return nil, nil, err
 	}
 	return s.Users, s.Groups, nil
+}
+
+// TopSubtrees is like TopPrefixes but ranks the prefixes by their
+// recursive value for metric, ie. that of the prefix and all of its
+// descendants. See TopSubtreesWithin for the top subtrees within a prefix.
+func (r *Reader) TopSubtrees(ctx context.Context, metric stats.Metric, n int) (TopN, error) {
+	s, err := r.topNState(ctx)
+	if err != nil {
+		return TopN{}, err
+	}
+	return r.topN(ctx, topn.SubtreesKey, metric, n, s.N)
+}
+
+// RankedID is a single entry in a ranking of users or groups.
+type RankedID struct {
+	ID     int64
+	Value  int64
+	Totals stats.Totals
+}
+
+func (r *Reader) idTotals(ctx context.Context) (*topn.IDTotals, error) {
+	if _, err := r.topNState(ctx); err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	if err := r.db.GetMeta(ctx, topn.IDTotalsKey, &buf); err != nil {
+		return nil, err
+	}
+	if buf.Len() == 0 {
+		return nil, ErrNoTopN
+	}
+	ids := &topn.IDTotals{}
+	if err := ids.UnmarshalBinary(buf.Bytes()); err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+func rankIDs(m map[int64]stats.Totals, metric stats.Metric, n int) []RankedID {
+	sorted := topn.Sorted(m, metric)
+	if n > 0 && n < len(sorted) {
+		sorted = sorted[:n]
+	}
+	out := make([]RankedID, len(sorted))
+	for i, t := range sorted {
+		out[i] = RankedID{ID: t.ID, Value: metric.Value(t), Totals: t}
+	}
+	return out
+}
+
+// TopUsers returns the top n users, or all users if n is zero or less, by
+// their value for metric across the entire filesystem, in descending order
+// of Value. Unlike the rankings of prefixes, the totals for every user are
+// stored and hence the result is always exact. Note that hardlinks are not
+// deduplicated.
+func (r *Reader) TopUsers(ctx context.Context, metric stats.Metric, n int) ([]RankedID, error) {
+	if err := checkMetric(metric); err != nil {
+		return nil, err
+	}
+	ids, err := r.idTotals(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return rankIDs(ids.Users, metric, n), nil
+}
+
+// TopGroups is like TopUsers but for groups.
+func (r *Reader) TopGroups(ctx context.Context, metric stats.Metric, n int) ([]RankedID, error) {
+	if err := checkMetric(metric); err != nil {
+		return nil, err
+	}
+	ids, err := r.idTotals(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return rankIDs(ids.Groups, metric, n), nil
+}
+
+// Subtree returns the recursive totals for path, ie. the sum of the direct
+// totals of path and all of its descendants, if path exists. It returns
+// idudb.ErrStaleSubtrees if the recursive totals are missing or may be out
+// of date. Note that hardlinks are not deduplicated.
+func (r *Reader) Subtree(ctx context.Context, path string) (stats.Totals, bool, error) {
+	if r.err != nil {
+		return stats.Totals{}, false, r.err
+	}
+	if err := idudb.CheckSubtrees(ctx, r.db); err != nil {
+		return stats.Totals{}, false, err
+	}
+	t, ok, err := r.subtrees(ctx, []string{stats.NormalizePath(r.sep, path)})
+	if err != nil {
+		return stats.Totals{}, false, err
+	}
+	return t[0], ok[0], nil
+}
+
+// subtrees returns the recursive totals for each of paths and whether
+// each was found.
+func (r *Reader) subtrees(ctx context.Context, paths []string) ([]stats.Totals, []bool, error) {
+	keys := make([]string, len(paths))
+	for i, p := range paths {
+		keys[i], _ = stats.SummaryKeys(r.sep, p)
+	}
+	totals := make([]stats.Totals, len(paths))
+	found := make([]bool, len(paths))
+	err := r.db.GetSubtrees(ctx, keys, func(i int, val []byte) error {
+		if val == nil {
+			return nil
+		}
+		if err := totals[i].UnmarshalBinary(val); err != nil {
+			return fmt.Errorf("%v: recursive totals: %w", paths[i], err)
+		}
+		found[i] = true
+		return nil
+	})
+	return totals, found, err
+}
+
+// rankedHeap is a max-heap of Ranked, ordered by descending Value with
+// ties broken by ascending Path.
+type rankedHeap []Ranked
+
+func (h rankedHeap) Len() int { return len(h) }
+func (h rankedHeap) Less(i, j int) bool {
+	if h[i].Value != h[j].Value {
+		return h[i].Value > h[j].Value
+	}
+	return h[i].Path < h[j].Path
+}
+func (h rankedHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h *rankedHeap) Push(x any)   { *h = append(*h, x.(Ranked)) }
+func (h *rankedHeap) Pop() any {
+	old := *h
+	n := len(old) - 1
+	x := old[n]
+	*h = old[:n]
+	return x
+}
+
+// TopSubtreesWithin returns the top n prefixes, path itself included, by
+// their recursive value for metric among path and its descendants, in
+// descending order of Value with ties broken by Path. Since a subtree's
+// value can never exceed that of its parent, it performs a best-first
+// search of the stored recursive totals whose cost is proportional to n
+// times the fanout of the prefixes visited, rather than to the size of the
+// subtree, and its results are always exact. Prefixes with a zero value
+// are omitted. It returns idudb.ErrStaleSubtrees if the recursive totals
+// are missing or may be out of date.
+func (r *Reader) TopSubtreesWithin(ctx context.Context, path string, metric stats.Metric, n int) ([]Ranked, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	if err := checkMetric(metric); err != nil {
+		return nil, err
+	}
+	if err := idudb.CheckSubtrees(ctx, r.db); err != nil {
+		return nil, err
+	}
+	if n <= 0 {
+		return nil, nil
+	}
+	frontier := &rankedHeap{}
+	push := func(paths []string) error {
+		totals, found, err := r.subtrees(ctx, paths)
+		if err != nil {
+			return err
+		}
+		for i, p := range paths {
+			if v := metric.Value(totals[i]); found[i] && v > 0 {
+				heap.Push(frontier, Ranked{Path: p, Value: v})
+			}
+		}
+		return nil
+	}
+	if err := push([]string{stats.NormalizePath(r.sep, path)}); err != nil {
+		return nil, err
+	}
+	var out []Ranked
+	for len(out) < n && frontier.Len() > 0 {
+		next := heap.Pop(frontier).(Ranked)
+		out = append(out, next)
+		if len(out) == n {
+			break
+		}
+		children, err := r.childPaths(ctx, next.Path)
+		if err != nil {
+			return nil, err
+		}
+		if err := push(children); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// childPaths returns the paths of the immediate child prefixes of path.
+func (r *Reader) childPaths(ctx context.Context, path string) ([]string, error) {
+	p, ok, err := r.Prefix(ctx, path)
+	if err != nil || !ok {
+		return nil, err
+	}
+	prefixes := p.pi.PrefixesOnly()
+	children := make([]string, 0, len(prefixes))
+	for _, fi := range prefixes {
+		children = append(children, join(r.sep, p.Path(), fi.Name()))
+	}
+	return children, nil
 }

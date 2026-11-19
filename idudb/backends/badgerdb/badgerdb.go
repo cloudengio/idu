@@ -75,7 +75,7 @@ type Database struct {
 	closeErr  error
 }
 
-// The database is partitioned into 6 'buckets':
+// The database is partitioned into 7 'buckets':
 // 1. inode bucket, keyed by inode and device numbers. This is by far
 //    the largest since it has an entry for every file.
 // 2. the prefix bucket, keyed by prefix. This contains an entry for
@@ -88,6 +88,8 @@ type Database struct {
 //    summary for every prefix.
 // 6. the meta bucket, keyed by name. This contains metadata describing
 //    the database, such as how its summaries were computed.
+// 7. the subtree bucket, keyed by summary key. This contains the recursive
+//    totals for every prefix.
 //
 // Keys are assigned to each bucket by prepending an identifying byte
 // to the key.
@@ -99,6 +101,7 @@ const (
 	errorBucket      = 0xf3
 	summaryBucket    = 0xf4
 	metaBucket       = 0xf5
+	subtreeBucket    = 0xf6
 	logKeyTimeFormat = "2006-01-02T15:04:05.000000000Z"
 )
 
@@ -339,13 +342,34 @@ func (db *Database) Delete(ctx context.Context, prefix string) error {
 
 // SetSummary stores a precomputed summary value in the summary bucket.
 func (db *Database) SetSummary(ctx context.Context, key string, val []byte, batch bool) error {
+	return db.setInBucket(ctx, summaryBucket, key, val, batch)
+}
+
+// DeleteSummary deletes exactKey and any descendant keys matching childPrefix
+// from the summary bucket without affecting sibling prefixes.
+func (db *Database) DeleteSummary(ctx context.Context, exactKey, childPrefix string) error {
+	return db.deleteSummaryKeys(ctx, summaryBucket, exactKey, childPrefix)
+}
+
+// SetSubtree stores the recursive totals for key in the subtree bucket.
+func (db *Database) SetSubtree(ctx context.Context, key string, val []byte, batch bool) error {
+	return db.setInBucket(ctx, subtreeBucket, key, val, batch)
+}
+
+// DeleteSubtrees deletes exactKey and any descendant keys matching childPrefix
+// from the subtree bucket without affecting sibling prefixes.
+func (db *Database) DeleteSubtrees(ctx context.Context, exactKey, childPrefix string) error {
+	return db.deleteSummaryKeys(ctx, subtreeBucket, exactKey, childPrefix)
+}
+
+func (db *Database) setInBucket(ctx context.Context, bucket byte, key string, val []byte, batch bool) error {
 	if err := db.canceled(ctx); err != nil {
 		return err
 	}
 	if db.ReadOnly {
 		return badger.ErrReadOnlyTxn
 	}
-	kb := keyForBucket(summaryBucket, []byte(key))
+	kb := keyForBucket(bucket, []byte(key))
 	defer bufPool.Put(kb)
 	if batch {
 		return db.batchSet(kb.Bytes(), val)
@@ -353,9 +377,7 @@ func (db *Database) SetSummary(ctx context.Context, key string, val []byte, batc
 	return db.set(ctx, kb.Bytes(), val)
 }
 
-// DeleteSummary deletes exactKey and any descendant keys matching childPrefix
-// from the summary bucket without affecting sibling prefixes.
-func (db *Database) DeleteSummary(ctx context.Context, exactKey, childPrefix string) error {
+func (db *Database) deleteSummaryKeys(ctx context.Context, bucket byte, exactKey, childPrefix string) error {
 	if err := db.canceled(ctx); err != nil {
 		return err
 	}
@@ -363,16 +385,27 @@ func (db *Database) DeleteSummary(ctx context.Context, exactKey, childPrefix str
 		return badger.ErrReadOnlyTxn
 	}
 	if exactKey != "" && (childPrefix == "" || !strings.HasPrefix(exactKey, childPrefix)) {
-		if err := db.deleteKey(summaryBucket, exactKey); err != nil {
+		if err := db.deleteKey(bucket, exactKey); err != nil {
 			return err
 		}
 	}
 	if childPrefix != "" {
-		cb := keyForBucket(summaryBucket, []byte(childPrefix))
+		cb := keyForBucket(bucket, []byte(childPrefix))
 		defer bufPool.Put(cb)
 		return db.deletePrefix(ctx, cb.Bytes())
 	}
 	return nil
+}
+
+// ClearSubtrees deletes all of the entries in the subtree bucket.
+func (db *Database) ClearSubtrees(ctx context.Context) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
+	if db.ReadOnly {
+		return badger.ErrReadOnlyTxn
+	}
+	return db.bdb.DropPrefix([]byte{subtreeBucket})
 }
 
 // SetMeta stores a metadata entry in the metadata bucket.
@@ -602,8 +635,21 @@ func inSummaryRange(exactKey, childPrefix, k string) bool {
 // ScanSummaries iterates over entries in the summary bucket starting at
 // exactKey and stopping once keys no longer match exactKey or childPrefix.
 func (db *Database) ScanSummaries(ctx context.Context, exactKey, childPrefix string, visitor func(ctx context.Context, key string, val []byte) bool) error {
-	return db.scanFrom(ctx, summaryBucket, []byte(exactKey), func(ctx context.Context, key string, val []byte) error {
-		if len(key) == 0 || key[0] != summaryBucket {
+	return db.scanSummaryKeys(ctx, summaryBucket, exactKey, childPrefix, visitor)
+}
+
+// ScanSubtrees iterates over entries in the subtree bucket starting at
+// exactKey and stopping once keys no longer match exactKey or childPrefix.
+func (db *Database) ScanSubtrees(ctx context.Context, exactKey, childPrefix string, visitor func(ctx context.Context, key string, val []byte) bool) error {
+	return db.scanSummaryKeys(ctx, subtreeBucket, exactKey, childPrefix, visitor)
+}
+
+// scanSummaryKeys iterates over the entries, keyed by summary key, in
+// bucket starting at exactKey and stopping once keys no longer match
+// exactKey or childPrefix.
+func (db *Database) scanSummaryKeys(ctx context.Context, bucket byte, exactKey, childPrefix string, visitor func(ctx context.Context, key string, val []byte) bool) error {
+	return db.scanFrom(ctx, bucket, []byte(exactKey), func(ctx context.Context, key string, val []byte) error {
+		if len(key) == 0 || key[0] != bucket {
 			return errScanDone
 		}
 		k := key[1:]
@@ -621,6 +667,15 @@ func (db *Database) ScanSummaries(ctx context.Context, exactKey, childPrefix str
 // is none, reading all of them within a single read transaction since
 // creating a transaction per value is expensive.
 func (db *Database) GetBatch(ctx context.Context, keys []string, fn func(i int, val []byte) error) error {
+	return db.getBatch(ctx, prefixBucket, keys, fn)
+}
+
+// GetSubtrees is like GetBatch but for the subtree bucket.
+func (db *Database) GetSubtrees(ctx context.Context, keys []string, fn func(i int, val []byte) error) error {
+	return db.getBatch(ctx, subtreeBucket, keys, fn)
+}
+
+func (db *Database) getBatch(ctx context.Context, bucket byte, keys []string, fn func(i int, val []byte) error) error {
 	if err := db.canceled(ctx); err != nil {
 		return err
 	}
@@ -628,7 +683,7 @@ func (db *Database) GetBatch(ctx context.Context, keys []string, fn func(i int, 
 	return db.bdb.View(func(tx *badger.Txn) error {
 		for i, key := range keys {
 			kb.Reset()
-			kb.WriteByte(prefixBucket)
+			kb.WriteByte(bucket)
 			kb.WriteString(key)
 			item, err := tx.Get(kb.Bytes())
 			if err == badger.ErrKeyNotFound {
