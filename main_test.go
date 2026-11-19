@@ -385,12 +385,31 @@ func verifyDistributedMode(t *testing.T, home, confDir, treeDir, fanoutRoot, nam
 	if out, err := runIDUEnv(env, "analyze"); err != nil {
 		t.Fatalf("%s analyze failed: %v\n%s", name, err, out)
 	}
+	latestStats := filepath.Join(statsDir, "latest.idustats")
+	// By default, the stats for the root of the filesystem are constructed
+	// from the stored rankings, which do not include the distributed
+	// subtree statistics.
 	if out, err := runIDUEnv(env, "stats", "compute", "."); err != nil {
 		t.Fatalf("%s stats compute failed: %v\n%s", name, err, out)
 	}
+	viewOut, err := runIDUEnv(env, "stats", "view", "--info", latestStats)
+	if err != nil {
+		t.Fatalf("%s stats view failed: %v\n%s", name, err, viewOut)
+	}
+	// The stored rankings cannot deduplicate hardlinks when the summaries
+	// do not record them, so a rescan is always used for rescan.
+	expected := []string{"Usage by top 10 Subtrees", "Distributed subtree hotspots were not computed", fanoutRoot, "maintained by analyze"}
+	if hardlinkDedup == "rescan" {
+		expected = []string{"Usage by top 10 Subtrees", "Distributed Subtree Hotspots", fanoutRoot, "Source     : the summaries"}
+	}
+	if err := containsAnyOf(viewOut, expected...); err != nil {
+		t.Fatalf("%s stats view missing expected output: %v\n%s", name, err, viewOut)
+	}
 
-	latestStats := filepath.Join(statsDir, "latest.idustats")
-	viewOut, err := runIDUEnv(env, "stats", "view", latestStats)
+	if out, err := runIDUEnv(env, "stats", "compute", "--scan", "."); err != nil {
+		t.Fatalf("%s stats compute failed: %v\n%s", name, err, out)
+	}
+	viewOut, err = runIDUEnv(env, "stats", "view", latestStats)
 	if err != nil {
 		t.Fatalf("%s stats view failed: %v\n%s", name, err, viewOut)
 	}

@@ -242,17 +242,27 @@ func (r *Reader) TopGroups(ctx context.Context, metric stats.Metric, n int) ([]R
 // the recursive totals are rebuilt, eg. by analyze --refresh-topn, rather
 // than as soon as they are created.
 func (r *Reader) Subtree(ctx context.Context, path string) (stats.Totals, bool, error) {
-	if r.err != nil {
-		return stats.Totals{}, false, r.err
-	}
-	if err := idudb.CheckSubtrees(ctx, r.db); err != nil {
-		return stats.Totals{}, false, err
-	}
-	t, ok, err := r.subtrees(ctx, []string{stats.NormalizePath(r.sep, path)})
+	t, ok, err := r.Subtrees(ctx, []string{path})
 	if err != nil {
 		return stats.Totals{}, false, err
 	}
 	return t[0], ok[0], nil
+}
+
+// Subtrees is like Subtree but returns the recursive totals for each of
+// paths, and whether each was found, reading them all at once.
+func (r *Reader) Subtrees(ctx context.Context, paths []string) ([]stats.Totals, []bool, error) {
+	if r.err != nil {
+		return nil, nil, r.err
+	}
+	if err := idudb.CheckSubtrees(ctx, r.db); err != nil {
+		return nil, nil, err
+	}
+	normalized := make([]string, len(paths))
+	for i, p := range paths {
+		normalized[i] = stats.NormalizePath(r.sep, p)
+	}
+	return r.subtrees(ctx, normalized)
 }
 
 // subtrees returns the recursive totals for each of paths and whether

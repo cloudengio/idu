@@ -247,6 +247,13 @@ by analyze --refresh-topn, rather than as soon as they are created.
 
 
 ```go
+func (r *Reader) Subtrees(ctx context.Context, paths []string) ([]stats.Totals, []bool, error)
+```
+Subtrees is like Subtree but returns the recursive totals for each of paths,
+and whether each was found, reading them all at once.
+
+
+```go
 func (r *Reader) TopGroups(ctx context.Context, metric stats.Metric, n int) ([]RankedID, error)
 ```
 TopGroups is like TopUsers but for groups.

@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/gob"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -34,6 +35,13 @@ type statsFileFormat struct {
 	Date       time.Time
 	Expression string
 	Stats      *report.AllStats
+	// Source is statsFromSummaries or statsFromStored, it is empty for
+	// files written before stats could be constructed from the stored
+	// state, which were always computed from the summaries.
+	Source string
+	// PerIDN is the maximum number of entries in the rankings of prefixes
+	// for each user and group when Source is statsFromStored.
+	PerIDN int
 }
 
 func loadStats(filename string) (statsFileFormat, error) {
@@ -112,6 +120,7 @@ type StatsFlags struct {
 
 type computeFlags struct {
 	ComputeN  int             `subcmd:"n,2000,number of top entries to compute"`
+	Scan      bool            `subcmd:"scan,false,'compute the stats from all of the summaries for the prefix, rather than from the rankings and recursive totals maintained by analyze, which are used by default for the root of a filesystem but do not include the distributed subtree statistics and limit the per user and group rankings to topn_per_id entries'"`
 	Progress  bool            `subcmd:"progress,false,show progress"`
 	StatsDir  string          `subcmd:"stats-dir,,'directory that stats files are written to, defaults to stats_dir from the configuration or stats'"`
 	StatsFile string          `subcmd:"stats-file,,'write stats to the specified file, rather than a directory, use - for stdout'"`
@@ -137,10 +146,16 @@ func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *comput
 
 	parser := stats.NewParser(ctx, fwfs)
 
-	ctx, cfg, target, rdb, err := openPrefixReadOnly(ctx, globalConfig, args[0])
+	ctx, f, target, err := lookupPrefix(ctx, globalConfig, args[0])
 	if err != nil {
 		return err
 	}
+	cfg := f.Config()
+	rdb, err := openReadOnlyDB(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("failed to open database for %v in %v: %w", iduconfig.Label(f), cfg.Database, err)
+	}
+	defer rdb.Close(ctx)
 
 	match, err := stats.NewMatcher(parser,
 		stats.WithExpression(args[1:]...),
@@ -148,16 +163,14 @@ func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *comput
 		stats.WithFilewalkFS(fwfs),
 		stats.WithHardlinkHandling(!cfg.CountHardlinkAsFiles))
 	if err != nil {
-		rdb.Close(ctx)
 		return err
 	}
 
-	sdb, err := st.computeStats(ctx, rdb, cfg, match, target, cf.ComputeN, cf.Progress)
+	useStored := !cf.Scan && isFilesystemRoot(cfg, f.Location(), target)
+	sdb, source, perIDN, err := st.computeStats(ctx, rdb, cfg, match, target, useStored, cf.ComputeN, cf.Progress)
 	if err != nil {
-		rdb.Close(ctx)
 		return err
 	}
-	rdb.Close(ctx)
 
 	// Save stats.
 	stats := statsFileFormat{
@@ -165,19 +178,49 @@ func (st *statsCmds) computeFS(ctx context.Context, fwfs filewalk.FS, cf *comput
 		Date:       time.Now(),
 		Expression: match.String(),
 		Stats:      sdb,
+		Source:     source,
+		PerIDN:     perIDN,
 	}
 	return saveStats(selectStatsDir(cf.StatsDir, cfg.StatsDir), cf.StatsFile, stats)
 }
 
-// computeStats computes stats for prefix using the precomputed summaries
-// unless they cannot be used, in which case all of the file metadata is
-// rescanned: summaries are computed without any filter expression and only
-// record what's needed to deduplicate hardlinks if configured to do so.
-func (st *statsCmds) computeStats(ctx context.Context, db idudb.Reader, cfg *iduconfig.Settings, match stats.Matcher, prefix string, topN int, progress bool) (*report.AllStats, error) {
+// computeStats computes stats for prefix and returns them together with
+// their source and, when statsFromStored is used, the stored per-ID
+// ranking limit. If useStored is true, and prefix is the root of the
+// filesystem, they are constructed from the rankings and recursive totals
+// maintained by analyze when those are available and up to date. Otherwise
+// they are computed from the precomputed summaries unless they cannot be
+// used, in which case all of the file metadata is rescanned: summaries are
+// computed without any filter expression and only record what's needed to
+// deduplicate hardlinks if configured to do so.
+func (st *statsCmds) computeStats(ctx context.Context, db idudb.Reader, cfg *iduconfig.Settings, match stats.Matcher, prefix string, useStored bool, topN int, progress bool) (*report.AllStats, string, int, error) {
 	if match.HasExpression() || !cfg.CountHardlinkAsFiles && !cfg.RecordHardlinks() {
-		return st.computeFromPrefixes(ctx, db, cfg, match, prefix, topN, progress)
+		sdb, err := st.computeFromPrefixes(ctx, db, cfg, match, prefix, topN, progress)
+		return sdb, statsFromSummaries, 0, err
 	}
-	return st.computeFromSummaries(ctx, db, cfg, prefix, topN, progress)
+	if useStored {
+		sdb, perIDN, err := st.computeFromStored(ctx, db, cfg, prefix, topN)
+		if err == nil {
+			return sdb, statsFromStored, perIDN, nil
+		}
+		if !errors.Is(err, errStoredUnusable) {
+			return nil, "", 0, err
+		}
+		fmt.Fprintf(os.Stderr, "computing stats from the summaries: %v\n", err)
+	}
+	sdb, err := st.computeFromSummaries(ctx, db, cfg, prefix, topN, progress)
+	return sdb, statsFromSummaries, 0, err
+}
+
+// isFilesystemRoot returns true if target is the root of the filesystem,
+// which is the only prefix for which the stored rankings and recursive
+// totals can be used, since they deduplicate hardlinks across the entire
+// filesystem.
+func isFilesystemRoot(cfg *iduconfig.Settings, root, target string) bool {
+	sep := cfg.SeparatorOrDefault()
+	rk, _ := stats.SummaryKeys(sep, root)
+	tk, _ := stats.SummaryKeys(sep, target)
+	return rk == tk
 }
 
 func (st *statsCmds) computeFromSummaries(ctx context.Context, db idudb.Reader, cfg *iduconfig.Settings, prefix string, topN int, progress bool) (*report.AllStats, error) {
@@ -262,6 +305,17 @@ func (st *statsCmds) computeFromPrefixes(ctx context.Context, db idudb.Reader, c
 	return sdb, nil
 }
 
+// statsSource describes the source of the stats in a stats file.
+func statsSource(sf statsFileFormat) string {
+	switch sf.Source {
+	case statsFromStored:
+		return fmt.Sprintf("the rankings and recursive totals maintained by analyze (at most %v entries per user and group)", sf.PerIDN)
+	case "", statsFromSummaries:
+		return "the summaries"
+	}
+	return sf.Source
+}
+
 func selectStatsDir(statsDirFlag, cfgStatsDir string) string {
 	if len(statsDirFlag) > 0 {
 		return statsDirFlag
@@ -343,6 +397,7 @@ func (st *statsCmds) view(ctx context.Context, values interface{}, args []string
 		fmt.Printf("Date       : %v\n", stats.Date)
 		fmt.Printf("Prefix     : %v\n", stats.Prefix)
 		fmt.Printf("Expression : %v\n", stats.Expression)
+		fmt.Printf("Source     : %v\n", statsSource(stats))
 		fmt.Println()
 	}
 
@@ -370,6 +425,8 @@ func (st *statsCmds) view(ctx context.Context, values interface{}, args []string
 	if sdb.Distributed != nil {
 		banner(os.Stdout, "=", "\nDistributed Subtree Hotspots (top %v, modest fanout) as of: %v\n", af.DisplayN, when)
 		formatDistributedHeaps(sdb.Distributed, os.Stdout, af.DisplayN)
+	} else if stats.Source == statsFromStored {
+		fmt.Printf("\nDistributed subtree hotspots were not computed, use stats compute --scan to compute them.\n")
 	}
 
 	banner(os.Stdout, "=", "\nUsage by top %v users as of: %v\n", af.DisplayN, when)
