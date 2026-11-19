@@ -7,13 +7,16 @@ package summary_test
 import (
 	"context"
 	"errors"
+	"iter"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"testing"
+	"time"
 
 	"cloudeng.io/cmd/idu/iduconfig"
+	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/cmd/idu/summary"
 )
@@ -87,6 +90,17 @@ func TestTopPrefixesForIDs(t *testing.T) {
 	}
 }
 
+type failStartObserver struct{}
+
+func (failStartObserver) ScanStarted(context.Context, idudb.ScanInfo) error {
+	return errors.New("abort scan")
+}
+func (failStartObserver) PrefixChanged(context.Context, string, *stats.PrefixSummary, *stats.PrefixSummary) {
+}
+func (failStartObserver) SubtreeDeleted(context.Context, string, iter.Seq2[string, *stats.PrefixSummary]) {
+}
+func (failStartObserver) ScanDone(context.Context, error) error { return nil }
+
 func TestTopPrefixesUnavailable(t *testing.T) {
 	ctx := context.Background()
 	root, cfg := createTree(t, false)
@@ -95,5 +109,26 @@ func TestTopPrefixesUnavailable(t *testing.T) {
 	sr := openReader(ctx, t, cfg)
 	if _, err := sr.TopPrefixes(ctx, stats.MetricBytes, 1); !errors.Is(err, summary.ErrNoTopN) {
 		t.Errorf("got %v, want %v", err, summary.ErrNoTopN)
+	}
+
+	// An interrupted analysis leaves top-N rankings marked invalid.
+	root2, cfg2 := createTree(t, false)
+	db, err := idudb.OpenWritable(ctx, cfg2, []idudb.OpenOption{withBadger})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := idudb.NewAnalyzer(db, root2, idudb.WithObserver(failStartObserver{})).Analyze(ctx, root2); err == nil {
+		t.Fatal("expected error from failStartObserver")
+	}
+	if err := db.LogAndClose(ctx, time.Now(), time.Now(), []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	sr2, err := summary.Open(ctx, cfg2, withBadger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sr2.Close(ctx) }()
+	if _, err := sr2.TopPrefixes(ctx, stats.MetricBytes, 1); !errors.Is(err, summary.ErrStaleTopN) {
+		t.Errorf("got %v, want %v", err, summary.ErrStaleTopN)
 	}
 }

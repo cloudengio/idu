@@ -84,7 +84,9 @@ func (r *Reader) topN(ctx context.Context, key string, metric stats.Metric, n, m
 		return TopN{}, err
 	}
 	h := rk[metric]
-	for _, e := range h.Top(n) {
+	top := h.Top(n)
+	res.Entries = make([]Ranked, 0, len(top))
+	for _, e := range top {
 		res.Entries = append(res.Entries, Ranked{Path: e.Key, Value: e.Value})
 	}
 	res.Certified = min(h.Certified(), len(res.Entries))

@@ -157,3 +157,17 @@ func TestEncoding(t *testing.T) {
 		t.Errorf("HasUser/HasGroup")
 	}
 }
+
+func TestDecodeOverflow(t *testing.T) {
+	// Capacity / state fields exceeding math.MaxInt must be rejected cleanly.
+	var h topn.Heap
+	overflowHeap := append([]byte{0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01}, 0x00, 0x00)
+	if _, err := h.DecodeBinary(overflowHeap); err == nil {
+		t.Errorf("expected overflow error from Heap.DecodeBinary")
+	}
+	overflowState := []byte{0x01, 0x01, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01}
+	var ovs topn.State
+	if err := ovs.UnmarshalBinary(overflowState); err == nil {
+		t.Errorf("expected overflow error from State.UnmarshalBinary")
+	}
+}

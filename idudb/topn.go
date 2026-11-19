@@ -212,6 +212,9 @@ func (t *topnObserver) setPerID(ctx context.Context, ir *idRankings, path string
 			continue
 		}
 		t.deletePerID(ctx, ir, path, id.ID)
+		if t.refresh {
+			return
+		}
 	}
 }
 
@@ -242,6 +245,9 @@ func (t *topnObserver) PrefixChanged(ctx context.Context, path string, old, cur 
 		oldUsers, oldGroups = old.PerUser, old.PerGroup
 	}
 	t.setPerID(ctx, &t.users, path, oldUsers, cur.PerUser)
+	if t.refresh {
+		return
+	}
 	t.setPerID(ctx, &t.groups, path, oldGroups, cur.PerGroup)
 }
 
@@ -344,9 +350,15 @@ func (sdb *DB) RefreshTopN(ctx context.Context) error {
 	if err := CheckSummaryKeys(ctx, sdb.db); err != nil {
 		return err
 	}
-	prev, _, err := getTopNState(ctx, sdb.db)
+	prev, ok, err := getTopNState(ctx, sdb.db)
 	if err != nil {
 		ctxlog.Warn(ctx, "failed to read top-N state", "error", err)
+	}
+	if ok && prev.Valid {
+		prev.Valid = false
+		if err := setTopNState(ctx, sdb.db, prev); err != nil {
+			return err
+		}
 	}
 	return refreshTopN(ctx, sdb, prev)
 }

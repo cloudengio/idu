@@ -154,7 +154,7 @@ func TestTopNIncremental(t *testing.T) {
 
 func TestTopNRefresh(t *testing.T) {
 	ctx := context.Background()
-	root, sub, dbDir := createRootAndSub(t)
+	root, _, dbDir := createRootAndSub(t)
 	var dirs []string
 	for _, name := range []string{"a", "b", "c", "d"} {
 		dirs = append(dirs, filepath.Join(root, name))
@@ -189,7 +189,6 @@ func TestTopNRefresh(t *testing.T) {
 	if !st.state.Valid || st.prefixes[stats.MetricBytes].Certified() != 2 {
 		t.Errorf("state %+v, certified %v", st.state, st.prefixes[stats.MetricBytes].Certified())
 	}
-	_ = sub
 }
 
 func TestTopNConfigChange(t *testing.T) {
@@ -307,5 +306,30 @@ func TestTopNUnreadablePreviousSummary(t *testing.T) {
 	}
 	if got := topKeys(&st.prefixes, stats.MetricFiles); !slices.Equal(got, []string{sub, root}) {
 		t.Errorf("got %v", got)
+	}
+}
+
+func TestRefreshTopNFailureInvalidatesState(t *testing.T) {
+	ctx := context.Background()
+	root, sub, dbDir := createRootAndSub(t)
+	dbOpts := []Option{WithTopN(10, 20, 5, 10)}
+	analyzeTopN(ctx, t, dbDir, root, dbOpts)
+
+	// Corrupt a summary so RefreshTopN fails mid-refresh.
+	db, err := openTestDB(ctx, dbDir, dbOpts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exactKey, _ := stats.SummaryKeys(db.sep, sub)
+	if err := db.db.SetSummary(ctx, exactKey, []byte{0xff}, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RefreshTopN(ctx); err == nil {
+		t.Fatalf("expected RefreshTopN error for corrupt summary")
+	}
+	st, ok, err := getTopNState(ctx, db.db)
+	_ = db.Close(ctx)
+	if err != nil || !ok || st.Valid {
+		t.Errorf("expected Valid=false after failed RefreshTopN, got %+v ok=%v err=%v", st, ok, err)
 	}
 }

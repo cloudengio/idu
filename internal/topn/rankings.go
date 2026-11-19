@@ -7,6 +7,7 @@ package topn
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 
@@ -148,6 +149,9 @@ func (s *State) UnmarshalBinary(data []byte) error {
 		var u uint64
 		if u, data, err = readUvarint(data); err != nil {
 			return fmt.Errorf("topn.State: %w", err)
+		}
+		if u > uint64(math.MaxInt) {
+			return fmt.Errorf("topn.State: value %d overflows int", u)
 		}
 		*v = int(u)
 	}

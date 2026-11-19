@@ -21,6 +21,7 @@ import (
 	"container/heap"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 )
@@ -206,7 +207,7 @@ func (h *Heap) DecodeBinary(data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("length: %w", err)
 	}
-	if n > capacity || n > uint64(len(data)) {
+	if capacity > uint64(math.MaxInt) || n > capacity || n > uint64(len(data)) {
 		return nil, fmt.Errorf("invalid length %d for capacity %d", n, capacity)
 	}
 	*h = *New(int(capacity))
