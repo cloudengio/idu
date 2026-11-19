@@ -51,6 +51,14 @@ func compareHeaps[T comparable](t *testing.T, what string, got, want *report.Hea
 	for _, fn := range adjust {
 		fn(w)
 	}
+	// The maintained rankings omit entries whose metrics are all zero, eg.
+	// directories containing only hardlinks on filesystems where directories
+	// report a size of zero.
+	for k, v := range w {
+		if v == (report.MergedStats{}) {
+			delete(w, k)
+		}
+	}
 	if !reflect.DeepEqual(g, w) {
 		t.Errorf("%v: got %+v, want %+v", what, g, w)
 	}
@@ -162,10 +170,10 @@ func TestStatsSource(t *testing.T) {
 		t.Errorf("changed config: got %q perID=%v %v, want %q perID=%v", source, perIDN, err, statsFromStored, iduconfig.DefaultTopNPerID)
 	}
 	for target, want := range map[string]bool{
-		root:                       true,
-		root + "/":                 true,
-		filepath.Join(root, "a"):   false,
-		filepath.Join(root, "a-b"): false,
+		root:                              true,
+		root + string(filepath.Separator): true,
+		filepath.Join(root, "a"):          false,
+		filepath.Join(root, "a-b"):        false,
 	} {
 		if got := isFilesystemRoot(pcfg, root, target); got != want {
 			t.Errorf("%v: got %v, want %v", target, got, want)
