@@ -5,6 +5,7 @@
 package stats_test
 
 import (
+	"bytes"
 	"io/fs"
 	"reflect"
 	"sort"
@@ -366,5 +367,75 @@ func TestTotalsArithmetic(t *testing.T) {
 	var d stats.Totals
 	if err := d.UnmarshalBinary([]byte{0x7f}); err == nil {
 		t.Errorf("expected an error")
+	}
+}
+
+func TestEffective(t *testing.T) {
+	calc := diskusage.NewIdentity()
+	match := stats.AlwaysMatch()
+	// f and l are the same file, s has a single link and u's inode is unknown.
+	pi := newLinkTestPrefix(7, 1,
+		newLinkTestFile("f", 20, 3, 2),
+		newLinkTestFile("l", 20, 3, 2),
+		newLinkTestFile("g", 30, 4, 2),
+		newLinkTestFile("s", 5, 5, 1),
+		newLinkTestFile("u", 7, 0, 0),
+	)
+	ps := stats.ComputeSummary("/dir", &pi, calc, match, stats.RecordLinkedFiles)
+	orig := ps.AppendBinary(nil)
+
+	var asked []uint64
+	eff := ps.Effective(false, func(ino uint64) bool {
+		asked = append(asked, ino)
+		return ino == 3
+	})
+	// owns is called once per file, other than those with unknown inodes.
+	if got, want := asked, []uint64{3, 4}; !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	// l repeats f, and g is owned by another prefix.
+	if got, want := [3]int64{eff.Direct.Files, eff.Direct.Bytes - eff.Direct.PrefixBytes, eff.Direct.Hardlinks}, [3]int64{3, 20 + 5 + 7, 2}; got != want {
+		t.Errorf("direct: got %v, want %v", got, want)
+	}
+	if len(eff.PerUser) != 1 || eff.PerUser[0].Files != 3 || eff.PerUser[0].Hardlinks != 2 {
+		t.Errorf("per user: got %+v", eff.PerUser)
+	}
+	// ps is not modified.
+	if !bytes.Equal(ps.AppendBinary(nil), orig) {
+		t.Errorf("Effective modified its receiver")
+	}
+
+	dup := ps.Effective(true, func(uint64) bool { t.Error("owns called for a duplicate"); return true })
+	if want := (stats.Totals{Prefix: 1, HardlinkDirs: 1}); dup.Direct != want || dup.PerUser != nil || dup.Files != nil {
+		t.Errorf("dup: got %+v", dup)
+	}
+
+	// Without hardlink information the summary is returned unchanged.
+	raw := stats.ComputeSummary("/dir", &pi, calc, match, stats.RecordNoFiles)
+	if got := raw.Effective(true, nil); !reflect.DeepEqual(got, raw) {
+		t.Errorf("got %+v, want %+v", got, raw)
+	}
+}
+
+func TestApplyHardlinksUnknownInodes(t *testing.T) {
+	calc := diskusage.NewIdentity()
+	match := stats.AlwaysMatch()
+	dedup := hardlinkMatcher(t)
+	hl := &hardlinks.Incremental{}
+	// Prefixes and files whose inode numbers are unknown are never
+	// hardlinks, and the summaries agree with the matcher.
+	for _, pi := range []prefixinfo.T{
+		newLinkTestPrefix(7, 0, newLinkTestFile("a", 10, 0, 0), newLinkTestFile("b", 10, 0, 0)),
+		newLinkTestPrefix(7, 0, newLinkTestFile("c", 10, 0, 0)),
+	} {
+		ps := stats.ComputeSummary("/dir", &pi, calc, match, stats.RecordAllFiles)
+		ps.ApplyHardlinks(hl)
+		totals, _, _ := stats.ComputeTotals("/dir", &pi, calc, dedup)
+		if ps.Direct != totals {
+			t.Errorf("got %+v, want %+v", ps.Direct, totals)
+		}
+		if ps.Direct.Hardlinks != 0 || ps.Direct.HardlinkDirs != 0 {
+			t.Errorf("unexpected hardlinks: %+v", ps.Direct)
+		}
 	}
 }

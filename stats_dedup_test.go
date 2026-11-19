@@ -17,6 +17,7 @@ import (
 	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/report"
 	"cloudeng.io/cmd/idu/stats"
+	"cloudeng.io/cmd/idu/summary"
 	"cloudeng.io/file/localfs"
 )
 
@@ -170,10 +171,33 @@ func verifyHardlinkTree(ctx context.Context, t *testing.T, cfg iduconfig.T, root
 				t.Errorf("%v: per subtree: summaries: %+v, rescan: %+v", tc.target, g, w)
 			}
 		}
+		if tc.target == root {
+			checkStoredSubtree(ctx, t, cfg, root, fromSummaries)
+		}
 		if got.Files != tc.files || got.Hardlinks != tc.hardlinks || got.Prefixes != tc.prefixes {
 			t.Errorf("%v: got files=%v hardlinks=%v prefixes=%v, want %v %v %v",
 				tc.target, got.Files, got.Hardlinks, got.Prefixes, tc.files, tc.hardlinks, tc.prefixes)
 		}
+	}
+}
+
+// checkStoredSubtree checks that the recursive totals for root maintained
+// by analyze deduplicate hardlinks in the same way as computing them from
+// the summaries.
+func checkStoredSubtree(ctx context.Context, t *testing.T, cfg iduconfig.T, root string, fromSummaries *report.AllStats) {
+	t.Helper()
+	_, pcfg, _, db, err := openPrefixReadOnly(ctx, cfg, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close(ctx)
+	stored, ok, err := summary.New(db, pcfg).Subtree(ctx, root)
+	if err != nil || !ok {
+		t.Fatalf("%v: %v %v", root, ok, err)
+	}
+	want := fromSummaries.Subtree
+	if stored.Files != want.TotalFiles || stored.Bytes != want.TotalBytes || stored.Hardlinks != want.TotalHardlinks {
+		t.Errorf("%v: stored %+v, from summaries: files %v, bytes %v, hardlinks %v", root, stored, want.TotalFiles, want.TotalBytes, want.TotalHardlinks)
 	}
 }
 

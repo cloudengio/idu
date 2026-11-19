@@ -18,8 +18,9 @@ import (
 // of the prefix and all of its descendants, are stored in the subtree
 // bucket keyed by summary key. They are maintained incrementally by
 // Analyze, when top-N rankings are enabled, and rebuilt from the summaries
-// when that is not possible. Hardlinks are not deduplicated.
-const metaKeySubtrees = "subtrees/v1"
+// when that is not possible. Hardlinks are deduplicated using the link
+// index, see linkChanges.
+const metaKeySubtrees = "subtrees/v2"
 
 const (
 	subtreesValid = "valid"

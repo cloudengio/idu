@@ -106,15 +106,18 @@ func (ir *idRankings) write(ctx context.Context, db Database) ([]int64, error) {
 }
 
 // topnObserver is an Observer that maintains the state derived from the
-// summaries stored in a DB, namely:
+// summaries stored in a DB, with hardlinks deduplicated, namely:
+//   - the link index used to deduplicate hardlinks, see linkChanges;
 //   - the recursive totals for every prefix, see subtreeChanges;
 //   - the top-N rankings of the prefixes by their direct and recursive
 //     totals, and by their direct totals for every user and group;
 //   - the totals, across the entire filesystem, for every user and group.
 //
 // Changes reported during an analysis are applied to the rankings and the
-// per-id totals immediately, and accumulated for the recursive totals.
-// All of them are written to the database by ScanDone.
+// per-id totals immediately, and accumulated for the recursive totals,
+// except for those to prefixes whose totals depend on the link index,
+// which are accumulated until the index is updated by ScanDone. All of
+// them are written to the database by ScanDone.
 //
 // The rankings, and per-id totals, are instead recomputed from scratch by
 // ScanDone (see refreshTopN) if they are missing, invalid, were created
@@ -139,6 +142,10 @@ type topnObserver struct {
 	groups   idRankings
 	ids      *topn.IDTotals
 	changes  *subtreeChanges
+	links    *linkChanges
+	// linkErr records the first failure to read the link index during the
+	// analysis, which requires the derived state to be rebuilt.
+	linkErr error
 }
 
 func newTopNObserver(sdb *DB) *topnObserver {
@@ -230,6 +237,15 @@ func (t *topnObserver) ScanStarted(ctx context.Context, scan ScanInfo) error {
 	}
 	t.reset(state)
 	t.rebuild = serr != nil || subState != subtreesValid || scan.Rewrite
+	t.links, t.linkErr = nil, nil
+	if !t.rebuild {
+		dirs, derr := loadDirIndex(ctx, db)
+		if derr != nil {
+			ctxlog.Warn(ctx, "failed to read the link index, the recursive totals will be rebuilt", "error", derr)
+			t.rebuild = true
+		}
+		t.links = newLinkChanges(dirs)
+	}
 	t.refresh = t.rebuild || err != nil || !ok || !state.Valid || !t.cfg.matches(state)
 	rootKey, _ := stats.SummaryKeys(t.sdb.sep, scan.Root)
 	t.changes = newSubtreeChanges(rootKey)
@@ -296,6 +312,19 @@ func (t *topnObserver) PrefixChanged(ctx context.Context, path string, old, cur 
 	key, _ := stats.SummaryKeys(t.sdb.sep, path)
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if !t.rebuild && t.links.relevant(key, old, cur) {
+		// The effective totals depend on the link index, which can only
+		// be updated once all of the changes are known.
+		t.links.prefixChanged(key, path, old, cur)
+		return
+	}
+	t.applyChange(ctx, key, path, old, cur)
+}
+
+// applyChange applies the change to the effective summary of the prefix
+// path, with summary key key, from old, which is nil for a new prefix,
+// to cur. It must be called with t.mu held.
+func (t *topnObserver) applyChange(ctx context.Context, key, path string, old, cur *stats.PrefixSummary) {
 	if !t.rebuild {
 		var od *stats.Totals
 		if old != nil {
@@ -324,12 +353,17 @@ func (t *topnObserver) SubtreeDeleted(ctx context.Context, path string, summarie
 	if t.isRebuilding() {
 		return
 	}
-	// The recursive totals of path are the sum of the direct totals of
-	// all of the prefixes being deleted.
+	// The recursive totals of path are the sum of the effective direct
+	// totals of all of the prefixes being deleted.
 	var removed stats.Totals
-	for p, ps := range summaries {
-		removed.Add(ps.Direct)
+	for p, raw := range summaries {
+		pkey, _ := stats.SummaryKeys(t.sdb.sep, p)
 		t.mu.Lock()
+		ps, err := t.links.subtreeDeleted(ctx, t.sdb.db, pkey, raw)
+		if err != nil && t.linkErr == nil {
+			t.linkErr = err
+		}
+		removed.Add(ps.Direct)
 		if !t.refresh {
 			t.prefixes.Delete(p)
 			t.subtrees.Delete(p)
@@ -383,12 +417,8 @@ func (t *topnObserver) ScanDone(ctx context.Context, scanErr error) error {
 		t.rebuild, t.refresh = true, true
 	}
 	if !t.rebuild {
-		if err := t.applySubtrees(ctx); err != nil {
-			if !errors.Is(err, errInconsistentSubtrees) {
-				return err
-			}
-			ctxlog.Warn(ctx, "the recursive totals and top-N rankings will be rebuilt", "error", err)
-			t.rebuild, t.refresh = true, true
+		if err := t.applyIncremental(ctx); err != nil {
+			return err
 		}
 	}
 	if !t.refresh && t.ids.IsNegative() {
@@ -408,6 +438,44 @@ func (t *topnObserver) ScanDone(ctx context.Context, scanErr error) error {
 		return err
 	}
 	return setSubtreesState(ctx, t.sdb.db, subtreesValid)
+}
+
+// applyIncremental applies the changes accumulated during the analysis to
+// the link index and the recursive totals, falling back to rebuilding them
+// if they are found to be inconsistent. It must be called with t.mu held.
+func (t *topnObserver) applyIncremental(ctx context.Context) error {
+	if err := t.applyLinks(ctx); err != nil {
+		if !errors.Is(err, errInconsistentSubtrees) {
+			return err
+		}
+		ctxlog.Warn(ctx, "failed to update the link index, the recursive totals and top-N rankings will be rebuilt", "error", err)
+		t.rebuild, t.refresh = true, true
+		return nil
+	}
+	if err := t.applySubtrees(ctx); err != nil {
+		if !errors.Is(err, errInconsistentSubtrees) {
+			return err
+		}
+		ctxlog.Warn(ctx, "the recursive totals and top-N rankings will be rebuilt", "error", err)
+		t.rebuild, t.refresh = true, true
+	}
+	return nil
+}
+
+// applyLinks updates the link index and applies the resulting changes to
+// the effective totals of the prefixes that depend on it.
+func (t *topnObserver) applyLinks(ctx context.Context) error {
+	if t.linkErr != nil {
+		return t.linkErr
+	}
+	changes, err := t.links.apply(ctx, t.sdb.db, t.sdb.sep, t.changes.isDeleted)
+	if err != nil {
+		return err
+	}
+	for _, c := range changes {
+		t.applyChange(ctx, c.key, c.path, c.old, c.cur)
+	}
+	return nil
 }
 
 // applySubtrees applies the accumulated changes to the stored recursive
@@ -463,9 +531,10 @@ func (t *topnObserver) newState(users, groups []int64) topn.State {
 // with WithTopN.
 var ErrTopNDisabled = errors.New("top-N rankings are not enabled for this database")
 
-// RefreshTopN rebuilds the recursive totals, and recomputes all of the
-// top-N rankings and per-id totals, from the summaries stored in the
-// database. It returns ErrStaleSummaries if the summaries are incomplete
+// RefreshTopN rebuilds the link index and the recursive totals, and
+// recomputes all of the top-N rankings and per-id totals, from the
+// summaries stored in the database. Prefixes that are duplicates of
+// preceding ones, eg. bind mounts, are only recognized by a rebuild. It returns ErrStaleSummaries if the summaries are incomplete
 // or were computed with a different configuration, ie. if the entire
 // filesystem needs to be analyzed first.
 func (sdb *DB) RefreshTopN(ctx context.Context) error {
@@ -523,6 +592,13 @@ func refreshTopN(ctx context.Context, sdb *DB, prev topn.State, rebuild bool) er
 		if err := db.ClearSubtrees(ctx); err != nil {
 			return err
 		}
+		if err := db.ClearLinks(ctx); err != nil {
+			return err
+		}
+	}
+	ls, err := newLinkScanner(ctx, db, rebuild)
+	if err != nil {
+		return fmt.Errorf("failed to read the link index: %w", err)
 	}
 	t := newTopNObserver(sdb)
 	t.reset(prev)
@@ -533,8 +609,11 @@ func refreshTopN(ctx context.Context, sdb *DB, prev topn.State, rebuild bool) er
 		}
 		return nil
 	}}
-	if err := t.scanSummaries(ctx, &agg); err != nil {
+	if err := t.scanSummaries(ctx, ls, &agg); err != nil {
 		return fmt.Errorf("failed to refresh top-N rankings: %w", err)
+	}
+	if err := ls.finish(ctx); err != nil {
+		return fmt.Errorf("failed to rebuild the link index: %w", err)
 	}
 	if err := db.Flush(ctx); err != nil {
 		return err
@@ -555,8 +634,9 @@ func refreshTopN(ctx context.Context, sdb *DB, prev topn.State, rebuild bool) er
 }
 
 // scanSummaries computes the rankings, per-id totals and recursive totals
-// from all of the summaries stored in the database.
-func (t *topnObserver) scanSummaries(ctx context.Context, agg *subtreeAggregator) error {
+// from all of the summaries stored in the database, with their hardlinks
+// deduplicated by ls.
+func (t *topnObserver) scanSummaries(ctx context.Context, ls *linkScanner, agg *subtreeAggregator) error {
 	set := func(ir *idRankings, path string, ids stats.PerIDTotals) {
 		for _, id := range ids {
 			r, ok := ir.loaded[id.ID]
@@ -568,12 +648,16 @@ func (t *topnObserver) scanSummaries(ctx context.Context, agg *subtreeAggregator
 			ir.modified[id.ID] = true
 		}
 	}
-	var ps stats.PrefixSummary
+	var raw stats.PrefixSummary
 	var visitErr error
 	err := t.sdb.db.ScanSummaries(ctx, "", "", func(_ context.Context, key string, val []byte) bool {
 		path := stats.DecodeSummaryKey(t.sdb.sep, key)
-		if visitErr = ps.UnmarshalBinary(val); visitErr != nil {
+		if visitErr = raw.UnmarshalBinary(val); visitErr != nil {
 			visitErr = fmt.Errorf("%v: %w", path, visitErr)
+			return false
+		}
+		var ps stats.PrefixSummary
+		if ps, visitErr = ls.effective(ctx, key, &raw); visitErr != nil {
 			return false
 		}
 		t.prefixes.Set(path, ps.Direct)

@@ -46,6 +46,12 @@ func (db *Database) Clear(ctx context.Context, logs, errors bool) error
 
 
 ```go
+func (db *Database) ClearLinks(ctx context.Context) error
+```
+ClearLinks deletes all of the entries in the link bucket.
+
+
+```go
 func (db *Database) ClearSubtrees(ctx context.Context) error
 ```
 ClearSubtrees deletes all of the entries in the subtree bucket.
@@ -79,6 +85,12 @@ DeleteError deletes the error logged for exactly key.
 ```go
 func (db *Database) DeleteErrors(ctx context.Context, prefix string) error
 ```
+
+
+```go
+func (db *Database) DeleteLink(ctx context.Context, key string) error
+```
+DeleteLink deletes exactly key, if present, from the link bucket.
 
 
 ```go
@@ -160,6 +172,13 @@ func (db *Database) Scan(ctx context.Context, path string, visitor func(ctx cont
 
 
 ```go
+func (db *Database) ScanLinks(ctx context.Context, prefix string, visitor func(ctx context.Context, key string, val []byte) bool) error
+```
+ScanLinks iterates over the entries in the link bucket whose keys start with
+prefix, in lexicographical key order.
+
+
+```go
 func (db *Database) ScanSubtrees(ctx context.Context, exactKey, childPrefix string, visitor func(ctx context.Context, key string, val []byte) bool) error
 ```
 ScanSubtrees iterates over entries in the subtree bucket starting at
@@ -176,6 +195,12 @@ exactKey and stopping once keys no longer match exactKey or childPrefix.
 ```go
 func (db *Database) Set(ctx context.Context, prefix string, val []byte, batch bool) error
 ```
+
+
+```go
+func (db *Database) SetLink(ctx context.Context, key string, val []byte, batch bool) error
+```
+SetLink stores value for key in the link bucket.
 
 
 ```go

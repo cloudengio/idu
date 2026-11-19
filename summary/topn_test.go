@@ -248,7 +248,7 @@ func TestSubtreesUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := raw.SetMeta(ctx, "topn/v1/subtrees", nil); err != nil {
+	if err := raw.SetMeta(ctx, "topn/v2/subtrees", nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := raw.Close(ctx); err != nil {

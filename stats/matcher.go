@@ -168,9 +168,10 @@ func (m Matcher) HasExpression() bool {
 }
 
 // IsHardlink returns true if hardlink handling is enabled and the file
-// identified by xattr has been seen before.
+// identified by xattr has been seen before. Files whose inode number is
+// zero, ie. unknown, are never hardlinks.
 func (m Matcher) IsHardlink(xattr file.XAttr) bool {
-	if m.hl == nil {
+	if m.hl == nil || xattr.FileID == 0 {
 		return false
 	}
 	return m.hl.Ref(xattr.Device, xattr.FileID)
