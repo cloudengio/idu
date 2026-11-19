@@ -86,7 +86,7 @@ func (r *Reader) topN(ctx context.Context, key string, metric stats.Metric, n, m
 		return TopN{}, err
 	}
 	if buf.Len() == 0 {
-		return res, nil
+		return TopN{}, ErrNoTopN
 	}
 	var rk topn.Rankings
 	if err := rk.UnmarshalBinary(buf.Bytes()); err != nil {
@@ -305,6 +305,9 @@ func (r *Reader) TopSubtreesWithin(ctx context.Context, path string, metric stat
 	}
 	if err := idudb.CheckSubtrees(ctx, r.db); err != nil {
 		return nil, err
+	}
+	if n <= 0 {
+		return nil, nil
 	}
 	frontier := &rankedHeap{}
 	push := func(paths []string) error {

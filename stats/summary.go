@@ -71,7 +71,9 @@ func ParentSummaryKey(key string) (string, bool) {
 		return "", false
 	}
 	parent := key[:idx]
-	if strings.IndexByte(parent, 0) < 0 {
+	isWinDrive := len(parent) == 2 && parent[1] == ':' &&
+		((parent[0] >= 'a' && parent[0] <= 'z') || (parent[0] >= 'A' && parent[0] <= 'Z'))
+	if parent == "" || isWinDrive {
 		// The parent is a root, eg. "/" or "C:\", whose key retains its
 		// trailing separator.
 		parent = key[:idx+1]

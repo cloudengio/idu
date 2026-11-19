@@ -300,6 +300,9 @@ func TestParentSummaryKey(t *testing.T) {
 		{`\`, `C:\`, ""},
 		{`\`, `C:\a`, `C:\`},
 		{`\`, `C:\a\b`, `C:\a`},
+		{"/", "data", ""},
+		{"/", "data/sub", "data"},
+		{"/", "data/sub/leaf", "data/sub"},
 	} {
 		key, _ := stats.SummaryKeys(tc.sep, tc.path)
 		parent, ok := stats.ParentSummaryKey(key)

@@ -342,51 +342,34 @@ func (db *Database) Delete(ctx context.Context, prefix string) error {
 
 // SetSummary stores a precomputed summary value in the summary bucket.
 func (db *Database) SetSummary(ctx context.Context, key string, val []byte, batch bool) error {
-	if err := db.canceled(ctx); err != nil {
-		return err
-	}
-	if db.ReadOnly {
-		return badger.ErrReadOnlyTxn
-	}
-	kb := keyForBucket(summaryBucket, []byte(key))
-	defer bufPool.Put(kb)
-	if batch {
-		return db.batchSet(kb.Bytes(), val)
-	}
-	return db.set(ctx, kb.Bytes(), val)
+	return db.setInBucket(ctx, summaryBucket, key, val, batch)
 }
 
 // DeleteSummary deletes exactKey and any descendant keys matching childPrefix
 // from the summary bucket without affecting sibling prefixes.
 func (db *Database) DeleteSummary(ctx context.Context, exactKey, childPrefix string) error {
-	if err := db.canceled(ctx); err != nil {
-		return err
-	}
-	if db.ReadOnly {
-		return badger.ErrReadOnlyTxn
-	}
-	if exactKey != "" && (childPrefix == "" || !strings.HasPrefix(exactKey, childPrefix)) {
-		if err := db.deleteKey(summaryBucket, exactKey); err != nil {
-			return err
-		}
-	}
-	if childPrefix != "" {
-		cb := keyForBucket(summaryBucket, []byte(childPrefix))
-		defer bufPool.Put(cb)
-		return db.deletePrefix(ctx, cb.Bytes())
-	}
-	return nil
+	return db.deleteSummaryKeys(ctx, summaryBucket, exactKey, childPrefix)
 }
 
 // SetSubtree stores the recursive totals for key in the subtree bucket.
 func (db *Database) SetSubtree(ctx context.Context, key string, val []byte, batch bool) error {
+	return db.setInBucket(ctx, subtreeBucket, key, val, batch)
+}
+
+// DeleteSubtrees deletes exactKey and any descendant keys matching childPrefix
+// from the subtree bucket without affecting sibling prefixes.
+func (db *Database) DeleteSubtrees(ctx context.Context, exactKey, childPrefix string) error {
+	return db.deleteSummaryKeys(ctx, subtreeBucket, exactKey, childPrefix)
+}
+
+func (db *Database) setInBucket(ctx context.Context, bucket byte, key string, val []byte, batch bool) error {
 	if err := db.canceled(ctx); err != nil {
 		return err
 	}
 	if db.ReadOnly {
 		return badger.ErrReadOnlyTxn
 	}
-	kb := keyForBucket(subtreeBucket, []byte(key))
+	kb := keyForBucket(bucket, []byte(key))
 	defer bufPool.Put(kb)
 	if batch {
 		return db.batchSet(kb.Bytes(), val)
@@ -394,9 +377,7 @@ func (db *Database) SetSubtree(ctx context.Context, key string, val []byte, batc
 	return db.set(ctx, kb.Bytes(), val)
 }
 
-// DeleteSubtrees deletes exactKey and any descendant keys matching childPrefix
-// from the subtree bucket without affecting sibling prefixes.
-func (db *Database) DeleteSubtrees(ctx context.Context, exactKey, childPrefix string) error {
+func (db *Database) deleteSummaryKeys(ctx context.Context, bucket byte, exactKey, childPrefix string) error {
 	if err := db.canceled(ctx); err != nil {
 		return err
 	}
@@ -404,12 +385,12 @@ func (db *Database) DeleteSubtrees(ctx context.Context, exactKey, childPrefix st
 		return badger.ErrReadOnlyTxn
 	}
 	if exactKey != "" && (childPrefix == "" || !strings.HasPrefix(exactKey, childPrefix)) {
-		if err := db.deleteKey(subtreeBucket, exactKey); err != nil {
+		if err := db.deleteKey(bucket, exactKey); err != nil {
 			return err
 		}
 	}
 	if childPrefix != "" {
-		cb := keyForBucket(subtreeBucket, []byte(childPrefix))
+		cb := keyForBucket(bucket, []byte(childPrefix))
 		defer bufPool.Put(cb)
 		return db.deletePrefix(ctx, cb.Bytes())
 	}

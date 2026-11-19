@@ -336,8 +336,14 @@ func (t *topnObserver) SubtreeDeleted(ctx context.Context, path string, summarie
 			t.ids.Sub(ps.PerUser, ps.PerGroup)
 			for _, u := range ps.PerUser {
 				t.deletePerID(ctx, &t.users, p, u.ID)
+				if t.refresh {
+					break
+				}
 			}
 			for _, g := range ps.PerGroup {
+				if t.refresh {
+					break
+				}
 				t.deletePerID(ctx, &t.groups, p, g.ID)
 			}
 		}

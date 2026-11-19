@@ -240,4 +240,26 @@ func TestSubtreesUnavailable(t *testing.T) {
 	if _, err := sr.TopUsers(ctx, stats.MetricBytes, 1); !errors.Is(err, summary.ErrNoTopN) {
 		t.Errorf("got %v, want %v", err, summary.ErrNoTopN)
 	}
+
+	// Missing SubtreesKey on a database with valid State must return ErrNoTopN.
+	root2, cfg2 := createTree(t, false)
+	analyze(ctx, t, root2, cfg2)
+	raw, err := idudb.OpenBackend(ctx, cfg2.Database, false, withBadger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.SetMeta(ctx, "topn/v1/subtrees", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	sr2, err := summary.Open(ctx, cfg2, withBadger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sr2.Close(ctx) }()
+	if _, err := sr2.TopSubtrees(ctx, stats.MetricBytes, 1); !errors.Is(err, summary.ErrNoTopN) {
+		t.Errorf("got %v, want %v", err, summary.ErrNoTopN)
+	}
 }
