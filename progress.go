@@ -18,21 +18,23 @@ import (
 )
 
 type anaylzeSummary struct {
-	Operation         string        `json:"operation"`
-	Command           string        `json:"command"`
-	Duration          time.Duration `json:"duration"`
-	PrefixesStarted   int64         `json:"prefixes_started"`
-	PrefixesFinished  int64         `json:"prefixes_finished"`
-	SynchronousScans  int64         `json:"synchronous_scans"`
-	SlowScans         int64         `json:"slow_scans"`
-	FSStats           int64         `json:"fs_stats"`
-	FSStatsTotal      int64         `json:"fs_stats_total"`
-	FSStatMeanLatency int64         `json:"fs_stat_mean_latency"`
-	Files             int64         `json:"files"`
-	ParentUnchanged   int64         `json:"parent_unchanged"`
-	ChildrenUnchanged int64         `json:"children_unchanged"`
-	Errors            int64         `json:"errors"`
-	PrefixesDeleted   int64         `json:"prefixes_deleted"`
+	Operation            string        `json:"operation"`
+	Command              string        `json:"command"`
+	Duration             time.Duration `json:"duration"`
+	PrefixesStarted      int64         `json:"prefixes_started"`
+	PrefixesFinished     int64         `json:"prefixes_finished"`
+	SynchronousScans     int64         `json:"synchronous_scans"`
+	SlowScans            int64         `json:"slow_scans"`
+	FSStats              int64         `json:"fs_stats"`
+	FSStatsTotal         int64         `json:"fs_stats_total"`
+	FSStatMeanLatency    int64         `json:"fs_stat_mean_latency"`
+	Files                int64         `json:"files"`
+	ParentUnchanged      int64         `json:"parent_unchanged"`
+	ChildrenUnchanged    int64         `json:"children_unchanged"`
+	Errors               int64         `json:"errors"`
+	PrefixesDeleted      int64         `json:"prefixes_deleted"`
+	FilesRestated        int64         `json:"files_restated"`
+	FilesRestatedChanged int64         `json:"files_restated_changed"`
 }
 
 type progressStats struct {
@@ -45,6 +47,7 @@ type progressStats struct {
 	numDeleted                              int64
 	numStatsStarted, numStatsFinished       int64
 	numSlowScans                            int64
+	numRestated, numRestatedChanged         int64
 	statsTotalTime                          int64
 	start                                   time.Time
 	lastGC                                  time.Time
@@ -94,18 +97,20 @@ func (pt *progressTracker) summarize() anaylzeSummary {
 	cpy := pt.progressStats
 	pt.Unlock()
 	return anaylzeSummary{
-		PrefixesStarted:   cpy.numPrefixesStarted,
-		PrefixesFinished:  cpy.numPrefixesFinished,
-		SynchronousScans:  cpy.numSyncScans,
-		SlowScans:         cpy.numSlowScans,
-		FSStats:           cpy.numStatsFinished,
-		FSStatsTotal:      cpy.statsTotalTime,
-		FSStatMeanLatency: cpy.meanStatLatency(),
-		Files:             cpy.numFiles,
-		ParentUnchanged:   cpy.numParentUnchanged,
-		ChildrenUnchanged: cpy.numChildrenUnchanged,
-		Errors:            cpy.numErrors,
-		PrefixesDeleted:   cpy.numDeleted,
+		PrefixesStarted:      cpy.numPrefixesStarted,
+		PrefixesFinished:     cpy.numPrefixesFinished,
+		SynchronousScans:     cpy.numSyncScans,
+		SlowScans:            cpy.numSlowScans,
+		FSStats:              cpy.numStatsFinished,
+		FSStatsTotal:         cpy.statsTotalTime,
+		FSStatMeanLatency:    cpy.meanStatLatency(),
+		Files:                cpy.numFiles,
+		ParentUnchanged:      cpy.numParentUnchanged,
+		ChildrenUnchanged:    cpy.numChildrenUnchanged,
+		Errors:               cpy.numErrors,
+		PrefixesDeleted:      cpy.numDeleted,
+		FilesRestated:        cpy.numRestated,
+		FilesRestatedChanged: cpy.numRestatedChanged,
 	}
 }
 
@@ -172,6 +177,13 @@ func (pt *progressTracker) SyncScans(numSyncScans int64) {
 	}
 }
 
+func (pt *progressTracker) Restated(files, changed int) {
+	pt.Lock()
+	defer pt.Unlock()
+	pt.numRestated += int64(files)
+	pt.numRestatedChanged += int64(changed)
+}
+
 func (pt *progressTracker) refreshMemstatsLocked() {
 	if time.Since(pt.lastGC) > (5 * time.Minute) {
 		runtime.GC()
@@ -196,6 +208,9 @@ func (pt *progressTracker) summary(ctx context.Context) {
 		ifmt.Printf("children unchanged : % 15v\n", cpy.numChildrenUnchanged)
 	}
 	ifmt.Printf("           deleted : % 15v\n", cpy.numDeleted)
+	if cpy.numRestated > 0 {
+		ifmt.Printf("    files restated : % 15v (%v changed)\n", cpy.numRestated, cpy.numRestatedChanged)
+	}
 	ifmt.Printf("            errors : % 15v\n", cpy.numErrors)
 	ifmt.Printf("        sync scans : % 15v\n", cpy.numSyncScans)
 	ifmt.Printf("        slow scans : % 15v\n", cpy.numSlowScans)
@@ -220,6 +235,8 @@ func (pt progressStats) log(ctx context.Context) {
 		"errors", pt.numErrors,
 		"sync_scans", pt.numSyncScans,
 		"slow_scans", pt.numSlowScans,
+		"files_restated", pt.numRestated,
+		"files_restated_changed", pt.numRestatedChanged,
 		"stat_ops", pt.numStatsFinished,
 		"num_goroutines", runtime.NumGoroutine(),
 		"run_time", time.Since(pt.start),

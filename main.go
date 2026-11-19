@@ -85,6 +85,11 @@ commands:
         arguments:
           - '[<filename>]'
 
+      - name: suggest
+        summary: suggest configuration settings based on the state of the database. It currently suggests the prefixes to add to hardlinks_record_all, based on the files found by analyze to have more links than it has seen; such files are only found when hardlink_dedup is summaries or summaries-all and topn is not zero. An optional prefix restricts the suggestions to the prefixes beneath it.
+        arguments:
+          - '[<prefix>]'
+
 
   - name: reports
     summary: generate and manage reports.
@@ -172,6 +177,7 @@ func cli() *subcmd.CommandSetYAML {
 	cmdSet.Set("stats", "compute").MustRunner(requireConfig(statsCmd.compute), &computeFlags{})
 
 	cmdSet.Set("stats", "view").MustRunner(statsCmd.view, &viewFlags{})
+	cmdSet.Set("stats", "suggest").MustRunner(requireConfig(statsCmd.suggest), &suggestFlags{})
 
 	reportsCmds := &reportCmds{}
 	cmdSet.Set("reports", "generate").MustRunner(reportsCmds.generate, &generateReportsFlags{})

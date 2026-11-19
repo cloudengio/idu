@@ -5,11 +5,15 @@
 package idudb
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/stats"
+	"cloudeng.io/cmdutil/cmdyaml"
 	"cloudeng.io/file/diskusage"
 	"cloudeng.io/file/filewalk"
 )
@@ -21,6 +25,8 @@ type options struct {
 	calc            diskusage.Calculator
 	sep             string
 	hardlinks       stats.HardlinkRecording
+	recordAll       func(prefix string) bool
+	recordAllID     string
 	compactInterval time.Duration
 	topn            topnConfig
 }
@@ -62,6 +68,38 @@ func WithHardlinkRecording(r stats.HardlinkRecording) Option {
 	return func(o *options) {
 		o.hardlinks = r
 	}
+}
+
+// WithRecordAllFiles requests that, when the hardlink recording is
+// stats.RecordLinkedFiles, the summaries of the prefixes for which
+// recordAll returns true record every file, as for stats.RecordAllFiles.
+// id identifies recordAll, eg. a hash of the patterns it matches, and is
+// included in the specification of the summaries so that changing it
+// causes all of the summaries to be rewritten by the next analysis. An
+// empty id, or a nil recordAll, disables it.
+func WithRecordAllFiles(id string, recordAll func(prefix string) bool) Option {
+	return func(o *options) {
+		if id == "" || recordAll == nil {
+			o.recordAll, o.recordAllID = nil, ""
+			return
+		}
+		o.recordAll, o.recordAllID = recordAll, id
+	}
+}
+
+// PatternsID returns an identifier for the supplied regular expressions
+// suitable for use with WithRecordAllFiles, or the empty string if there
+// are none.
+func PatternsID(rl cmdyaml.RegexpList) string {
+	if len(rl) == 0 {
+		return ""
+	}
+	patterns := make([]string, len(rl))
+	for i, re := range rl {
+		patterns[i] = re.String()
+	}
+	sum := sha256.Sum256([]byte(strings.Join(patterns, "\n")))
+	return hex.EncodeToString(sum[:8])
 }
 
 // WithCompactionInterval requests that the database be compacted when it is
@@ -109,6 +147,7 @@ func OptionsFromConfig(cfg *iduconfig.Settings) []Option {
 		WithCalculator(cfg.CalculatorOrDefault()),
 		WithSeparator(cfg.SeparatorOrDefault()),
 		WithHardlinkRecording(HardlinkRecording(cfg)),
+		WithRecordAllFiles(PatternsID(cfg.HardlinksRecordAll), cfg.RecordAllFilesFor),
 		WithCompactionInterval(cfg.CompactionInterval()),
 		WithTopN(cfg.TopNOrDefault(), cfg.TopNCapacity(), cfg.TopNPerIDOrDefault(), cfg.TopNPerIDCapacity()),
 	}
@@ -125,6 +164,7 @@ type analyzeOptions struct {
 	concurrentStats          int
 	concurrentStatsThreshold int
 	force                    bool
+	restat                   func(path string) bool
 	slowScan                 time.Duration
 	progress                 ScanProgress
 	observer                 Observer
@@ -191,6 +231,16 @@ func WithForce(v bool) AnalyzeOption {
 	}
 }
 
+// WithRestat sets a function that is called for every file in a prefix
+// that is otherwise unchanged; those for which it returns true are
+// re-stat'ed so that changes to files modified in place, which do not
+// change their prefix, are detected. A nil function disables re-stat'ing.
+func WithRestat(restat func(path string) bool) AnalyzeOption {
+	return func(o *analyzeOptions) {
+		o.restat = restat
+	}
+}
+
 // WithSlowScanThreshold sets the duration after which a scan is reported
 // as slow, it defaults to DefaultSlowScanThreshold.
 func WithSlowScanThreshold(d time.Duration) AnalyzeOption {
@@ -213,8 +263,13 @@ func WithProgress(p ScanProgress) AnalyzeOption {
 // The filesystem (WithFS) and any options not represented in the
 // configuration (eg. WithForce, WithProgress) must be supplied separately.
 func AnalyzeOptionsFromConfig(cfg *iduconfig.Settings) []AnalyzeOption {
+	var restat func(string) bool
+	if len(cfg.Restat) > 0 {
+		restat = cfg.RestatFile
+	}
 	return []AnalyzeOption{
 		WithExclusions(cfg.Exclude),
+		WithRestat(restat),
 		WithConcurrentScans(cfg.ConcurrentScans),
 		WithScanSize(cfg.ScanSize),
 		WithConcurrentStats(cfg.ConcurrentStats),

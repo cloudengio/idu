@@ -44,6 +44,10 @@ type ScanProgress interface {
 	SlowScan()
 	// SyncScans is called with the running total of synchronous scans.
 	SyncScans(n int64)
+	// Restated is called when files in an unchanged prefix are re-stat'ed,
+	// see WithRestat, with the number of files re-stat'ed and the number
+	// of those that had changed.
+	Restated(files, changed int)
 }
 
 type nullProgress struct{}
@@ -57,6 +61,7 @@ func (nullProgress) ParentUnchanged()      {}
 func (nullProgress) ChildrenUnchanged()    {}
 func (nullProgress) SlowScan()             {}
 func (nullProgress) SyncScans(int64)       {}
+func (nullProgress) Restated(int, int)     {}
 
 // Analyzer scans a filesystem and records the metadata for every prefix
 // (directory) and file in a DB. Subsequent analyses are incremental, in that
@@ -152,6 +157,7 @@ func (a *Analyzer) Analyze(ctx context.Context, target string) error {
 		fs:        a.opts.fs,
 		pt:        a.opts.progress,
 		exclude:   a.opts.exclude,
+		restat:    a.opts.restat,
 		slowScan:  a.opts.slowScan,
 		reAnalyze: a.opts.force,
 	}
@@ -176,7 +182,10 @@ func (a *Analyzer) Analyze(ctx context.Context, target string) error {
 		}
 		a.db.observer = obs
 		a.db.previousSummaryFailed.Store(false)
-		defer func() { a.db.observer = nil }()
+		if a.db.recordsLinks() {
+			a.db.links = newLinkCounts()
+		}
+		defer func() { a.db.observer, a.db.links = nil, nil }()
 	}
 
 	errs := errors.M{}
@@ -240,6 +249,7 @@ type walker struct {
 	fw        *filewalk.Walker[prefixState]
 	pt        ScanProgress
 	exclude   func(string) bool
+	restat    func(string) bool
 	slowScan  time.Duration
 	lsi       *asyncstat.T
 	reAnalyze bool
@@ -257,6 +267,12 @@ type prefixState struct {
 	start             time.Time
 	contentsStart     time.Time
 	contentsErr       error
+	// restatIndex maps the names of the files in an unchanged prefix to
+	// their position in current, it is created when the first file is
+	// re-stat'ed.
+	restatIndex map[string]int
+	// restatChanged is true if any of the re-stat'ed files had changed.
+	restatChanged bool
 }
 
 func (w *walker) dbLogErr(ctx context.Context, prefix string, val []byte) {
@@ -386,6 +402,7 @@ func (w *walker) Contents(ctx context.Context, state *prefixState, prefix string
 		w.pt.SlowScan()
 	}
 	toStat := make([]filewalk.Entry, 0, len(contents))
+	var restat []filewalk.Entry
 	for _, entry := range contents {
 		path := w.fs.Join(prefix, entry.Name)
 		if w.exclude(path) {
@@ -396,9 +413,18 @@ func (w *walker) Contents(ctx context.Context, state *prefixState, prefix string
 		}
 		if state.parentUnchanged && !entry.IsDir() {
 			state.nfiles++
+			if w.restat != nil && w.restat(path) {
+				restat = append(restat, entry)
+			}
 			continue
 		}
 		toStat = append(toStat, entry)
+	}
+	if len(restat) > 0 {
+		if err := w.restatFiles(ctx, state, prefix, restat); err != nil {
+			state.contentsErr = err
+			return nil, err
+		}
 	}
 	children, all, err := w.processStats(ctx, prefix, toStat)
 	if err != nil {
@@ -409,6 +435,55 @@ func (w *walker) Contents(ctx context.Context, state *prefixState, prefix string
 	state.nfiles += int64(len(all) - len(children))
 	state.nchildren += int64(len(children))
 	return children, nil
+}
+
+// restatFiles stats the files in entries, which are in the unchanged
+// prefix, and replaces the stored metadata for any that have changed.
+func (w *walker) restatFiles(ctx context.Context, state *prefixState, prefix string, entries []filewalk.Entry) error {
+	_, all, err := w.processStats(ctx, prefix, entries)
+	if err != nil {
+		return err
+	}
+	if state.restatIndex == nil {
+		state.restatIndex = map[string]int{}
+		for i, fi := range state.current.InfoList() {
+			if !fi.IsDir() {
+				state.restatIndex[fi.Name()] = i
+			}
+		}
+	}
+	current := state.current.InfoList()
+	changed := 0
+	for _, fi := range all {
+		i, ok := state.restatIndex[fi.Name()]
+		if !ok || fi.IsDir() {
+			// The prefix has changed since it was found to be unchanged,
+			// the next analysis will rescan it.
+			continue
+		}
+		if fileUnchanged(state.existing, current[i], fi) {
+			continue
+		}
+		current[i] = fi
+		changed++
+	}
+	if changed > 0 {
+		state.current.SetInfoList(current)
+		state.restatChanged = true
+	}
+	w.pt.Restated(len(entries), changed)
+	return nil
+}
+
+// fileUnchanged returns true if the file described by cur, as returned by
+// stat, is unchanged from prev, as stored for prefix pi.
+func fileUnchanged(pi prefixinfo.T, prev, cur file.Info) bool {
+	if prev.Size() != cur.Size() || !prev.ModTime().Equal(cur.ModTime()) || prev.Mode() != cur.Mode() {
+		return false
+	}
+	px, cx := pi.XAttrInfo(prev), pi.XAttrInfo(cur)
+	return px.UID == cx.UID && px.GID == cx.GID && px.FileID == cx.FileID &&
+		px.Blocks == cx.Blocks && px.Hardlinks == cx.Hardlinks
 }
 
 func (w *walker) Done(ctx context.Context, state *prefixState, prefix string, err error) error {
@@ -458,7 +533,7 @@ func (w *walker) Done(ctx context.Context, state *prefixState, prefix string, er
 		return err
 	}
 
-	if err := w.db.setPrefixInfo(ctx, prefix, unchanged, &state.current); err != nil {
+	if err := w.db.setPrefixInfo(ctx, prefix, unchanged && !state.restatChanged, &state.current); err != nil {
 		ctxlog.Debug(ctx, "prefix done",
 			"prefix", w.root,
 			"path", prefix,

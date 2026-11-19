@@ -13,6 +13,7 @@ import (
 	"maps"
 	"slices"
 	"sync"
+	"time"
 
 	"cloudeng.io/cmd/idu/internal/topn"
 	"cloudeng.io/cmd/idu/stats"
@@ -431,6 +432,19 @@ func (t *topnObserver) ScanDone(ctx context.Context, scanErr error) error {
 			t.users.needsRefresh(t.cfg.perIDN) ||
 			t.groups.needsRefresh(t.cfg.perIDN)
 	}
+	if err := t.finish(ctx); err != nil {
+		return err
+	}
+	// The link index is now up to date.
+	if err := t.sdb.updateMissingLinks(ctx, time.Now()); err != nil {
+		ctxlog.Warn(ctx, "failed to update the prefixes with missing links", "error", err)
+	}
+	return nil
+}
+
+// finish refreshes, or writes, the rankings and marks the recursive totals
+// as valid. It must be called with t.mu held.
+func (t *topnObserver) finish(ctx context.Context) error {
 	if t.refresh {
 		return refreshTopN(ctx, t.sdb, t.state, t.rebuild)
 	}

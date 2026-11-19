@@ -1,4 +1,5 @@
 # Package [cloudeng.io/cmd/idu/iduconfig](https://pkg.go.dev/cloudeng.io/cmd/idu/iduconfig?tab=doc)
+[![CircleCI](https://circleci.com/gh/cloudengio/go.gotools.svg?style=svg)](https://circleci.com/gh/cloudengio/go.gotools) [![Go Report Card](https://goreportcard.com/badge/cloudeng.io/cmd/idu/iduconfig)](https://goreportcard.com/report/cloudeng.io/cmd/idu/iduconfig)
 
 ```go
 import cloudeng.io/cmd/idu/iduconfig
@@ -300,8 +301,10 @@ type Settings struct {
 	SetMaxThreads            int                `yaml:"set_max_threads" doc:"if non-zero used for debug.SetMaxThreads"`
 	ScanSize                 int                `yaml:"scan_size" doc:"maximum number of items to fetch from the filesystem in a single operation"`
 	Exclusions               cmdyaml.RegexpList `yaml:"exclusions" doc:"prefixes and files matching these regular expressions will be ignored when building a database"`
+	Restat                   cmdyaml.RegexpList `yaml:"restat" doc:"files whose full paths match these regular expressions are re-stat'ed by analyze even when their directory is unchanged, so that changes to files that are modified in place, such as logs and databases, are detected; analyze otherwise reuses the stored metadata for all of the files in an unchanged directory"`
 	CountHardlinkAsFiles     bool               `yaml:"count_hardlinks_as_files" doc:"if true, hardlinks will be counted as separate files"`
 	HardlinkDedup            HardlinkDedup      `yaml:"hardlink_dedup" doc:"the strategy used to deduplicate hardlinks when count_hardlinks_as_files is false (summaries, summaries-all, rescan), defaults to summaries, see Hardlink deduplication strategies below"`
+	HardlinksRecordAll       cmdyaml.RegexpList `yaml:"hardlinks_record_all" doc:"when hardlink_dedup is summaries, the summaries of prefixes (directories) whose paths match these regular expressions record every file, as for summaries-all, rather than only those that may be hardlinks; this ensures that links created to files in such prefixes are deduplicated even if the prefix has not been rescanned since, see idu stats suggest; changing this list causes the next analyze to rewrite all of the summaries"`
 	CompactIntervalDays      int                `yaml:"compact_interval_days" doc:"number of days after the last database write before running compaction, added to compact_interval"`
 	CompactInterval          time.Duration      `yaml:"compact_interval" doc:"duration after the last database write before running compaction, added to compact_interval_days"`
 	TopN                     int                `yaml:"topn" doc:"the number of top entries, N, maintained incrementally by analyze for each top-N report, ie. by prefix, subtree, user and group, reports for more entries than this require a scan of the database, it defaults to 2000"`
@@ -359,10 +362,26 @@ only those that may be hardlinks, in the precomputed summaries.
 
 
 ```go
+func (p *Settings) RecordAllFilesFor(prefix string) bool
+```
+RecordAllFilesFor returns true if the summary for prefix should
+record every file, rather than only those that may be hardlinks,
+either because hardlink_dedup is summaries-all or because prefix matches
+hardlinks_record_all.
+
+
+```go
 func (p *Settings) RecordHardlinks() bool
 ```
 RecordHardlinks returns true if analyze should record potential hardlinks in
 the precomputed summaries.
+
+
+```go
+func (p *Settings) RestatFile(path string) bool
+```
+RestatFile returns true if the file path should be re-stat'ed by analyze
+even if its directory is unchanged, ie. if it matches restat.
 
 
 ```go
