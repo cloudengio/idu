@@ -30,9 +30,11 @@ type storedSubtrees struct {
 	ids      topn.IDTotals
 }
 
-func readSubtrees(ctx context.Context, t *testing.T, dbDir string) storedSubtrees {
+// readSubtrees reads the stored state, opening the database with opts,
+// which must match those used to analyze it.
+func readSubtrees(ctx context.Context, t *testing.T, dbDir string, opts ...Option) storedSubtrees {
 	t.Helper()
-	db, err := openTestDB(ctx, dbDir)
+	db, err := openTestDB(ctx, dbDir, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,9 +86,9 @@ func sameSubtrees(t *testing.T, incremental, rebuilt storedSubtrees) {
 
 // injectSubtreeSentinel adds recursive totals for a nonexistent prefix
 // outside of the analyzed filesystem; they are only removed by a rebuild.
-func injectSubtreeSentinel(ctx context.Context, t *testing.T, dbDir string) {
+func injectSubtreeSentinel(ctx context.Context, t *testing.T, dbDir string, opts ...Option) {
 	t.Helper()
-	db, err := openTestDB(ctx, dbDir)
+	db, err := openTestDB(ctx, dbDir, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}

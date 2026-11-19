@@ -299,7 +299,8 @@ HasExpression reports whether an expression was specified.
 func (m Matcher) IsHardlink(xattr file.XAttr) bool
 ```
 IsHardlink returns true if hardlink handling is enabled and the file
-identified by xattr has been seen before.
+identified by xattr has been seen before. Files whose inode number is zero,
+ie. unknown, are never hardlinks.
 
 
 ```go
@@ -550,9 +551,9 @@ single prefix along with the calculator identifier used for StorageBytes.
 func ComputeSummary(prefix string, pi PrefixInfo, du diskusage.Calculator, match Matcher, rec HardlinkRecording) PrefixSummary
 ```
 ComputeSummary computes a PrefixSummary for a single directory/prefix.
-Unless rec is RecordNoFiles the summary records the information required
-for hardlinks to be deduplicated by ApplyHardlinks. match should not perform
-hardlink handling itself.
+Unless rec is RecordNoFiles (or unrecognized) the summary records the
+information required for hardlinks to be deduplicated by ApplyHardlinks.
+match should not perform hardlink handling itself.
 
 
 
@@ -571,8 +572,23 @@ func (ps *PrefixSummary) ApplyHardlinks(hl *hardlinks.Incremental)
 ApplyHardlinks adjusts ps to exclude the prefix itself, or any of its files,
 that have already been seen by hl, recording them as hardlinks instead.
 Applying it to summaries in the same order as ComputeTotals is called with
-a hardlink-handling matcher yields identical results. It has no effect if
-HardlinkInfo is false.
+a hardlink-handling matcher yields identical results. Prefixes and files
+whose inode number is zero, ie. unknown, are never treated as hardlinks.
+It has no effect if HardlinkInfo is false.
+
+
+```go
+func (ps *PrefixSummary) Effective(dup bool, owns func(fileID uint64) bool) PrefixSummary
+```
+Effective returns a copy of ps adjusted, as ApplyHardlinks would be,
+to exclude the prefix itself if dup is true, ie. if it is a duplicate of
+a prefix that precedes it, such as a bind mount or a directory hardlink,
+or otherwise to exclude the files that it does not own, recording them as
+hardlinks instead. owns is called with the inode number of each file that
+the prefix records, other than repeated ones, which are always hardlinks,
+and those whose inode number is zero, which never are; it should return true
+if the prefix is the first to contain that file. ps itself is not modified.
+It returns a copy of ps if HardlinkInfo is false.
 
 
 ```go

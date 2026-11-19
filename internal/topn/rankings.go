@@ -188,7 +188,7 @@ func (s *State) HasGroup(gid int64) bool {
 // The keys, in the database's metadata bucket, used to store the state
 // and the rankings.
 const (
-	keyPrefix   = "topn/v1/"
+	keyPrefix   = "topn/v2/"
 	StateKey    = keyPrefix + "state"
 	PrefixesKey = keyPrefix + "prefixes"
 	// SubtreesKey is the key for the rankings of the prefixes by their

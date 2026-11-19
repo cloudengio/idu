@@ -75,7 +75,7 @@ type Database struct {
 	closeErr  error
 }
 
-// The database is partitioned into 6 'buckets':
+// The database is partitioned into 7 'buckets':
 // 1. the prefix bucket, keyed by prefix. This contains an entry for
 //    every prefix, which includes the metadata for all of its files, and
 //    is by far the largest.
@@ -89,6 +89,9 @@ type Database struct {
 //    the database, such as how its summaries were computed.
 // 6. the subtree bucket, keyed by summary key. This contains the recursive
 //    totals for every prefix.
+// 7. the link bucket, whose keys are defined by idudb. This contains an
+//    entry for every prefix that contains a file recorded for hardlink
+//    deduplication, keyed by the file's device and inode numbers.
 //
 // Keys are assigned to each bucket by prepending an identifying byte
 // to the key.
@@ -100,6 +103,7 @@ const (
 	summaryBucket    = 0xf4
 	metaBucket       = 0xf5
 	subtreeBucket    = 0xf6
+	linkBucket       = 0xf7
 	logKeyTimeFormat = "2006-01-02T15:04:05.000000000Z"
 )
 
@@ -329,13 +333,7 @@ func (db *Database) deleteKey(bucket byte, key string) error {
 
 // Delete deletes the value stored for exactly prefix.
 func (db *Database) Delete(ctx context.Context, prefix string) error {
-	if err := db.canceled(ctx); err != nil {
-		return err
-	}
-	if db.ReadOnly {
-		return badger.ErrReadOnlyTxn
-	}
-	return db.deleteKey(prefixBucket, prefix)
+	return db.deleteInBucket(ctx, prefixBucket, prefix)
 }
 
 // SetSummary stores a precomputed summary value in the summary bucket.
@@ -395,15 +393,82 @@ func (db *Database) deleteSummaryKeys(ctx context.Context, bucket byte, exactKey
 	return nil
 }
 
-// ClearSubtrees deletes all of the entries in the subtree bucket.
-func (db *Database) ClearSubtrees(ctx context.Context) error {
+func (db *Database) deleteInBucket(ctx context.Context, bucket byte, key string) error {
 	if err := db.canceled(ctx); err != nil {
 		return err
 	}
 	if db.ReadOnly {
 		return badger.ErrReadOnlyTxn
 	}
-	return db.bdb.DropPrefix([]byte{subtreeBucket})
+	return db.deleteKey(bucket, key)
+}
+
+func (db *Database) clearBucket(ctx context.Context, bucket byte) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
+	if db.ReadOnly {
+		return badger.ErrReadOnlyTxn
+	}
+	return db.bdb.DropPrefix([]byte{bucket})
+}
+
+// ClearSubtrees deletes all of the entries in the subtree bucket.
+func (db *Database) ClearSubtrees(ctx context.Context) error {
+	return db.clearBucket(ctx, subtreeBucket)
+}
+
+// SetLink stores value for key in the link bucket.
+func (db *Database) SetLink(ctx context.Context, key string, val []byte, batch bool) error {
+	return db.setInBucket(ctx, linkBucket, key, val, batch)
+}
+
+// DeleteLink deletes exactly key, if present, from the link bucket.
+func (db *Database) DeleteLink(ctx context.Context, key string) error {
+	return db.deleteInBucket(ctx, linkBucket, key)
+}
+
+// ScanLinks iterates over the entries in the link bucket whose keys start
+// with prefix, in lexicographical key order.
+func (db *Database) ScanLinks(ctx context.Context, prefix string, visitor func(ctx context.Context, key string, val []byte) bool) error {
+	if err := db.canceled(ctx); err != nil {
+		return err
+	}
+	kb := keyForBucket(linkBucket, []byte(prefix))
+	defer bufPool.Put(kb)
+	return db.bdb.View(func(tx *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		// Restricting the iterator to prefix allows badger to skip the
+		// tables that cannot contain it, which matters since most scans
+		// are for the few entries of a single file.
+		opts.Prefix = kb.Bytes()
+		opts.PrefetchValues = false
+		it := tx.NewIterator(opts)
+		defer it.Close()
+		for it.Seek(opts.Prefix); it.ValidForPrefix(opts.Prefix); it.Next() {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			item := it.Item()
+			key := string(item.Key()[1:])
+			cont := true
+			if err := item.Value(func(v []byte) error {
+				cont = visitor(ctx, key, v)
+				return nil
+			}); err != nil {
+				return err
+			}
+			if !cont {
+				return nil
+			}
+		}
+		return nil
+	})
+}
+
+// ClearLinks deletes all of the entries in the link bucket.
+func (db *Database) ClearLinks(ctx context.Context) error {
+	return db.clearBucket(ctx, linkBucket)
 }
 
 // SetMeta stores a metadata entry in the metadata bucket.
@@ -504,13 +569,7 @@ func (db *Database) deletePrefix(ctx context.Context, prefix []byte) error {
 
 // DeleteError deletes the error logged for exactly key.
 func (db *Database) DeleteError(ctx context.Context, key string) error {
-	if err := db.canceled(ctx); err != nil {
-		return err
-	}
-	if db.ReadOnly {
-		return badger.ErrReadOnlyTxn
-	}
-	return db.deleteKey(errorBucket, key)
+	return db.deleteInBucket(ctx, errorBucket, key)
 }
 
 func (db *Database) DeleteErrors(ctx context.Context, prefix string) error {

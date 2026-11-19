@@ -102,6 +102,15 @@ func CheckSummaryKeys(ctx context.Context, db Reader) error
 CheckSummaryKeys returns ErrStaleSummaries if a summary could not be written
 and hence the summary keys may not include every prefix.
 
+### Func CheckSummaryRecording
+```go
+func CheckSummaryRecording(ctx context.Context, db Reader, calcID string, rec stats.HardlinkRecording) error
+```
+CheckSummaryRecording returns ErrStaleSummaries unless db contains complete
+precomputed summaries computed with calcID that satisfy the hardlink
+recording requirement rec. RecordAllFiles satisfies RecordLinkedFiles,
+and both satisfy RecordNoFiles.
+
 ### Func EraseErrors
 ```go
 func EraseErrors(ctx context.Context, db Database) error
@@ -337,11 +346,12 @@ compaction or garbage collection) and closes the database.
 ```go
 func (sdb *DB) RefreshTopN(ctx context.Context) error
 ```
-RefreshTopN rebuilds the recursive totals, and recomputes all of the top-N
-rankings and per-id totals, from the summaries stored in the database. It
-returns ErrStaleSummaries if the summaries are incomplete or were computed
-with a different configuration, ie. if the entire filesystem needs to be
-analyzed first.
+RefreshTopN rebuilds the link index and the recursive totals, and recomputes
+all of the top-N rankings and per-id totals, from the summaries stored
+in the database. Prefixes that are duplicates of preceding ones, eg.
+bind mounts, are only recognized by a rebuild. It returns ErrStaleSummaries
+if the summaries are incomplete or were computed with a different
+configuration, ie. if the entire filesystem needs to be analyzed first.
 
 
 
@@ -554,6 +564,12 @@ type Reader interface {
 	// non-empty).
 	ScanSubtrees(ctx context.Context, exactKey, childPrefix string, visitor func(ctx context.Context, key string, val []byte) bool) error
 
+	// ScanLinks iterates over the entries in the link bucket whose keys
+	// start with prefix, in lexicographical key order. The link bucket
+	// contains the index used to deduplicate hardlinks, whose keys and
+	// values are defined by the idudb package.
+	ScanLinks(ctx context.Context, prefix string, visitor func(ctx context.Context, key string, val []byte) bool) error
+
 	// GetMeta retrieves a metadata value from the metadata bucket into buf.
 	GetMeta(ctx context.Context, key string, buf *bytes.Buffer) error
 
@@ -671,6 +687,16 @@ type Writer interface {
 
 	// ClearSubtrees deletes all of the entries in the subtree bucket.
 	ClearSubtrees(ctx context.Context) error
+
+	// SetLink stores value for key in the link bucket. If batch is true
+	// the write may be merged with others, as for Set.
+	SetLink(ctx context.Context, key string, value []byte, batch bool) error
+
+	// DeleteLink deletes exactly key, if present, from the link bucket.
+	DeleteLink(ctx context.Context, key string) error
+
+	// ClearLinks deletes all of the entries in the link bucket.
+	ClearLinks(ctx context.Context) error
 
 	// SetMeta stores a metadata value in the metadata bucket.
 	SetMeta(ctx context.Context, key string, value []byte) error

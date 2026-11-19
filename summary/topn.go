@@ -33,7 +33,7 @@ type Ranked struct {
 }
 
 // TopN is a ranking of prefixes by a single stats.Metric, as maintained by
-// analyze. Note that hardlinks are not deduplicated.
+// analyze. Hardlinks are deduplicated, see Subtree.
 type TopN struct {
 	// Entries are in descending order of Value.
 	Entries []Ranked
@@ -201,8 +201,8 @@ func rankIDs(m map[int64]stats.Totals, metric stats.Metric, n int) []RankedID {
 // TopUsers returns the top n users, or all users if n is zero or less, by
 // their value for metric across the entire filesystem, in descending order
 // of Value. Unlike the rankings of prefixes, the totals for every user are
-// stored and hence the result is always exact. Note that hardlinks are not
-// deduplicated.
+// stored and hence the result is always exact. Hardlinks are deduplicated,
+// see Subtree.
 func (r *Reader) TopUsers(ctx context.Context, metric stats.Metric, n int) ([]RankedID, error) {
 	if err := checkMetric(metric); err != nil {
 		return nil, err
@@ -229,7 +229,18 @@ func (r *Reader) TopGroups(ctx context.Context, metric stats.Metric, n int) ([]R
 // Subtree returns the recursive totals for path, ie. the sum of the direct
 // totals of path and all of its descendants, if path exists. It returns
 // idudb.ErrStaleSubtrees if the recursive totals are missing or may be out
-// of date. Note that hardlinks are not deduplicated.
+// of date.
+//
+// The recursive totals, and the rankings and per-id totals, deduplicate
+// hardlinks across the entire filesystem, as Walk does when walking from
+// its root: each file is attributed to the first prefix, in depth-first
+// pre-order, that records it (see stats.HardlinkRecording), and counted as
+// a hardlink by any other prefixes that record it. They may therefore
+// differ from the totals computed by walking from path, which attributes
+// files only amongst the prefixes beneath path. Prefixes that are
+// duplicates of preceding ones, eg. bind mounts, are only recognized when
+// the recursive totals are rebuilt, eg. by analyze --refresh-topn, rather
+// than as soon as they are created.
 func (r *Reader) Subtree(ctx context.Context, path string) (stats.Totals, bool, error) {
 	if r.err != nil {
 		return stats.Totals{}, false, r.err

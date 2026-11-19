@@ -993,3 +993,104 @@ func TestSubtreesReadOnly(t *testing.T) {
 		t.Errorf("readonly ClearSubtrees = %v, want ErrReadOnlyTxn", err)
 	}
 }
+
+// scanLinks returns up to limit keys with prefix in the link bucket, each
+// of which must have itself as its value.
+func scanLinks(ctx context.Context, t *testing.T, db idudb.Database, prefix string, limit int) []string {
+	t.Helper()
+	var got []string
+	if err := db.ScanLinks(ctx, prefix, func(_ context.Context, k string, v []byte) bool {
+		if string(v) != k {
+			t.Errorf("%q: got %q", k, v)
+		}
+		got = append(got, k)
+		return len(got) < limit
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func TestLinks(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := openTestBadger(t, t.TempDir())
+	defer db.Close(ctx)
+
+	keys := []string{"fa\x00x", "fa\x00y", "fab", "fb", "d"}
+	for i, k := range keys {
+		if err := db.SetLink(ctx, k, []byte(k), i%2 == 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// The link and subtree buckets are distinct.
+	if err := db.SetSubtree(ctx, "fa", []byte("subtree"), false); err != nil {
+		t.Fatal(err)
+	}
+	scan := func(prefix string, limit int) []string {
+		return scanLinks(ctx, t, db, prefix, limit)
+	}
+	for _, tc := range []struct {
+		prefix string
+		limit  int
+		want   []string
+	}{
+		{"fa", 10, []string{"fa\x00x", "fa\x00y", "fab"}},
+		{"fa\x00", 10, []string{"fa\x00x", "fa\x00y"}},
+		{"fa", 1, []string{"fa\x00x"}},
+		{"f", 10, []string{"fa\x00x", "fa\x00y", "fab", "fb"}},
+		{"", 10, []string{"d", "fa\x00x", "fa\x00y", "fab", "fb"}},
+		{"g", 10, nil},
+	} {
+		if got := scan(tc.prefix, tc.limit); !slices.Equal(got, tc.want) {
+			t.Errorf("%q: got %q, want %q", tc.prefix, got, tc.want)
+		}
+	}
+	if err := db.DeleteLink(ctx, "fa\x00y"); err != nil {
+		t.Fatal(err)
+	}
+	// Deleting a missing key is not an error.
+	if err := db.DeleteLink(ctx, "missing"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := scan("fa", 10), []string{"fa\x00x", "fab"}; !slices.Equal(got, want) {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if err := db.ClearLinks(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := scan("", 10); got != nil {
+		t.Errorf("got %q after clearing", got)
+	}
+	var buf bytes.Buffer
+	if err := db.ScanSubtrees(ctx, "fa", "", func(_ context.Context, _ string, v []byte) bool {
+		buf.Write(v)
+		return false
+	}); err != nil || buf.String() != "subtree" {
+		t.Errorf("subtree: %q %v", buf.String(), err)
+	}
+}
+
+func TestLinksReadOnly(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+	_ = openTestBadger(t, dir).Close(ctx)
+	rdb := openTestBadger(t, dir, badgerdb.ReadOnly())
+	defer rdb.Close(ctx)
+	if err := rdb.SetLink(ctx, "x", []byte("1"), false); !errors.Is(err, badger.ErrReadOnlyTxn) {
+		t.Errorf("readonly SetLink = %v, want ErrReadOnlyTxn", err)
+	}
+	if err := rdb.DeleteLink(ctx, "x"); !errors.Is(err, badger.ErrReadOnlyTxn) {
+		t.Errorf("readonly DeleteLink = %v, want ErrReadOnlyTxn", err)
+	}
+	if err := rdb.ClearLinks(ctx); !errors.Is(err, badger.ErrReadOnlyTxn) {
+		t.Errorf("readonly ClearLinks = %v, want ErrReadOnlyTxn", err)
+	}
+	if err := rdb.ScanLinks(ctx, "", func(context.Context, string, []byte) bool { return true }); err != nil {
+		t.Errorf("readonly ScanLinks: %v", err)
+	}
+}

@@ -7,6 +7,7 @@ package stats
 import (
 	"encoding/binary"
 	"fmt"
+	"slices"
 	"strings"
 
 	"cloudeng.io/cmd/idu/internal/hardlinks"
@@ -236,19 +237,59 @@ func computeFileEntries(prefix string, pi PrefixInfo, du diskusage.Calculator, m
 // files, that have already been seen by hl, recording them as hardlinks
 // instead. Applying it to summaries in the same order as ComputeTotals is
 // called with a hardlink-handling matcher yields identical results.
-// It has no effect if HardlinkInfo is false.
+// Prefixes and files whose inode number is zero, ie. unknown, are never
+// treated as hardlinks. It has no effect if HardlinkInfo is false.
 func (ps *PrefixSummary) ApplyHardlinks(hl *hardlinks.Incremental) {
 	if !ps.HardlinkInfo {
 		return
 	}
-	if hl.Ref(ps.Device, ps.FileID) {
+	// Files share the device of their prefix.
+	dev := ps.Device
+	dup := ps.FileID != 0 && hl.Ref(dev, ps.FileID)
+	ps.applyOwnership(dup, func(fileID uint64) bool {
+		return !hl.Ref(dev, fileID)
+	})
+}
+
+// Effective returns a copy of ps adjusted, as ApplyHardlinks would be, to
+// exclude the prefix itself if dup is true, ie. if it is a duplicate of a
+// prefix that precedes it, such as a bind mount or a directory hardlink,
+// or otherwise to exclude the files that it does not own, recording them
+// as hardlinks instead. owns is called with the inode number of each file
+// that the prefix records, other than repeated ones, which are always
+// hardlinks, and those whose inode number is zero, which never are; it
+// should return true if the prefix is the first to contain that file. ps
+// itself is not modified. It returns a copy of ps if HardlinkInfo is false.
+func (ps *PrefixSummary) Effective(dup bool, owns func(fileID uint64) bool) PrefixSummary {
+	eff := *ps
+	if !ps.HardlinkInfo {
+		return eff
+	}
+	if !dup {
+		eff.PerUser = slices.Clone(ps.PerUser)
+		eff.PerGroup = slices.Clone(ps.PerGroup)
+	}
+	eff.applyOwnership(dup, owns)
+	return eff
+}
+
+func (ps *PrefixSummary) applyOwnership(dup bool, owns func(fileID uint64) bool) {
+	if dup {
 		ps.Direct = Totals{Prefix: 1, HardlinkDirs: 1}
 		ps.PerUser, ps.PerGroup, ps.Files = nil, nil, nil
 		return
 	}
+	if len(ps.Files) == 0 {
+		return
+	}
+	seen := make(map[uint64]bool, len(ps.Files))
 	for _, l := range ps.Files {
-		// Files share the device of their prefix.
-		if !hl.Ref(ps.Device, l.FileID) {
+		if l.FileID == 0 {
+			continue
+		}
+		first := !seen[l.FileID]
+		seen[l.FileID] = true
+		if first && owns(l.FileID) {
 			continue
 		}
 		ps.Direct = ps.Direct.asHardlink(l)

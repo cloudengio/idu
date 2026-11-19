@@ -62,6 +62,12 @@ type Reader interface {
 	// non-empty).
 	ScanSubtrees(ctx context.Context, exactKey, childPrefix string, visitor func(ctx context.Context, key string, val []byte) bool) error
 
+	// ScanLinks iterates over the entries in the link bucket whose keys
+	// start with prefix, in lexicographical key order. The link bucket
+	// contains the index used to deduplicate hardlinks, whose keys and
+	// values are defined by the idudb package.
+	ScanLinks(ctx context.Context, prefix string, visitor func(ctx context.Context, key string, val []byte) bool) error
+
 	// GetMeta retrieves a metadata value from the metadata bucket into buf.
 	GetMeta(ctx context.Context, key string, buf *bytes.Buffer) error
 
@@ -118,6 +124,16 @@ type Writer interface {
 
 	// ClearSubtrees deletes all of the entries in the subtree bucket.
 	ClearSubtrees(ctx context.Context) error
+
+	// SetLink stores value for key in the link bucket. If batch is true
+	// the write may be merged with others, as for Set.
+	SetLink(ctx context.Context, key string, value []byte, batch bool) error
+
+	// DeleteLink deletes exactly key, if present, from the link bucket.
+	DeleteLink(ctx context.Context, key string) error
+
+	// ClearLinks deletes all of the entries in the link bucket.
+	ClearLinks(ctx context.Context) error
 
 	// SetMeta stores a metadata value in the metadata bucket.
 	SetMeta(ctx context.Context, key string, value []byte) error
