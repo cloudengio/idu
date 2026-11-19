@@ -6,7 +6,6 @@ package idudb
 
 import (
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -110,7 +109,10 @@ func (lc *linkCounts) record(prefix string, pi *prefixinfo.T) {
 		if xattr.FileID == 0 || xattr.Hardlinks <= 1 {
 			continue
 		}
-		lc.files[inode{dev: dev, ino: xattr.FileID}] = seenLinks{links: xattr.Hardlinks, prefix: prefix}
+		in := inode{dev: dev, ino: xattr.FileID}
+		if xattr.Hardlinks > lc.files[in].links {
+			lc.files[in] = seenLinks{links: xattr.Hardlinks, prefix: prefix}
+		}
 	}
 }
 
@@ -152,9 +154,9 @@ func (lc *linkCounts) recordedLinks(ctx context.Context, db Reader) (map[inode]u
 		if _, ok := lc.files[in]; !ok {
 			return true
 		}
-		c, n := binary.Uvarint(v)
-		if n <= 0 || n != len(v) {
-			parseErr = fmt.Errorf("link index: %w: invalid count for %q", errInconsistentSubtrees, k)
+		c, err := decodeLinkCount(k, v)
+		if err != nil {
+			parseErr = err
 			return false
 		}
 		recorded[in] += c
@@ -242,7 +244,7 @@ func (sdb *DB) fileNames(ctx context.Context, prefix string, inodes []uint64) ([
 	if err != nil || !ok {
 		return nil, err
 	}
-	want := map[uint64]bool{}
+	want := make(map[uint64]bool, len(inodes))
 	for _, ino := range inodes {
 		want[ino] = true
 	}

@@ -108,6 +108,9 @@ func locateStaleLinks(ctx context.Context, sr *summary.Reader, cfg *iduconfig.Se
 		return nil, err
 	}
 	stale := map[string]*staleLinks{}
+	if len(origins) == 0 {
+		return stale, nil
+	}
 	for p, err := range sr.Prefixes(ctx, root) {
 		if err != nil {
 			return nil, err
@@ -119,26 +122,30 @@ func locateStaleLinks(ctx context.Context, sr *summary.Reader, cfg *iduconfig.Se
 			if e.IsDir() || e.XAttr.Hardlinks != 1 {
 				continue
 			}
-			from, ok := origins[linkOrigin{dev: e.XAttr.Device, ino: e.XAttr.FileID}]
-			if !ok || from == p.Path() {
-				continue
+			froms := origins[linkOrigin{dev: e.XAttr.Device, ino: e.XAttr.FileID}]
+			matched := false
+			for _, from := range froms {
+				if from == p.Path() {
+					continue
+				}
+				if !matched {
+					if stale[p.Path()] == nil {
+						stale[p.Path()] = &staleLinks{from: map[string]bool{}}
+					}
+					stale[p.Path()].files++
+					matched = true
+				}
+				stale[p.Path()].from[from] = true
 			}
-			s := stale[p.Path()]
-			if s == nil {
-				s = &staleLinks{from: map[string]bool{}}
-				stale[p.Path()] = s
-			}
-			s.files++
-			s.from[from] = true
 		}
 	}
 	return stale, nil
 }
 
-// linkOrigins returns the prefix that contains each of the files that may
+// linkOrigins returns the prefixes that contain each of the files that may
 // be hardlinks in the prefixes with missing links.
-func linkOrigins(ctx context.Context, sr *summary.Reader, missing []idudb.MissingLinksPrefix) (map[linkOrigin]string, error) {
-	origins := map[linkOrigin]string{}
+func linkOrigins(ctx context.Context, sr *summary.Reader, missing []idudb.MissingLinksPrefix) (map[linkOrigin][]string, error) {
+	origins := map[linkOrigin][]string{}
 	for _, m := range missing {
 		p, ok, err := sr.Prefix(ctx, m.Prefix)
 		if err != nil {
@@ -149,7 +156,10 @@ func linkOrigins(ctx context.Context, sr *summary.Reader, missing []idudb.Missin
 		}
 		for _, e := range p.Entries() {
 			if !e.IsDir() && e.XAttr.FileID != 0 && e.XAttr.Hardlinks > 1 {
-				origins[linkOrigin{dev: e.XAttr.Device, ino: e.XAttr.FileID}] = m.Prefix
+				in := linkOrigin{dev: e.XAttr.Device, ino: e.XAttr.FileID}
+				if !slices.Contains(origins[in], m.Prefix) {
+					origins[in] = append(origins[in], m.Prefix)
+				}
 			}
 		}
 	}

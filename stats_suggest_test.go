@@ -118,3 +118,42 @@ func TestSuggestOutsideLinks(t *testing.T) {
 		t.Errorf("unexpected suggestions: %v", out)
 	}
 }
+
+func TestSuggestMultipleOrigins(t *testing.T) {
+	ctx := context.Background()
+	tmpDir, root := newHardlinkTree(t)
+	cfg := writeRecordAllConfig(t, tmpDir, root)
+	analyzeWithConfig(ctx, t, cfg, root)
+
+	// Create two new hardlinks to unchanged b/h across separate incremental
+	// analyze runs (first in a, then in c) so ReadMissingLinks has entries
+	// for the same inode from both prefixes.
+	linkUnchanged(t, root)
+	analyzeWithConfig(ctx, t, cfg, root)
+	if err := os.MkdirAll(filepath.Join(root, "c"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(filepath.Join(root, "b", "h"), filepath.Join(root, "c", "hl2")); err != nil {
+		t.Fatal(err)
+	}
+	analyzeWithConfig(ctx, t, cfg, root)
+
+	out := runSuggest(ctx, t, cfg, &suggestFlags{N: 20, Locate: true})
+	if strings.Contains(out, "No stale links were found") {
+		t.Errorf("expected all missing-link origins to be located: %v", out)
+	}
+	aPrefix := filepath.Join(root, "a")
+	cPrefix := filepath.Join(root, "c")
+	found := false
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "# 1 file linked from ") &&
+			strings.Contains(line, aPrefix) &&
+			strings.Contains(line, cPrefix) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected %q and %q on \"# 1 file linked from \" line in:\n%v", aPrefix, cPrefix, out)
+	}
+}

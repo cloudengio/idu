@@ -7,6 +7,7 @@ package idudb
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -18,6 +19,7 @@ import (
 	"cloudeng.io/cmd/idu/internal/prefixinfo"
 	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/cmdutil/cmdyaml"
+	"cloudeng.io/file"
 )
 
 type restatProgress struct {
@@ -85,7 +87,7 @@ func TestRestat(t *testing.T) {
 		t.Fatalf("directory changed: %v", err)
 	}
 
-	match := regexp.MustCompile(`/f0$`)
+	match := regexp.MustCompile(regexp.QuoteMeta(string(filepath.Separator)) + "f0$")
 	for i, tc := range []struct {
 		restat              func(string) bool
 		size                int64
@@ -357,6 +359,59 @@ func TestLinkCountsRemoved(t *testing.T) {
 	for prefix, want := range map[string]bool{"/a/b": true, "/a/b/c": true, "/a/bc": false, "/a": false} {
 		if got := lc.isRemoved("/", prefix); got != want {
 			t.Errorf("%v: got %v, want %v", prefix, got, want)
+		}
+	}
+}
+
+func TestLinkCountsMaxAndDecode(t *testing.T) {
+	now := time.Now()
+	makePI := func(dir, name string, dirIno, links uint64) prefixinfo.T {
+		pi := prefixinfo.New("", file.NewInfo(dir, 0, fs.ModeDir|0o755, now, file.XAttr{Device: 1, FileID: dirIno}))
+		pi.AppendInfo(file.NewInfo(name, 10, 0o644, now, file.XAttr{Device: 7, FileID: 42, Hardlinks: links}))
+		return pi
+	}
+
+	pi3 := makePI("p1", "f1", 10, 3)
+	pi2 := makePI("p2", "f2", 20, 2)
+
+	// Retain highest link count regardless of observation order.
+	lc := newLinkCounts()
+	lc.record("/p1", &pi3)
+	lc.record("/p2", &pi2)
+	if len(lc.files) != 1 {
+		t.Fatalf("got %d entries, want 1", len(lc.files))
+	}
+	for _, seen := range lc.files {
+		if seen.links != 3 || seen.prefix != "/p1" {
+			t.Errorf("got %+v, want links=3 prefix=/p1", seen)
+		}
+	}
+
+	lc = newLinkCounts()
+	lc.record("/p2", &pi2)
+	lc.record("/p1", &pi3)
+	if len(lc.files) != 1 {
+		t.Fatalf("got %d entries, want 1", len(lc.files))
+	}
+	for _, seen := range lc.files {
+		if seen.links != 3 || seen.prefix != "/p1" {
+			t.Errorf("got %+v, want links=3 prefix=/p1", seen)
+		}
+	}
+
+	if got, err := decodeLinkCount("1:2", []byte{3}); err != nil || got != 3 {
+		t.Errorf("valid decode: got (%v, %v), want (3, nil)", got, err)
+	}
+	for _, tc := range []struct {
+		name string
+		val  []byte
+	}{
+		{"empty", nil},
+		{"zero", []byte{0}},
+		{"trailing", []byte{1, 0}},
+	} {
+		if _, err := decodeLinkCount("1:2", tc.val); !errors.Is(err, errInconsistentSubtrees) {
+			t.Errorf("%s: got err %v, want %v", tc.name, err, errInconsistentSubtrees)
 		}
 	}
 }

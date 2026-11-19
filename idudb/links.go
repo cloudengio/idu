@@ -77,15 +77,24 @@ type occurrence struct {
 	count uint64
 }
 
+// decodeLinkCount decodes a link occurrence count from v.
+func decodeLinkCount(k string, v []byte) (uint64, error) {
+	c, n := binary.Uvarint(v)
+	if n <= 0 || n != len(v) || c == 0 {
+		return 0, fmt.Errorf("link index: %w: invalid count for %q", errInconsistentSubtrees, k)
+	}
+	return c, nil
+}
+
 // readOccurrences returns the occurrences of the file in, in key order.
 func readOccurrences(ctx context.Context, db Reader, in inode) ([]occurrence, error) {
 	prefix := linkPrefix(fileLinkTag, in)
 	var occ []occurrence
 	var decodeErr error
 	err := db.ScanLinks(ctx, prefix, func(_ context.Context, k string, v []byte) bool {
-		c, n := binary.Uvarint(v)
-		if n <= 0 || n != len(v) || c == 0 {
-			decodeErr = fmt.Errorf("link index: %w: invalid count for %q", errInconsistentSubtrees, k)
+		c, err := decodeLinkCount(k, v)
+		if err != nil {
+			decodeErr = err
 			return false
 		}
 		occ = append(occ, occurrence{key: k[len(prefix):], count: c})
