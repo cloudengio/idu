@@ -68,7 +68,8 @@ filesystems:
     root: /usr/local
     database: ${db_root}/usr-local
     count_hardlinks_as_files: false
-    # summaries (default) or rescan, see hardlink_dedup in iduconfig.
+    # summaries (default), summaries-all or rescan, see hardlink_dedup in
+    # iduconfig.
     hardlink_dedup: summaries
 
   - name: tmp

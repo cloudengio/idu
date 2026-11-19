@@ -188,13 +188,20 @@ HardlinkDedup determines how hardlinks are deduplicated when computing
 statistics.
 
 ### Constants
-### HardlinkDedupSummaries, HardlinkDedupRescan
+### HardlinkDedupSummaries, HardlinkDedupSummariesAll, HardlinkDedupRescan
 ```go
 const (
-	// HardlinkDedupSummaries records potential hardlinks in the precomputed
-	// per-prefix summaries when analyzing so that stats can deduplicate them
-	// without rescanning all of the file metadata. This is the default.
+	// HardlinkDedupSummaries records potential hardlinks, ie. files with
+	// more than one link, in the precomputed per-prefix summaries when
+	// analyzing so that stats can deduplicate them without rescanning all
+	// of the file metadata. The link counts are only refreshed when a
+	// prefix is rescanned, see stats.RecordLinkedFiles. This is the default.
 	HardlinkDedupSummaries HardlinkDedup = "summaries"
+	// HardlinkDedupSummariesAll is like HardlinkDedupSummaries but records
+	// every file rather than only those that may be hardlinks, ie. those
+	// with more than one link. It requires more storage but does not
+	// depend on the link counts being up to date.
+	HardlinkDedupSummariesAll HardlinkDedup = "summaries-all"
 	// HardlinkDedupRescan computes stats from all of the file metadata
 	// stored for each prefix, which requires no additional storage but is
 	// considerably slower.
@@ -294,7 +301,7 @@ type Settings struct {
 	ScanSize                 int                `yaml:"scan_size" doc:"maximum number of items to fetch from the filesystem in a single operation"`
 	Exclusions               cmdyaml.RegexpList `yaml:"exclusions" doc:"prefixes and files matching these regular expressions will be ignored when building a database"`
 	CountHardlinkAsFiles     bool               `yaml:"count_hardlinks_as_files" doc:"if true, hardlinks will be counted as separate files"`
-	HardlinkDedup            HardlinkDedup      `yaml:"hardlink_dedup" doc:"the strategy used to deduplicate hardlinks when count_hardlinks_as_files is false (summaries, rescan), defaults to summaries, see Hardlink deduplication strategies below"`
+	HardlinkDedup            HardlinkDedup      `yaml:"hardlink_dedup" doc:"the strategy used to deduplicate hardlinks when count_hardlinks_as_files is false (summaries, summaries-all, rescan), defaults to summaries, see Hardlink deduplication strategies below"`
 	CompactIntervalDays      int                `yaml:"compact_interval_days" doc:"number of days after the last database write before running compaction, added to compact_interval"`
 	CompactInterval          time.Duration      `yaml:"compact_interval" doc:"duration after the last database write before running compaction, added to compact_interval_days"`
 	TopN                     int                `yaml:"topn" doc:"the number of top entries, N, maintained incrementally by analyze for each top-N report, ie. by prefix, subtree, user and group, reports for more entries than this require a scan of the database, it defaults to 2000"`
@@ -342,6 +349,13 @@ Config implements Filesystem.
 func (p *Settings) Exclude(path string) bool
 ```
 Exclude returns true if path should be excluded/ignored.
+
+
+```go
+func (p *Settings) RecordAllFiles() bool
+```
+RecordAllFiles returns true if analyze should record every file, rather than
+only those that may be hardlinks, in the precomputed summaries.
 
 
 ```go

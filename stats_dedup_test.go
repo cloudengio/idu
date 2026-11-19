@@ -58,9 +58,14 @@ func writeHardlinkConfig(t *testing.T, dir, root string, dedup iduconfig.Hardlin
 
 func analyzeWithConfig(ctx context.Context, t *testing.T, cfg iduconfig.T, root string) {
 	t.Helper()
+	analyzeWithFlags(ctx, t, cfg, root, &analyzeFlags{})
+}
+
+func analyzeWithFlags(ctx context.Context, t *testing.T, cfg iduconfig.T, root string, af *analyzeFlags) {
+	t.Helper()
 	globalConfig = cfg
 	alz := &analyzeCmd{}
-	if err := alz.analyzeFS(ctx, localfs.New(), &analyzeFlags{}, []string{root}); err != nil {
+	if err := alz.analyzeFS(ctx, localfs.New(), af, []string{root}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -121,32 +126,38 @@ func computeBoth(ctx context.Context, t *testing.T, cfg iduconfig.T, target stri
 	return
 }
 
-func TestHardlinkDedupSummariesMatchRescan(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
+func newHardlinkTree(t *testing.T) (tmpDir, root string) {
+	t.Helper()
+	tmpDir = t.TempDir()
 	root, err := filepath.EvalSymlinks(tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	root = filepath.Join(root, "tree")
 	createHardlinkTree(t, root)
+	return tmpDir, root
+}
 
-	verify := func(cfg iduconfig.T, rootFiles, rootHardlinks, aFiles int64) {
-		t.Helper()
-		for _, tc := range []struct {
-			target           string
-			files, hardlinks int64
-			prefixes         int64
-		}{
-			{root, rootFiles, rootHardlinks, 6},
-			// Siblings a-b and ab must not be included.
-			{filepath.Join(root, "a"), aFiles, 0, 1},
-		} {
-			fromSummaries, fromPrefixes, err := computeBoth(ctx, t, cfg, tc.target)
-			if err != nil {
-				t.Fatalf("%v: computeFromSummaries: %v", tc.target, err)
-			}
-			got, want := totalsFor(fromSummaries), totalsFor(fromPrefixes)
+// verifyHardlinkTree verifies the stats for the tree created by
+// createHardlinkTree, and for its prefix a, computed from the summaries.
+// If exact is true they must match those computed by a rescan.
+func verifyHardlinkTree(ctx context.Context, t *testing.T, cfg iduconfig.T, root string, exact bool, rootFiles, rootHardlinks, aFiles int64) {
+	t.Helper()
+	for _, tc := range []struct {
+		target           string
+		files, hardlinks int64
+		prefixes         int64
+	}{
+		{root, rootFiles, rootHardlinks, 6},
+		// Siblings a-b and ab must not be included.
+		{filepath.Join(root, "a"), aFiles, 0, 1},
+	} {
+		fromSummaries, fromPrefixes, err := computeBoth(ctx, t, cfg, tc.target)
+		if err != nil {
+			t.Fatalf("%v: computeFromSummaries: %v", tc.target, err)
+		}
+		got, want := totalsFor(fromSummaries), totalsFor(fromPrefixes)
+		if exact {
 			if got != want {
 				t.Errorf("%v: summaries: %+v, rescan: %+v", tc.target, got, want)
 			}
@@ -158,28 +169,44 @@ func TestHardlinkDedupSummariesMatchRescan(t *testing.T) {
 			if g, w := fromSummaries.Subtree.Merge(20), fromPrefixes.Subtree.Merge(20); !reflect.DeepEqual(g, w) {
 				t.Errorf("%v: per subtree: summaries: %+v, rescan: %+v", tc.target, g, w)
 			}
-			if got.Files != tc.files || got.Hardlinks != tc.hardlinks || got.Prefixes != tc.prefixes {
-				t.Errorf("%v: got files=%v hardlinks=%v prefixes=%v, want %v %v %v",
-					tc.target, got.Files, got.Hardlinks, got.Prefixes, tc.files, tc.hardlinks, tc.prefixes)
-			}
+		}
+		if got.Files != tc.files || got.Hardlinks != tc.hardlinks || got.Prefixes != tc.prefixes {
+			t.Errorf("%v: got files=%v hardlinks=%v prefixes=%v, want %v %v %v",
+				tc.target, got.Files, got.Hardlinks, got.Prefixes, tc.files, tc.hardlinks, tc.prefixes)
 		}
 	}
+}
+
+// linkUnchanged creates a hardlink in a, which is therefore rescanned, to
+// b/h, a file in b, which is not rescanned since it is unchanged, and which
+// had a link count of 1 when last scanned. a/hl precedes b/h and is
+// counted, b/h is now a hardlink.
+func linkUnchanged(t *testing.T, root string) {
+	t.Helper()
+	if err := os.Link(filepath.Join(root, "b", "h"), filepath.Join(root, "a", "hl")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHardlinkDedupSummariesMatchRescan(t *testing.T) {
+	ctx := context.Background()
+	tmpDir, root := newHardlinkTree(t)
 
 	// Freshly analyzed, potential hardlinks are recorded using their link counts.
 	summariesCfg := writeHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupSummaries)
 	analyzeWithConfig(ctx, t, summariesCfg, root)
 	// f1, f2, g, h are counted once, l1, l2, l3 are hardlinks.
-	verify(summariesCfg, 4, 3, 2)
+	verifyHardlinkTree(ctx, t, summariesCfg, root, true, 4, 3, 2)
 
-	// Create a hardlink in a, which is rescanned, to b/h, a file in b, which
-	// is not rescanned since it is unchanged, and which had a link count of
-	// 1 when last scanned. a/hl precedes b/h and is counted, b/h is now a
-	// hardlink.
-	if err := os.Link(filepath.Join(root, "b", "h"), filepath.Join(root, "a", "hl")); err != nil {
-		t.Fatal(err)
-	}
+	// The link count stored for b/h is stale, it is not recorded and hence
+	// is counted twice: a/hl and b/h are both counted.
+	linkUnchanged(t, root)
 	analyzeWithConfig(ctx, t, summariesCfg, root)
-	verify(summariesCfg, 4, 4, 3)
+	verifyHardlinkTree(ctx, t, summariesCfg, root, false, 5, 3, 3)
+
+	// Forcing a reanalysis refreshes the link counts.
+	analyzeWithFlags(ctx, t, summariesCfg, root, &analyzeFlags{Force: true})
+	verifyHardlinkTree(ctx, t, summariesCfg, root, true, 4, 4, 3)
 
 	// Switching to rescan rewrites the summaries without hardlink information.
 	rescanCfg := writeHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupRescan)
@@ -194,9 +221,33 @@ func TestHardlinkDedupSummariesMatchRescan(t *testing.T) {
 	}
 
 	// Reanalyzing rewrites the summaries for the unchanged prefixes from the
-	// stored metadata, which lacks link counts, and must yield the same results.
+	// stored metadata, and must yield the same results.
 	analyzeWithConfig(ctx, t, summariesCfg, root)
-	verify(summariesCfg, 4, 4, 3)
+	verifyHardlinkTree(ctx, t, summariesCfg, root, true, 4, 4, 3)
+}
+
+func TestHardlinkDedupSummariesAllMatchRescan(t *testing.T) {
+	ctx := context.Background()
+	tmpDir, root := newHardlinkTree(t)
+
+	allCfg := writeHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupSummariesAll)
+	analyzeWithConfig(ctx, t, allCfg, root)
+	verifyHardlinkTree(ctx, t, allCfg, root, true, 4, 3, 2)
+
+	// Every file is recorded, so the stale link count of b/h does not matter.
+	linkUnchanged(t, root)
+	analyzeWithConfig(ctx, t, allCfg, root)
+	verifyHardlinkTree(ctx, t, allCfg, root, true, 4, 4, 3)
+
+	// Switching from summaries to summaries-all requires reanalyzing.
+	summariesCfg := writeHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupSummaries)
+	analyzeWithConfig(ctx, t, summariesCfg, root)
+	verifyHardlinkTree(ctx, t, summariesCfg, root, false, 5, 3, 3)
+	if _, _, err := computeBoth(ctx, t, allCfg, root); !errors.Is(err, idudb.ErrStaleSummaries) {
+		t.Fatalf("expected %v before reanalyzing with summaries-all, got %v", idudb.ErrStaleSummaries, err)
+	}
+	analyzeWithConfig(ctx, t, allCfg, root)
+	verifyHardlinkTree(ctx, t, allCfg, root, true, 4, 4, 3)
 }
 
 // createSparseFile creates a file of size bytes with a hole after its

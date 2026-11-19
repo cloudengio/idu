@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"cloudeng.io/cmd/idu/iduconfig"
+	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/file/diskusage"
 	"cloudeng.io/file/filewalk"
 )
@@ -19,7 +20,7 @@ type Option func(*options)
 type options struct {
 	calc            diskusage.Calculator
 	sep             string
-	hardlinks       bool
+	hardlinks       stats.HardlinkRecording
 	compactInterval time.Duration
 	topn            topnConfig
 }
@@ -54,12 +55,12 @@ func WithSeparator(sep string) Option {
 	}
 }
 
-// WithRecordHardlinks requests that the precomputed summaries record
-// potential hardlinks so that they can be deduplicated without rescanning
-// the database.
-func WithRecordHardlinks(v bool) Option {
+// WithHardlinkRecording determines which files, if any, the precomputed
+// summaries record so that hardlinks can be deduplicated without rescanning
+// the database. It defaults to stats.RecordNoFiles.
+func WithHardlinkRecording(r stats.HardlinkRecording) Option {
 	return func(o *options) {
-		o.hardlinks = v
+		o.hardlinks = r
 	}
 }
 
@@ -90,12 +91,24 @@ func WithTopN(n, capacity, perIDN, perIDCapacity int) Option {
 	}
 }
 
+// HardlinkRecording returns the files that the summaries record, as
+// specified by cfg, so that hardlinks can be deduplicated.
+func HardlinkRecording(cfg *iduconfig.Settings) stats.HardlinkRecording {
+	switch {
+	case !cfg.RecordHardlinks():
+		return stats.RecordNoFiles
+	case cfg.RecordAllFiles():
+		return stats.RecordAllFiles
+	}
+	return stats.RecordLinkedFiles
+}
+
 // OptionsFromConfig returns the database options specified by cfg.
 func OptionsFromConfig(cfg *iduconfig.Settings) []Option {
 	return []Option{
 		WithCalculator(cfg.CalculatorOrDefault()),
 		WithSeparator(cfg.SeparatorOrDefault()),
-		WithRecordHardlinks(cfg.RecordHardlinks()),
+		WithHardlinkRecording(HardlinkRecording(cfg)),
 		WithCompactionInterval(cfg.CompactionInterval()),
 		WithTopN(cfg.TopNOrDefault(), cfg.TopNCapacity(), cfg.TopNPerIDOrDefault(), cfg.TopNPerIDCapacity()),
 	}

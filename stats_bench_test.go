@@ -64,7 +64,7 @@ func createPrefixTreeDB(ctx context.Context, b testing.TB, fanout, nfiles int) i
 		if err := sdb.Set(ctx, path, buf.Bytes(), true); err != nil {
 			b.Fatal(err)
 		}
-		summary := stats.ComputeSummary(path, &pi, cfg.CalculatorOrDefault(), stats.AlwaysMatch(), cfg.RecordHardlinks())
+		summary := stats.ComputeSummary(path, &pi, cfg.CalculatorOrDefault(), stats.AlwaysMatch(), idudb.HardlinkRecording(&cfg.Settings))
 		exactKey, _ := stats.SummaryKeys(cfg.SeparatorOrDefault(), path)
 		if err := sdb.SetSummary(ctx, exactKey, summary.AppendBinary(nil), true); err != nil {
 			b.Fatal(err)

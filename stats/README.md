@@ -118,6 +118,44 @@ FileEntry records the contribution of a file to the totals of the prefix
 that contains it.
 
 
+### Type HardlinkRecording
+```go
+type HardlinkRecording int
+```
+HardlinkRecording determines which files, if any, a PrefixSummary records so
+that hardlinks can be deduplicated by ApplyHardlinks.
+
+### Constants
+### RecordNoFiles, RecordLinkedFiles, RecordAllFiles
+```go
+const (
+	// RecordNoFiles records no hardlink information.
+	RecordNoFiles HardlinkRecording = iota
+	// RecordLinkedFiles records the files that may be hardlinks, ie. those
+	// whose link count is greater than one or is unknown (zero). Link
+	// counts can be stale: a file's link count changes when a link to it
+	// is created, but its directory does not, and hence a file may still
+	// be recorded as having a single link if its directory has not been
+	// rescanned since. Such a file is then not deduplicated.
+	RecordLinkedFiles
+	// RecordAllFiles records every file, and hence deduplication does
+	// not depend on the link counts being up to date.
+	RecordAllFiles
+)
+```
+
+
+
+### Methods
+
+```go
+func (r HardlinkRecording) String() string
+```
+String implements fmt.Stringer.
+
+
+
+
 ### Type MatchEntry
 ```go
 type MatchEntry struct {
@@ -498,10 +536,8 @@ type PrefixSummary struct {
 	HardlinkInfo bool
 	// Device and FileID identify the prefix itself.
 	Device, FileID uint64
-	// Files lists every file counted in Direct. All files are recorded,
-	// rather than only those with a link count greater than one, since
-	// a hardlink may be created to a file in a prefix that is not rescanned
-	// because it is unchanged.
+	// Files lists the files counted in Direct that are recorded so that
+	// hardlinks can be deduplicated, see HardlinkRecording.
 	Files []FileEntry
 }
 ```
@@ -511,11 +547,11 @@ single prefix along with the calculator identifier used for StorageBytes.
 ### Functions
 
 ```go
-func ComputeSummary(prefix string, pi PrefixInfo, du diskusage.Calculator, match Matcher, hardlinkInfo bool) PrefixSummary
+func ComputeSummary(prefix string, pi PrefixInfo, du diskusage.Calculator, match Matcher, rec HardlinkRecording) PrefixSummary
 ```
 ComputeSummary computes a PrefixSummary for a single directory/prefix.
-If hardlinkInfo is true the summary records the information required for
-hardlinks to be deduplicated by ApplyHardlinks. match should not perform
+Unless rec is RecordNoFiles the summary records the information required
+for hardlinks to be deduplicated by ApplyHardlinks. match should not perform
 hardlink handling itself.
 
 

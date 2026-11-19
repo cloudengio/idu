@@ -13,6 +13,9 @@ import (
 type fsOnly struct {
 	ino    uint64
 	blocks int64
+	// links is the number of hardlinks to the file, zero if unknown,
+	// eg. if it was stored by an older version, and for prefixes.
+	links uint64
 }
 
 type idAndFS struct {
@@ -24,18 +27,20 @@ func (pi *T) xAttrFromSys(v any) file.XAttr {
 	switch s := v.(type) {
 	case fsOnly:
 		return file.XAttr{
-			UID:    pi.xattr.UID,
-			GID:    pi.xattr.GID,
-			Device: pi.xattr.Device,
-			FileID: s.ino,
-			Blocks: s.blocks}
+			UID:       pi.xattr.UID,
+			GID:       pi.xattr.GID,
+			Device:    pi.xattr.Device,
+			FileID:    s.ino,
+			Blocks:    s.blocks,
+			Hardlinks: s.links}
 	case idAndFS:
 		return file.XAttr{
-			UID:    s.uid,
-			GID:    s.gid,
-			Device: pi.xattr.Device,
-			FileID: s.ino,
-			Blocks: s.blocks}
+			UID:       s.uid,
+			GID:       s.gid,
+			Device:    pi.xattr.Device,
+			FileID:    s.ino,
+			Blocks:    s.blocks,
+			Hardlinks: s.links}
 	case *file.XAttr:
 		return *s
 	case file.XAttr:
