@@ -374,9 +374,9 @@ func formatSummary(env *cli.Env, s model.Summary) string {
 		if len(t) == 0 {
 			return
 		}
-		fmt.Fprintf(&b, "\n[::b]%v[::-]\n", title)
+		fmt.Fprintf(&b, "\n[::b]%v, by storage used[::-]\n", title)
 		for _, id := range t {
-			fmt.Fprintf(&b, "  %-12v %v in %v files\n", tview.Escape(name(id.ID)), size(id.Bytes), count(id.Files))
+			fmt.Fprintf(&b, "  %-12v %v in %v files\n", tview.Escape(name(id.ID)), size(id.StorageBytes), count(id.Files))
 		}
 	}
 	ids("Users", s.Users, usernames.Manager.NameForUID)
@@ -414,7 +414,7 @@ func (v *viewScreen) fillTables(top model.TopN) {
 	prefixes(subdirsTab, "Prefixes", top.Subdirs, count)
 	ids := func(name, what string, r []model.Ranked[int64], nameFor func(int64) string) {
 		t := v.tables[name]
-		header(t, "Bytes", what)
+		header(t, "Storage", what)
 		for i, e := range r {
 			t.SetCell(i+1, 0, tview.NewTableCell(size(e.Value)).SetAlign(tview.AlignRight))
 			t.SetCell(i+1, 1, tview.NewTableCell(tview.Escape(nameFor(e.Item))).SetExpansion(1))

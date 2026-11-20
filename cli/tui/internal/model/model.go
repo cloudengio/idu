@@ -82,7 +82,8 @@ type TopN struct {
 	// Source describes where the rankings came from.
 	Source                         string
 	Bytes, Storage, Files, Subdirs []Ranked[string]
-	// Users and Groups are ranked by bytes.
+	// Users and Groups are ranked by the storage that they use, ie.
+	// StorageBytes, rather than the size of their files.
 	Users, Groups []Ranked[int64]
 	// Hotspots are the distributed subtree hotspots ranked by bytes, they
 	// are only valid if HasHotspots is true.
@@ -113,8 +114,8 @@ func newTopN(path, source string, sdb *report.AllStats, n int) TopN {
 		Storage: sorted(sdb.Prefix.StorageBytes, n),
 		Files:   sorted(sdb.Prefix.Files, n),
 		Subdirs: sorted(sdb.Prefix.Prefixes, n),
-		Users:   sorted(sdb.ByUser.Bytes, n),
-		Groups:  sorted(sdb.ByGroup.Bytes, n),
+		Users:   sorted(sdb.ByUser.StorageBytes, n),
+		Groups:  sorted(sdb.ByGroup.StorageBytes, n),
 	}
 	if sdb.Distributed != nil {
 		t.Hotspots, t.HasHotspots = report.TopDistributed(sdb.Distributed.Bytes, n), true
@@ -260,6 +261,18 @@ func lastElement(parent, path string) string {
 	return path
 }
 
+// byStorage returns a copy of t sorted by the storage used, largest first.
+func byStorage(t stats.PerIDTotals) stats.PerIDTotals {
+	s := slices.Clone(t)
+	slices.SortStableFunc(s, func(a, b stats.Totals) int {
+		if c := cmp.Compare(b.StorageBytes, a.StorageBytes); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.ID, b.ID)
+	})
+	return s
+}
+
 // Summary implements Source.
 func (s *DB) Summary(ctx context.Context, path string) (Summary, error) {
 	ps, ok, err := s.sr.Get(ctx, path)
@@ -271,8 +284,8 @@ func (s *DB) Summary(ctx context.Context, path string) (Summary, error) {
 	}
 	sum := Summary{
 		Node:   Node{Path: path, Direct: ps.Direct},
-		Users:  ps.PerUser,
-		Groups: ps.PerGroup,
+		Users:  byStorage(ps.PerUser),
+		Groups: byStorage(ps.PerGroup),
 	}
 	if t, ok, err := s.sr.Subtree(ctx, path); err == nil && ok {
 		sum.Subtree, sum.HasSubtree = t, true
