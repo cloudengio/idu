@@ -11,31 +11,11 @@ import (
 	"sync"
 	"time"
 
-	"cloudeng.io/cmd/idu/idudb"
+	"cloudeng.io/cmd/idu/cli/analyze"
 	"cloudeng.io/logging/ctxlog"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 )
-
-type anaylzeSummary struct {
-	Operation            string        `json:"operation"`
-	Command              string        `json:"command"`
-	Duration             time.Duration `json:"duration"`
-	PrefixesStarted      int64         `json:"prefixes_started"`
-	PrefixesFinished     int64         `json:"prefixes_finished"`
-	SynchronousScans     int64         `json:"synchronous_scans"`
-	SlowScans            int64         `json:"slow_scans"`
-	FSStats              int64         `json:"fs_stats"`
-	FSStatsTotal         int64         `json:"fs_stats_total"`
-	FSStatMeanLatency    int64         `json:"fs_stat_mean_latency"`
-	Files                int64         `json:"files"`
-	ParentUnchanged      int64         `json:"parent_unchanged"`
-	ChildrenUnchanged    int64         `json:"children_unchanged"`
-	Errors               int64         `json:"errors"`
-	PrefixesDeleted      int64         `json:"prefixes_deleted"`
-	FilesRestated        int64         `json:"files_restated"`
-	FilesRestatedChanged int64         `json:"files_restated_changed"`
-}
 
 type progressStats struct {
 	numPrefixesStarted, numPrefixesFinished int64
@@ -55,10 +35,11 @@ type progressStats struct {
 	sysMemstats                             *sysMemstats
 }
 
-var _ idudb.ScanProgress = (*progressTracker)(nil)
+var _ analyze.Progress = (*progressTracker)(nil)
 
 type progressTracker struct {
 	sync.Mutex
+	stop     func()
 	interval time.Duration
 	progressStats
 	displayUnchanged bool
@@ -72,6 +53,14 @@ func newProgressTracker(ctx context.Context, interval time.Duration, display, di
 	pt.start = time.Now()
 	pt.sysMemstats = &sysMemstats{}
 	pt.refreshMemstatsLocked()
+	var once sync.Once
+	ctx, cancel := context.WithCancel(ctx)
+	pt.stop = func() {
+		once.Do(func() {
+			cancel()
+			wg.Wait()
+		})
+	}
 	if display {
 		go func() {
 			pt.display(ctx)
@@ -92,11 +81,24 @@ func (pt progressStats) meanStatLatency() int64 {
 	return 0
 }
 
-func (pt *progressTracker) summarize() anaylzeSummary {
+// newAnalyzeProgress implements analyze.NewProgress.
+func newAnalyzeProgress(ctx context.Context, display bool) analyze.Progress {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	return newProgressTracker(ctx, time.Second, display, true, &wg)
+}
+
+// Stop implements analyze.Progress.
+func (pt *progressTracker) Stop() {
+	pt.stop()
+}
+
+// Summary implements analyze.Progress.
+func (pt *progressTracker) Summary() analyze.Summary {
 	pt.Lock()
 	cpy := pt.progressStats
 	pt.Unlock()
-	return anaylzeSummary{
+	return analyze.Summary{
 		PrefixesStarted:      cpy.numPrefixesStarted,
 		PrefixesFinished:     cpy.numPrefixesFinished,
 		SynchronousScans:     cpy.numSyncScans,
@@ -193,7 +195,8 @@ func (pt *progressTracker) refreshMemstatsLocked() {
 	}
 }
 
-func (pt *progressTracker) summary(ctx context.Context) {
+// Report implements analyze.Progress.
+func (pt *progressTracker) Report(ctx context.Context) {
 	pt.Lock()
 	pt.refreshMemstatsLocked()
 	cpy := pt.progressStats

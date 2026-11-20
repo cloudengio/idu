@@ -1,5 +1,4 @@
 # Package [cloudeng.io/cmd/idu/idudb](https://pkg.go.dev/cloudeng.io/cmd/idu/idudb?tab=doc)
-[![CircleCI](https://circleci.com/gh/cloudengio/go.gotools.svg?style=svg)](https://circleci.com/gh/cloudengio/go.gotools) [![Go Report Card](https://goreportcard.com/badge/cloudeng.io/cmd/idu/idudb)](https://goreportcard.com/report/cloudeng.io/cmd/idu/idudb)
 
 ```go
 import cloudeng.io/cmd/idu/idudb
@@ -111,6 +110,16 @@ CheckSummaryRecording returns ErrStaleSummaries unless db contains complete
 precomputed summaries computed with calcID that satisfy the hardlink
 recording requirement rec. RecordAllFiles satisfies RecordLinkedFiles,
 and both satisfy RecordNoFiles.
+
+### Func DatabaseSize
+```go
+func DatabaseSize(dir string) (int64, error)
+```
+DatabaseSize returns the total size of the files in the database
+directory dir. The database is excluded from analyses, see
+iduconfig.Settings.ExcludeFunc, so its size is measured separately,
+after the database has been closed. Files that are removed while it is being
+measured are ignored.
 
 ### Func EraseErrors
 ```go

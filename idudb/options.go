@@ -268,7 +268,7 @@ func AnalyzeOptionsFromConfig(cfg *iduconfig.Settings) []AnalyzeOption {
 		restat = cfg.RestatFile
 	}
 	return []AnalyzeOption{
-		WithExclusions(cfg.Exclude),
+		WithExclusions(cfg.ExcludeFunc()),
 		WithRestat(restat),
 		WithConcurrentScans(cfg.ConcurrentScans),
 		WithScanSize(cfg.ScanSize),

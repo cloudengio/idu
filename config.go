@@ -10,14 +10,11 @@ import (
 	"os"
 
 	"cloudeng.io/cmd/idu/iduconfig"
+	"cloudeng.io/cmd/idu/internal/cli"
 	"cloudeng.io/cmdutil"
 	"cloudeng.io/cmdutil/cmdconfig"
 	"cloudeng.io/cmdutil/subcmd"
 )
-
-type configLoadError struct {
-	err error
-}
 
 func configCommands() cmdconfig.ConfigCommands[iduconfig.T] {
 	return cmdconfig.ConfigCommands[iduconfig.T]{
@@ -40,11 +37,11 @@ func configDescribe(_ context.Context, _ any, _ []string) error {
 }
 
 func configShow(ctx context.Context, flagValues any, args []string) error {
-	if loadErr, ok := cmdutil.ContextValue[configLoadError](ctx); ok && loadErr.err != nil {
+	if loadErr := cli.ConfigLoadError(ctx); loadErr != nil {
 		if loc, ok := cmdutil.ContextValue[*cmdconfig.Located](ctx); ok {
 			iduconfig.PrintLocated(os.Stdout, loc)
 		}
-		return loadErr.err
+		return loadErr
 	}
 	return configCommands().Show(ctx, flagValues, args)
 }

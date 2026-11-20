@@ -5,13 +5,15 @@
 // Usage of idu
 //
 //	analyze disk usage using a database for incremental updates. The filesystem to
-//	operate on is selected by name using the --fs flag, which may be omitted if only
-//	one filesystem is configured. Commands that accept a <prefix> interpret it
-//	relative to that filesystem's configured root, or as a key prefix for a filesystem
-//	configured as a key range, and it must be contained within that root or range;
-//	an omitted [<prefix>] refers to the entire filesystem. Many of the commands
-//	accept an expression that is used to restrict which prefixes/directories and
-//	files are processed.
+//	operate on is selected by name using the --fs flag, which every command that
+//	operates on a filesystem accepts, and which may also be given as a global flag
+//	that the command flag overrides; it may be omitted if only one filesystem is
+//	configured. Commands that accept a <prefix> interpret it relative to that
+//	filesystem's configured root, or as a key prefix for a filesystem configured as
+//	a key range, and it must be contained within that root or range; an omitted
+//	[<prefix>] refers to the entire filesystem. Many of the commands accept an
+//	expression that is used to restrict which prefixes/directories and files are
+//	processed.
 //
 //	expression-syntax - display the syntax for the expression language supported by commands such as analyze, find etc.
 //	          analyze - analyze the file system to build a database of directory and file metadata.
