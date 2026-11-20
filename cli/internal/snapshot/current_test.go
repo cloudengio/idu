@@ -96,7 +96,7 @@ func TestCurrent(t *testing.T) {
 	current(dir, 10, FromSummariesSource, saved)
 
 	// Once the database has been updated the snapshot is stale.
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(25 * time.Millisecond)
 	analyzeWithConfig(ctx, t, cfg, root)
 	current(dir, 10, FromStoredSource, "")
 	// Without a snapshot directory a full pass is not saved.

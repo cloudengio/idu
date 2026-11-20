@@ -422,7 +422,7 @@ func verifyDistributedMode(t *testing.T, home, confDir, treeDir, fanoutRoot, nam
 		t.Fatalf("%s reports generate failed: %v\n%s", name, err, out)
 	}
 
-	latestReport := filepath.Join(reportsDir, "latest")
+	latestReport := latestReportDir(t, reportsDir)
 	for _, rel := range []string{"subtrees.tsv", "subtrees.json", "distributed.tsv", "distributed.json", "usage-summary.md"} {
 		data, err := os.ReadFile(filepath.Join(latestReport, rel))
 		if err != nil {
@@ -609,16 +609,12 @@ func TestSnapshots(t *testing.T) {
 	expect([]string{fromDB}, noSnapshots, "stats", "view", "--info")
 
 	expect([]string{"snapshot: " + snapshots}, withSnapshots, "analyze", "--progress=false", "--snapshot")
-	target, err := os.Readlink(filepath.Join(snapshots, "latest"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	latest := filepath.Join(snapshots, target)
+	latest := latestSnapshotPath(t, snapshots)
 	// The snapshot is more recent than the database and is used.
 	expect([]string{"Snapshot   : " + latest, "Prefix     : " + root}, withSnapshots, "stats", "view", "--info")
 	reports := filepath.Join(tmp, "reports")
 	expect(nil, withSnapshots, "reports", "generate", "--report-dir="+reports)
-	if _, err := os.Stat(filepath.Join(reports, "latest", "usage-summary.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(latestReportDir(t, reports), "usage-summary.md")); err != nil {
 		t.Errorf("reports: %v", err)
 	}
 	// Once the database is updated the snapshot is stale.
@@ -661,13 +657,58 @@ func TestViewHotspotsAndHardlinks(t *testing.T) {
 		}
 	}
 	// The full pass was saved and includes the hotspots.
-	target, err := os.Readlink(filepath.Join(snapshots, "latest"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	latest := latestSnapshotPath(t, snapshots)
 	out = run("stats", "view", "--info", "--hotspots")
-	if !strings.Contains(out, "Snapshot   : "+filepath.Join(snapshots, target)) || strings.Contains(out, "computing stats") ||
+	if !strings.Contains(out, "Snapshot   : "+latest) || strings.Contains(out, "computing stats") ||
 		!strings.Contains(out, "Distributed Subtree Hotspots") {
 		t.Errorf("--hotspots:\n%s", out)
 	}
+}
+
+// latestSnapshotPath returns the path to the latest snapshot in dir,
+// resolving the latest symlink where supported or selecting the most recent
+// .idustats file when latest is a copy (e.g. on Windows without symlinks).
+func latestSnapshotPath(t *testing.T, dir string) string {
+	t.Helper()
+	if target, err := os.Readlink(filepath.Join(dir, "latest")); err == nil {
+		return filepath.Join(dir, target)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var latest string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".idustats") && e.Name() > latest {
+			latest = e.Name()
+		}
+	}
+	if latest == "" {
+		t.Fatalf("no snapshot found in %s", dir)
+	}
+	return filepath.Join(dir, latest)
+}
+
+// latestReportDir returns dir/latest if it exists, or the single report
+// subdirectory created in dir when directory symlinks are not supported.
+func latestReportDir(t *testing.T, dir string) string {
+	t.Helper()
+	latest := filepath.Join(dir, "latest")
+	if _, err := os.Stat(latest); err == nil {
+		return latest
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var newest string
+	for _, e := range entries {
+		if e.IsDir() && e.Name() != "latest" && e.Name() > newest {
+			newest = e.Name()
+		}
+	}
+	if newest == "" {
+		t.Fatalf("no report directory found in %s", dir)
+	}
+	return filepath.Join(dir, newest)
 }

@@ -84,7 +84,7 @@ func checkFileEntries(t *testing.T, d statedir.Dir, want ...time.Time) {
 }
 
 func TestDirectories(t *testing.T) {
-	d := statedir.New(filepath.Join(t.TempDir(), "reports"), time.RFC3339, "")
+	d := statedir.New(filepath.Join(t.TempDir(), "reports"), "2006-01-02_15-04-05", "")
 	base := time.Date(2026, 11, 19, 10, 0, 0, 0, time.UTC)
 	for _, when := range []time.Time{base, base.Add(time.Hour)} {
 		path, err := d.MkdirAll(when, "users", "groups")
@@ -144,9 +144,14 @@ func TestNoOverwrite(t *testing.T) {
 
 func TestLegacyLayouts(t *testing.T) {
 	root := t.TempDir()
-	d := statedir.New(root, layout, ".snap", time.DateTime)
+	legacy := time.DateTime
+	if runtime.GOOS == "windows" {
+		// ':' is not permitted in Windows filenames.
+		legacy = "2006-01-02 15-04-05"
+	}
+	d := statedir.New(root, layout, ".snap", legacy)
 	old := time.Date(2026, 11, 19, 10, 0, 0, 0, time.Local)
-	if err := os.WriteFile(filepath.Join(root, old.Format(time.DateTime)+".snap"), nil, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, old.Format(legacy)+".snap"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	path, err := d.WriteFile(old.Add(time.Hour), nil)
