@@ -304,7 +304,7 @@ func (u *ui) startAnalyze(force bool) {
 	a.mu.Unlock()
 	a.render(sample{}, kind)
 	u.view.reset()
-	u.closeSource()
+	old := u.detachSource()
 	flags := &analyze.Flags{
 		FSFlag:    cli.FSFlag{FS: u.cfg.fs.Config().Name},
 		Progress:  true,
@@ -313,12 +313,13 @@ func (u *ui) startAnalyze(force bool) {
 		SlowScans: idudb.DefaultSlowScanThreshold,
 	}
 	p := newTUIProgress(u, kind)
-	go u.runAnalysis(ctx, cancel, done, p, flags)
+	go u.runAnalysis(ctx, cancel, done, old, p, flags)
 }
 
 // runAnalysis runs an analysis started by startAnalyze.
-func (u *ui) runAnalysis(ctx context.Context, cancel context.CancelFunc, done chan struct{}, p *tuiProgress, flags *analyze.Flags) {
+func (u *ui) runAnalysis(ctx context.Context, cancel context.CancelFunc, done chan struct{}, old *sourceHandle, p *tuiProgress, flags *analyze.Flags) {
 	defer close(done)
+	old.close(u.ctx)
 	a := u.analyze
 	start := time.Now()
 	err := u.cfg.analyze(ctx, p, a.output, flags)
@@ -334,19 +335,28 @@ func (u *ui) runAnalysis(ctx context.Context, cancel context.CancelFunc, done ch
 		// The database is not reopened since the tui is exiting.
 		return
 	}
+	var analyzeErrMsg string
 	if err != nil {
 		fmt.Fprintf(a.output, "\nanalyze failed: %v\n", err)
 		u.setStatus("analyze failed after %v, press escape to return to the view", time.Since(start).Truncate(time.Second))
-		u.showError("analyze failed after %v:\n\n%v", time.Since(start).Truncate(time.Second), err)
+		analyzeErrMsg = fmt.Sprintf("analyze failed after %v:\n\n%v", time.Since(start).Truncate(time.Second), err)
 	} else {
 		u.setStatus("analyze completed in %v", time.Since(start).Truncate(time.Second))
 	}
-	if err := u.openSource(); err != nil {
-		u.app.QueueUpdateDraw(func() { u.openFailed(err) })
+	if openErr := u.openSourceWithWarning(analyzeErrMsg == ""); openErr != nil {
+		u.queueUpdateDraw(func() {
+			if analyzeErrMsg != "" {
+				u.showDialog(errorDialog, analyzeErrMsg)
+				return
+			}
+			u.openFailed(openErr)
+		})
 		return
 	}
-	u.app.QueueUpdateDraw(func() {
-		if err == nil {
+	u.queueUpdateDraw(func() {
+		if analyzeErrMsg != "" {
+			u.showDialog(errorDialog, analyzeErrMsg)
+		} else {
 			u.showView()
 		}
 		u.view.load(u.cfg.target)
@@ -381,13 +391,16 @@ type tuiProgress struct {
 	start time.Time
 	done  chan struct{}
 	once  sync.Once
+	wg    sync.WaitGroup
 
 	mu           sync.Mutex
 	s            analyze.Summary
 	statsStarted int64
 
-	// smu guards the following, which are used to compute the rates.
+	// smu guards the following, which are used to compute the rates and
+	// prevent stale ticker samples from rendering after Stop.
 	smu     sync.Mutex
+	stopped bool
 	last    sample
 	history [3][]float64
 	peaks   [3]float64
@@ -395,11 +408,13 @@ type tuiProgress struct {
 
 func newTUIProgress(u *ui, kind string) *tuiProgress {
 	p := &tuiProgress{u: u, kind: kind, start: time.Now(), done: make(chan struct{})}
+	p.wg.Add(1)
 	go p.display()
 	return p
 }
 
 func (p *tuiProgress) display() {
+	defer p.wg.Done()
 	ticker := time.NewTicker(progressInterval)
 	defer ticker.Stop()
 	for {
@@ -407,23 +422,49 @@ func (p *tuiProgress) display() {
 		case <-p.done:
 			return
 		case <-ticker.C:
-			s := p.sample(false)
-			p.u.app.QueueUpdateDraw(func() { p.u.analyze.render(s, p.kind) })
+			s, ok := p.sampleIfRunning()
+			if !ok {
+				return
+			}
+			p.u.queueUpdateDraw(func() {
+				if !p.isStopped() {
+					p.u.analyze.render(s, p.kind)
+				}
+			})
 		}
 	}
+}
+
+func (p *tuiProgress) isStopped() bool {
+	p.smu.Lock()
+	defer p.smu.Unlock()
+	return p.stopped
+}
+
+func (p *tuiProgress) sampleIfRunning() (sample, bool) {
+	p.smu.Lock()
+	defer p.smu.Unlock()
+	if p.stopped {
+		return sample{}, false
+	}
+	return p.sampleLocked(false), true
 }
 
 // sample returns the current progress, updating the rates and their
 // histories since the previous sample.
 func (p *tuiProgress) sample(done bool) sample {
+	p.smu.Lock()
+	defer p.smu.Unlock()
+	return p.sampleLocked(done)
+}
+
+func (p *tuiProgress) sampleLocked(done bool) sample {
 	p.mu.Lock()
 	s := sample{Summary: p.s, statsStarted: p.statsStarted, elapsed: time.Since(p.start), done: done}
 	p.mu.Unlock()
 	if s.FSStats > 0 {
 		s.FSStatMeanLatency = s.FSStatsTotal / s.FSStats
 	}
-	p.smu.Lock()
-	defer p.smu.Unlock()
 	if secs := (s.elapsed - p.last.elapsed).Seconds(); secs > 0 {
 		current := [3]int64{s.PrefixesFinished, s.Files, s.FSStats}
 		previous := [3]int64{p.last.PrefixesFinished, p.last.Files, p.last.FSStats}
@@ -505,7 +546,13 @@ func (p *tuiProgress) Restated(files, changed int) {
 
 // Stop implements analyze.Progress.
 func (p *tuiProgress) Stop() {
-	p.once.Do(func() { close(p.done) })
+	p.once.Do(func() {
+		p.smu.Lock()
+		p.stopped = true
+		p.smu.Unlock()
+		close(p.done)
+		p.wg.Wait()
+	})
 }
 
 // Summary implements analyze.Progress.
@@ -521,6 +568,7 @@ func (p *tuiProgress) Summary() analyze.Summary {
 
 // Report implements analyze.Progress, it displays the final progress.
 func (p *tuiProgress) Report(context.Context) {
+	p.Stop()
 	s := p.sample(true)
-	p.u.app.QueueUpdateDraw(func() { p.u.analyze.render(s, p.kind) })
+	p.u.queueUpdateDraw(func() { p.u.analyze.render(s, p.kind) })
 }

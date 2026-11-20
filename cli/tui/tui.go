@@ -70,7 +70,13 @@ func (c *Commands) TUI(ctx context.Context, values interface{}, args []string) e
 	if err != nil {
 		return err
 	}
-	if c.logToFile == nil || !c.logToFile() {
+	logsToFile := false
+	if c.logToFile != nil {
+		logsToFile = c.logToFile()
+	} else {
+		logsToFile = cli.LogsToFileFor(ctx, env.Config.Logging, f.Config().Logging)
+	}
+	if !logsToFile {
 		// Anything written to the terminal corrupts the display.
 		ctx = ctxlog.WithLogger(ctx, slog.New(slog.DiscardHandler))
 	}
@@ -117,10 +123,14 @@ func (c *Commands) analyzer(env *cli.Env, f iduconfig.Filesystem) func(context.C
 		return c.analyze
 	}
 	return func(ctx context.Context, p analyze.Progress, out io.Writer, flags *analyze.Flags) error {
-		alz := analyze.New(env,
-			analyze.WithProgress(func(context.Context, bool) analyze.Progress { return p }),
+		opts := []analyze.Option{
 			analyze.WithOutput(out),
-			analyze.WithSnapshot(stats.New(env).Snapshot))
+			analyze.WithSnapshot(stats.New(env).Snapshot),
+		}
+		if p != nil {
+			opts = append(opts, analyze.WithProgress(func(context.Context, bool) analyze.Progress { return p }))
+		}
+		alz := analyze.New(env, opts...)
 		return alz.Analyze(ctx, flags, []string{f.Location()})
 	}
 }

@@ -231,11 +231,14 @@ func (s *DB) Children(ctx context.Context, path string) ([]Node, error) {
 		paths[i] = e.Path
 		nodes[i] = Node{Path: e.Path, Name: lastElement(path, e.Path), Direct: e.Summary.Direct}
 	}
-	// The recursive totals are unavailable if they are being rebuilt.
-	if totals, found, err := s.sr.Subtrees(ctx, paths); err == nil {
+	// The recursive totals are unavailable if they are stale or being rebuilt.
+	totals, found, err := s.sr.Subtrees(ctx, paths)
+	if err == nil {
 		for i := range nodes {
 			nodes[i].Subtree, nodes[i].HasSubtree = totals[i], found[i]
 		}
+	} else if !errors.Is(err, idudb.ErrStaleSubtrees) {
+		return nil, err
 	}
 	slices.SortStableFunc(nodes, func(a, b Node) int {
 		if c := cmp.Compare(b.Size(), a.Size()); c != 0 {

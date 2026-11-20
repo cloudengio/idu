@@ -163,18 +163,6 @@ func requireConfig(runner subcmd.Runner) subcmd.Runner {
 // squashErrors returns a runner that squashes the, potentially thousands
 // of, context.Canceled and context.DeadlineExceeded errors returned by
 // runner when it is interrupted, see cli.SquashCanceled.
-// logsToFile returns true if log output is written to a file, rather than
-// the terminal, as specified by the --log-* flags or the configuration.
-func logsToFile() bool {
-	toFile := func(file, temp string) bool {
-		return temp != "" || (file != "" && file != "-")
-	}
-	if toFile(globalFlags.File, globalFlags.TempFile) {
-		return true
-	}
-	return toFile(env.Config.Logging.File, env.Config.Logging.TempFile)
-}
-
 func squashErrors(runner subcmd.Runner) subcmd.Runner {
 	return func(ctx context.Context, flagValues any, args []string) error {
 		return cli.SquashCanceled(runner(ctx, flagValues, args))
@@ -205,7 +193,7 @@ func newCommandSet() *subcmd.CommandSetYAML {
 	cmdSet.Set("reports", "generate").MustRunner(squashErrors(rpts.Generate), &reports.GenerateFlags{})
 	cmdSet.Set("reports", "locate").MustRunner(squashErrors(rpts.Locate), &reports.LocateFlags{})
 
-	ui := tui.New(env, tui.WithLogToFile(logsToFile))
+	ui := tui.New(env)
 	cmdSet.Set("tui").MustRunner(squashErrors(requireConfig(ui.TUI)), &tui.Flags{})
 
 	fnd := find.New(env)

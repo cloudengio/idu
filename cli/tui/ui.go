@@ -65,7 +65,7 @@ type ui struct {
 	statuses chan string
 
 	mu  sync.Mutex
-	src model.Source
+	src *sourceHandle
 	// analyzing is true while an analysis is running, analysisDone is
 	// closed when the most recent analysis has finished.
 	analyzing    bool
@@ -73,6 +73,28 @@ type ui struct {
 	// quitting is true once quitting has been requested and the tui is
 	// waiting for an analysis to finish.
 	quitting bool
+}
+
+// sourceHandle wraps an open model.Source so active view readers can be
+// canceled and drained before the underlying database is closed.
+type sourceHandle struct {
+	src    model.Source
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+}
+
+func (h *sourceHandle) release() {
+	h.wg.Done()
+}
+
+func (h *sourceHandle) close(ctx context.Context) {
+	if h == nil {
+		return
+	}
+	h.cancel()
+	h.wg.Wait()
+	_ = h.src.Close(context.WithoutCancel(ctx))
 }
 
 func newUI(ctx context.Context, cfg uiConfig) *ui {
@@ -109,7 +131,7 @@ func (u *ui) setupMenu() {
 		{Label: "Hotspots", Action: func() { u.showView(); u.view.tabs.Select(hotspotsTab) }},
 	}
 	u.menu.AddMenu("View", view...).AddAction("Analyze", func() { u.startAnalyze(false) }).AddAction("Quit", u.quit).
-		SetRight(fmt.Sprintf("idu: %v   [::d]/ m: menu  ←/→ tab: panes  [ ]: tabs  +/-/z: resize  q: quit", iduconfig.Label(u.cfg.fs)))
+		SetRight(fmt.Sprintf("idu: %v   [::d]/ m: menu  ←/→ tab: panes  [ ]: tabs  +/-/z: resize  q: quit", tview.Escape(iduconfig.Label(u.cfg.fs))))
 }
 
 // run starts the tui and returns when it is quit.
@@ -128,20 +150,20 @@ func (u *ui) start() {
 	cfg := u.cfg.fs.Config()
 	if _, err := os.Stat(cfg.Database); errors.Is(err, os.ErrNotExist) {
 		u.setStatus("the filesystem has not been analyzed, running analyze")
-		u.app.QueueUpdateDraw(func() { u.startAnalyze(false) })
+		u.queueUpdateDraw(func() { u.startAnalyze(false) })
 		return
 	}
 	u.setStatus("opening the database (waiting if it is locked by another process)")
 	if err := u.openSource(); err != nil {
 		if errors.Is(err, model.ErrNotAnalyzed) {
 			u.setStatus("the filesystem has not been analyzed, running analyze")
-			u.app.QueueUpdateDraw(func() { u.startAnalyze(false) })
+			u.queueUpdateDraw(func() { u.startAnalyze(false) })
 			return
 		}
-		u.app.QueueUpdateDraw(func() { u.openFailed(err) })
+		u.queueUpdateDraw(func() { u.openFailed(err) })
 		return
 	}
-	u.app.QueueUpdateDraw(func() { u.view.load(u.cfg.target) })
+	u.queueUpdateDraw(func() { u.view.load(u.cfg.target) })
 }
 
 // openFailed reports that the database could not be opened and offers
@@ -208,7 +230,7 @@ func (u *ui) showDialog(kind, message string, buttons ...dialogButton) {
 // goroutine, including the tui's, see displayStatuses.
 func (u *ui) showError(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
-	go u.app.QueueUpdateDraw(func() { u.showDialog(errorDialog, msg) })
+	go u.queueUpdateDraw(func() { u.showDialog(errorDialog, msg) })
 }
 
 // dialogOpen returns true if a dialog is displayed.
@@ -217,16 +239,31 @@ func (u *ui) dialogOpen() bool {
 }
 
 func (u *ui) openSource() error {
+	return u.openSourceWithWarning(true)
+}
+
+func (u *ui) openSourceWithWarning(showWarning bool) error {
 	src, err := u.cfg.openSource(u.ctx, u.cfg.env, u.cfg.fs, statusWriter{u})
 	if err != nil {
 		return err
 	}
+	sctx, scancel := context.WithCancel(u.ctx)
+	h := &sourceHandle{src: src, ctx: sctx, cancel: scancel}
 	u.mu.Lock()
-	u.src = src
+	if u.ctx.Err() != nil {
+		u.mu.Unlock()
+		h.close(u.ctx)
+		return u.ctx.Err()
+	}
+	prev := u.src
+	u.src = h
 	u.mu.Unlock()
+	if prev != nil {
+		prev.close(u.ctx)
+	}
 	u.setStatus("database opened")
-	if w, fixable := src.Warning(); w != "" {
-		u.app.QueueUpdateDraw(func() {
+	if w, fixable := src.Warning(); showWarning && w != "" {
+		u.queueUpdateDraw(func() {
 			if !fixable {
 				u.showDialog(warningDialog, w+".", dialogButton{"Continue", nil})
 				return
@@ -239,20 +276,38 @@ func (u *ui) openSource() error {
 	return nil
 }
 
+func (u *ui) acquireSource(n int) (*sourceHandle, context.Context, bool) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.src == nil {
+		return nil, nil, false
+	}
+	u.src.wg.Add(n)
+	return u.src, u.src.ctx, true
+}
+
 func (u *ui) source() model.Source {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	return u.src
+	if u.src == nil {
+		return nil
+	}
+	return u.src.src
+}
+
+func (u *ui) detachSource() *sourceHandle {
+	u.mu.Lock()
+	h := u.src
+	u.src = nil
+	u.mu.Unlock()
+	if h != nil {
+		h.cancel()
+	}
+	return h
 }
 
 func (u *ui) closeSource() {
-	u.mu.Lock()
-	src := u.src
-	u.src = nil
-	u.mu.Unlock()
-	if src != nil {
-		_ = src.Close(context.WithoutCancel(u.ctx))
-	}
+	u.detachSource().close(u.ctx)
 }
 
 // refresh reopens the database and reloads the view.
@@ -262,13 +317,14 @@ func (u *ui) refresh() {
 	}
 	u.showView()
 	u.view.reset()
-	u.closeSource()
+	old := u.detachSource()
 	go func() {
+		old.close(u.ctx)
 		if err := u.openSource(); err != nil {
-			u.app.QueueUpdateDraw(func() { u.openFailed(err) })
+			u.queueUpdateDraw(func() { u.openFailed(err) })
 			return
 		}
-		u.app.QueueUpdateDraw(func() { u.view.load(u.view.currentPath()) })
+		u.queueUpdateDraw(func() { u.view.load(u.view.currentPath()) })
 	}()
 }
 
@@ -303,8 +359,12 @@ func (u *ui) quitAfterAnalysis() {
 	u.analyze.cancelAnalysis()
 	u.status.SetText("canceling the analysis, waiting for all filesystem and database operations to finish (q to quit immediately)")
 	go func() {
-		<-done
-		u.app.QueueUpdate(u.stop)
+		select {
+		case <-done:
+		case <-u.ctx.Done():
+			return
+		}
+		u.queueUpdateDraw(u.stop)
 	}()
 }
 
@@ -343,6 +403,23 @@ func (u *ui) setStatus(format string, args ...any) {
 	}
 }
 
+// queueUpdateDraw runs fn on the tui's goroutine and waits for it,
+// returning immediately if the tui has exited.
+func (u *ui) queueUpdateDraw(fn func()) {
+	if u.ctx.Err() != nil {
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		u.app.QueueUpdateDraw(fn)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-u.ctx.Done():
+	}
+}
+
 // displayStatuses displays the messages queued by setStatus. QueueUpdate
 // waits for the update to be run on the tui's goroutine and hence must not
 // be called from that goroutine, which is why the messages are displayed
@@ -351,7 +428,7 @@ func (u *ui) displayStatuses() {
 	for {
 		select {
 		case msg := <-u.statuses:
-			u.app.QueueUpdateDraw(func() { u.status.SetText(msg) })
+			u.queueUpdateDraw(func() { u.status.SetText(tview.Escape(msg)) })
 		case <-u.ctx.Done():
 			return
 		}

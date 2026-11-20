@@ -78,24 +78,36 @@ func openSource(t *testing.T) (context.Context, *model.DB, string) {
 
 func TestChildren(t *testing.T) {
 	ctx, src, root := openSource(t)
-	// The children are sorted by subtree size, see
-	// clitest.CreateHardlinkTree: a contains f1 and f2, ab contains g and
-	// a link to f1, which a owns, and b contains h and c.
+	// The children are sorted by subtree size, then name. On filesystems
+	// where directories allocate blocks, b's child c makes b larger than ab
+	// (so b precedes ab); otherwise ab and b tie and ab precedes b.
 	children, err := src.Children(ctx, root)
 	if err != nil {
 		t.Fatal(err)
 	}
+	byName := map[string]model.Node{}
 	var names []string
-	for _, c := range children {
+	for i, c := range children {
 		names = append(names, c.Name)
+		byName[c.Name] = c
 		if !c.HasSubtree {
 			t.Errorf("%v: missing subtree totals", c.Path)
 		}
+		if i > 0 {
+			prev := children[i-1]
+			if prev.Size() < c.Size() || (prev.Size() == c.Size() && prev.Name > c.Name) {
+				t.Errorf("children not sorted by size desc, name asc: %+v before %+v", prev, c)
+			}
+		}
 	}
-	if want := []string{"a", "ab", "b", "a-b"}; !equal(names, want) {
+	want := []string{"a", "ab", "b", "a-b"}
+	if byName["b"].Size() > byName["ab"].Size() {
+		want = []string{"a", "b", "ab", "a-b"}
+	}
+	if !equal(names, want) {
 		t.Errorf("got %v, want %v", names, want)
 	}
-	if !children[2].HasChildren() || children[0].HasChildren() {
+	if !byName["b"].HasChildren() || byName["a"].HasChildren() {
 		t.Errorf("unexpected children: %+v", children)
 	}
 }
@@ -218,5 +230,11 @@ func TestLenient(t *testing.T) {
 	defer src2.Close(ctx)
 	if w, _ := src2.Warning(); w != "" {
 		t.Errorf("unexpected warning: %q", w)
+	}
+
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := src2.Children(cctx, root); !errors.Is(err, context.Canceled) {
+		t.Errorf("Children with canceled ctx: got %v, want %v", err, context.Canceled)
 	}
 }

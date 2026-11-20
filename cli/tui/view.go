@@ -65,7 +65,7 @@ type viewScreen struct {
 func newViewScreen(u *ui) *viewScreen {
 	v := &viewScreen{u: u, bottomWeight: 3, tables: map[string]*tview.Table{}}
 	v.tree = tview.NewTreeView()
-	v.tree.SetBorder(true).SetTitle(" " + u.cfg.fs.Location() + " ")
+	v.tree.SetBorder(true).SetTitle(" " + tview.Escape(u.cfg.fs.Location()) + " ")
 	v.tree.SetChangedFunc(v.highlighted)
 	v.tree.SetSelectedFunc(v.toggle)
 	v.summary = tview.NewTextView().SetDynamicColors(true).SetWrap(true)
@@ -90,9 +90,16 @@ func newViewScreen(u *ui) *viewScreen {
 	return v
 }
 
-// reset clears the tree, summary and tables.
+// reset clears the tree, summary and tables and cancels any pending loads.
 func (v *viewScreen) reset() {
-	root := tview.NewTreeNode(v.u.cfg.fs.Location()).SetReference(&nodeRef{node: model.Node{Path: v.u.cfg.fs.Location()}})
+	v.mu.Lock()
+	if v.cancel != nil {
+		v.cancel()
+		v.cancel = nil
+	}
+	v.generation++
+	v.mu.Unlock()
+	root := tview.NewTreeNode(tview.Escape(v.u.cfg.fs.Location())).SetReference(&nodeRef{node: model.Node{Path: v.u.cfg.fs.Location()}})
 	v.tree.SetRoot(root).SetCurrentNode(root)
 	v.summary.SetText("loading...")
 	for _, t := range v.tables {
@@ -130,18 +137,22 @@ type level struct {
 // expandTo loads the children of node and its descendants that are
 // ancestors of target, in the background, and then highlights target.
 func (v *viewScreen) expandTo(node *tview.TreeNode, target string) {
-	src := v.u.source()
-	if src == nil {
+	h, ctx, ok := v.u.acquireSource(1)
+	if !ok {
 		return
 	}
 	path := node.GetReference().(*nodeRef).node.Path
 	go func() {
-		levels, err := fetchLevels(v.u.ctx, src, path, target)
+		levels, err := fetchLevels(ctx, h.src, path, target)
+		h.release()
+		if ctx.Err() != nil {
+			return
+		}
 		if err != nil {
 			v.u.showError("failed to read the prefixes in %v", err)
 			return
 		}
-		v.u.app.QueueUpdateDraw(func() { v.applyLevels(node, target, levels) })
+		v.u.queueUpdateDraw(func() { v.applyLevels(node, target, levels) })
 	}()
 }
 
@@ -225,7 +236,7 @@ func (v *viewScreen) label(n model.Node) string {
 		marker = "+"
 	}
 	t := n.Totals()
-	return fmt.Sprintf("%s %s  %s (%s)", marker, n.Name, strings.TrimSpace(v.u.cfg.env.FmtSize(t.StorageBytes)), strings.TrimSpace(cli.FmtCount(t.Files)))
+	return fmt.Sprintf("%s %s  %s (%s)", marker, tview.Escape(n.Name), strings.TrimSpace(v.u.cfg.env.FmtSize(t.StorageBytes)), strings.TrimSpace(cli.FmtCount(t.Files)))
 }
 
 // toggle expands, loading its children if necessary, or collapses node.
@@ -235,17 +246,21 @@ func (v *viewScreen) toggle(node *tview.TreeNode) {
 		node.SetExpanded(!node.IsExpanded())
 		return
 	}
-	src := v.u.source()
-	if src == nil {
+	h, ctx, ok := v.u.acquireSource(1)
+	if !ok {
 		return
 	}
 	go func() {
-		children, err := src.Children(v.u.ctx, ref.node.Path)
+		children, err := h.src.Children(ctx, ref.node.Path)
+		h.release()
+		if ctx.Err() != nil {
+			return
+		}
 		if err != nil {
 			v.u.showError("failed to read the prefixes in %v: %v", ref.node.Path, err)
 			return
 		}
-		v.u.app.QueueUpdateDraw(func() {
+		v.u.queueUpdateDraw(func() {
 			v.setChildren(node, children)
 			node.SetExpanded(true)
 		})
@@ -255,8 +270,11 @@ func (v *viewScreen) toggle(node *tview.TreeNode) {
 // highlighted is called when the highlight moves to node. It loads the
 // summary for node immediately and its top-N rankings after topNDelay.
 func (v *viewScreen) highlighted(node *tview.TreeNode) {
-	src := v.u.source()
-	if src == nil || node == nil {
+	if node == nil {
+		return
+	}
+	h, srcCtx, ok := v.u.acquireSource(2)
+	if !ok {
 		return
 	}
 	path := node.GetReference().(*nodeRef).node.Path
@@ -264,13 +282,13 @@ func (v *viewScreen) highlighted(node *tview.TreeNode) {
 	if v.cancel != nil {
 		v.cancel()
 	}
-	ctx, cancel := context.WithCancel(v.u.ctx)
+	ctx, cancel := context.WithCancel(srcCtx)
 	v.cancel = cancel
 	v.generation++
 	gen := v.generation
 	v.mu.Unlock()
-	go v.loadSummary(ctx, src, gen, path)
-	go v.loadTopN(ctx, src, gen, path)
+	go v.loadSummary(ctx, h, gen, path)
+	go v.loadTopN(ctx, h, gen, path)
 }
 
 func (v *viewScreen) current(gen int) bool {
@@ -279,47 +297,53 @@ func (v *viewScreen) current(gen int) bool {
 	return gen == v.generation
 }
 
-func (v *viewScreen) loadSummary(ctx context.Context, src model.Source, gen int, path string) {
-	sum, err := src.Summary(ctx, path)
-	v.u.app.QueueUpdateDraw(func() {
+func (v *viewScreen) loadSummary(ctx context.Context, h *sourceHandle, gen int, path string) {
+	sum, err := h.src.Summary(ctx, path)
+	h.release()
+	if ctx.Err() != nil {
+		return
+	}
+	v.u.queueUpdateDraw(func() {
 		if !v.current(gen) {
 			return
 		}
 		if err != nil {
-			v.summary.SetText(fmt.Sprintf("[red]%v", err))
+			v.summary.SetText(fmt.Sprintf("[red]%v", tview.Escape(err.Error())))
 			return
 		}
 		v.summary.SetText(formatSummary(v.u.cfg.env, sum)).ScrollToBeginning()
 	})
 }
 
-func (v *viewScreen) loadTopN(ctx context.Context, src model.Source, gen int, path string) {
+func (v *viewScreen) loadTopN(ctx context.Context, h *sourceHandle, gen int, path string) {
 	select {
 	case <-time.After(topNDelay):
 	case <-ctx.Done():
+		h.release()
 		return
 	}
-	v.u.app.QueueUpdateDraw(func() {
+	v.u.queueUpdateDraw(func() {
 		if v.current(gen) {
-			v.tabs.SetTitle(fmt.Sprintf(" Top-N beneath %v: computing... ", path))
+			v.tabs.SetTitle(fmt.Sprintf(" Top-N beneath %v: computing... ", tview.Escape(path)))
 		}
 	})
 	start := time.Now()
-	top, err := src.TopN(ctx, path, v.u.cfg.topN)
+	top, err := h.src.TopN(ctx, path, v.u.cfg.topN)
+	h.release()
 	if ctx.Err() != nil {
 		return
 	}
-	v.u.app.QueueUpdateDraw(func() {
+	v.u.queueUpdateDraw(func() {
 		if !v.current(gen) {
 			return
 		}
 		if err != nil {
-			v.tabs.SetTitle(fmt.Sprintf(" Top-N beneath %v: %v ", path, err))
+			v.tabs.SetTitle(fmt.Sprintf(" Top-N beneath %v: %v ", tview.Escape(path), tview.Escape(err.Error())))
 			return
 		}
-		v.tabs.SetTitle(fmt.Sprintf(" Top-N beneath %v ", path))
+		v.tabs.SetTitle(fmt.Sprintf(" Top-N beneath %v ", tview.Escape(path)))
 		v.fillTables(top)
-		v.u.status.SetText(fmt.Sprintf("top-N: %v (%v)", top.Source, time.Since(start).Truncate(time.Millisecond)))
+		v.u.status.SetText(tview.Escape(fmt.Sprintf("top-N: %v (%v)", top.Source, time.Since(start).Truncate(time.Millisecond))))
 	})
 }
 
@@ -380,7 +404,7 @@ func (v *viewScreen) fillTables(top model.TopN) {
 		header(t, metric, "Prefix")
 		for i, e := range r {
 			t.SetCell(i+1, 0, tview.NewTableCell(format(e.Value)).SetAlign(tview.AlignRight))
-			t.SetCell(i+1, 1, tview.NewTableCell(e.Item).SetReference(e.Item).SetExpansion(1))
+			t.SetCell(i+1, 1, tview.NewTableCell(tview.Escape(e.Item)).SetReference(e.Item).SetExpansion(1))
 		}
 		t.ScrollToBeginning()
 	}
@@ -393,7 +417,7 @@ func (v *viewScreen) fillTables(top model.TopN) {
 		header(t, "Bytes", what)
 		for i, e := range r {
 			t.SetCell(i+1, 0, tview.NewTableCell(size(e.Value)).SetAlign(tview.AlignRight))
-			t.SetCell(i+1, 1, tview.NewTableCell(nameFor(e.Item)).SetExpansion(1))
+			t.SetCell(i+1, 1, tview.NewTableCell(tview.Escape(nameFor(e.Item))).SetExpansion(1))
 		}
 	}
 	ids(usersTab, "User", top.Users, usernames.Manager.NameForUID)
@@ -411,7 +435,7 @@ func (v *viewScreen) fillHotspots(top model.TopN) {
 	}
 	header(t, "Distributed", "Max leaf", "Amplification", "Dirs", "Prefix")
 	for i, ds := range top.Hotspots {
-		row := []string{size(ds.DistributedBytes), size(ds.MaxLeafBytes), fmt.Sprintf("%.1fx", ds.BytesAmplification), strings.TrimSpace(cli.FmtCount(ds.SubtreeDirs)), ds.Prefix}
+		row := []string{size(ds.DistributedBytes), size(ds.MaxLeafBytes), fmt.Sprintf("%.1fx", ds.BytesAmplification), strings.TrimSpace(cli.FmtCount(ds.SubtreeDirs)), tview.Escape(ds.Prefix)}
 		for j, c := range row {
 			cell := tview.NewTableCell(c)
 			if j < 4 {

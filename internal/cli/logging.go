@@ -67,6 +67,27 @@ func WithLoggers(ctx context.Context, ls *Loggers) context.Context {
 	return cmdutil.ContextWithValue(ctx, ls)
 }
 
+// LogsToFile reports whether a logger configured with cfg and overridden by
+// ls's flags writes to a file rather than the terminal.
+func (ls *Loggers) LogsToFile(cfg cmdutil.LoggingConfig) bool {
+	if ls != nil {
+		cfg = cfg.WithFlagOverrides(ls.fs, ls.flags)
+	}
+	return cfg.TempFile != "" || (cfg.File != "" && cfg.File != "-")
+}
+
+// LogsToFileFor reports whether the effective logger in ctx for a filesystem
+// with optional perFS logging configuration writes to a file rather than
+// the terminal.
+func LogsToFileFor(ctx context.Context, global cmdutil.LoggingConfig, perFS *cmdutil.LoggingConfig) bool {
+	cfg := global
+	if perFS != nil {
+		cfg = *perFS
+	}
+	ls, _ := cmdutil.ContextValue[*Loggers](ctx)
+	return ls.LogsToFile(cfg)
+}
+
 // withPrefixLogger returns a context whose logger is the one specified by the
 // logging section of the prefix's configuration, if it has one, overridden
 // by any --log-* flags set on the command line. Otherwise ctx is returned

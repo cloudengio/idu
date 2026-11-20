@@ -6,7 +6,10 @@ package tui
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -71,7 +74,7 @@ func startHarness(t *testing.T, analyzeWith func(tmpDir, root string) iduconfig.
 		acfg := analyzeWith(tmpDir, root)
 		aenv := *env
 		aenv.Config = acfg
-		if err := c.analyzer(&aenv, acfg.Filesystems[0])(ctx, nullProgress{}, io.Discard, &analyze.Flags{}); err != nil {
+		if err := c.analyzer(&aenv, acfg.Filesystems[0])(ctx, nil, io.Discard, &analyze.Flags{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -190,24 +193,6 @@ func (h *harness) eventually(what string, cond func() bool) {
 	}
 }
 
-type nullProgress struct{ analyze.Progress }
-
-func (nullProgress) Before() time.Time     { return time.Now() }
-func (nullProgress) After(time.Time)       {}
-func (nullProgress) PrefixStarted()        {}
-func (nullProgress) PrefixDone(int, int64) {}
-func (nullProgress) Error()                {}
-func (nullProgress) ParentUnchanged()      {}
-func (nullProgress) ChildrenUnchanged()    {}
-func (nullProgress) SlowScan()             {}
-func (nullProgress) SyncScans(int64)       {}
-func (nullProgress) Restated(int, int)     {}
-func (nullProgress) Stop()                 {}
-func (nullProgress) Summary() analyze.Summary {
-	return analyze.Summary{}
-}
-func (nullProgress) Report(context.Context) {}
-
 func TestView(t *testing.T) {
 	h := start(t, true)
 	// The root's children are displayed, largest first, and the root's
@@ -234,10 +219,19 @@ func TestView(t *testing.T) {
 	h.key(tcell.KeyDown)
 	h.eventually("a to be highlighted", func() bool { return h.u.view.currentPath() == filepath.Join(h.root, "a") })
 	h.waitFor("files      2")
-	// Expanding b displays its child c.
-	h.key(tcell.KeyDown)
-	h.key(tcell.KeyDown)
-	h.eventually("b to be highlighted", func() bool { return h.u.view.currentPath() == filepath.Join(h.root, "b") })
+	// Expanding b displays its child c; b may be one or two rows below a
+	// depending on whether directories themselves allocate storage blocks.
+	bPath := filepath.Join(h.root, "b")
+	for range 3 {
+		var cur string
+		h.inUI(func() { cur = h.u.view.currentPath() })
+		if cur == bPath {
+			break
+		}
+		h.key(tcell.KeyDown)
+		h.eventually("highlight to move down", func() bool { return h.u.view.currentPath() != cur })
+	}
+	h.eventually("b to be highlighted", func() bool { return h.u.view.currentPath() == bPath })
 	h.key(tcell.KeyEnter)
 	h.waitFor("  c ")
 	// The rankings beneath b are computed from its summaries.
@@ -637,4 +631,93 @@ func TestArrowKeys(t *testing.T) {
 	h.eventually("the storage tab", func() bool { return h.u.view.tabs.Current() == storageTab })
 	h.key(tcell.KeyUp)
 	focused("the menu bar", menu)
+}
+
+func TestBracketPathsEscaped(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	root := filepath.Join(tmpDir, "tree[blue]")
+	sub := filepath.Join(root, "dir[red]sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "f"), []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := iduconfig.ParseConfig([]byte(fmt.Sprintf("filesystems:\n  - root: %s\n    database: %s\n", root, filepath.Join(tmpDir, "db"))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := cli.NewEnv()
+	env.OpenProgress = io.Discard
+	env.Config = cfg
+	f := cfg.Filesystems[0]
+	c := New(env)
+	if err := c.analyzer(env, f)(ctx, nil, io.Discard, &analyze.Flags{}); err != nil {
+		t.Fatal(err)
+	}
+	screen := tcell.NewSimulationScreen("UTF-8")
+	u := newUI(ctx, uiConfig{
+		env:        env,
+		fs:         f,
+		target:     root,
+		topN:       10,
+		screen:     screen,
+		openSource: c.sourceOpener(),
+		analyze:    c.analyzer(env, f),
+	})
+	screen.SetSize(140, 45)
+	h := &harness{t: t, u: u, screen: screen, done: make(chan error, 1), root: root}
+	go func() { h.done <- u.run() }()
+	t.Cleanup(func() {
+		go u.app.QueueUpdate(u.stop)
+		select {
+		case err := <-h.done:
+			if err != nil {
+				t.Errorf("tui: %v", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Errorf("the tui did not exit")
+		}
+	})
+	h.waitFor("dir[red]sub", "Top-N beneath "+root+" ")
+}
+
+func TestTUIProgressStopPreventsStaleRunningRender(t *testing.T) {
+	h := start(t, true)
+	h.waitFor("Top-N beneath " + h.root + " ")
+	p := newTUIProgress(h.u, "analyze")
+	p.PrefixDone(0, 5)
+	p.Report(context.Background())
+	if _, ok := p.sampleIfRunning(); ok {
+		t.Errorf("sampleIfRunning returned true after Report/Stop")
+	}
+	if !p.isStopped() {
+		t.Errorf("expected stopped to be true after Report/Stop")
+	}
+	h.eventually("completed state rendered", func() bool {
+		return strings.Contains(h.u.analyze.info.GetText(true), "completed")
+	})
+}
+
+func TestAnalyzeErrorPreservesErrorDialog(t *testing.T) {
+	h := startHarness(t, func(tmpDir, root string) iduconfig.T {
+		return clitest.WriteHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupRescan)
+	}, func(context.Context, analyze.Progress, io.Writer, *analyze.Flags) error {
+		return errors.New("boom")
+	})
+	// Dismiss initial hardlink warning dialog from openSource.
+	h.waitFor("Warning", "counted more than once", "Continue")
+	h.key(tcell.KeyEnter)
+	h.eventually("warning dialog closed", func() bool { return !h.u.dialogOpen() })
+
+	// Trigger Analyze; failure dialog must stay visible rather than being
+	// overwritten by openSource's warning dialog.
+	h.rune('m')
+	h.key(tcell.KeyRight)
+	h.key(tcell.KeyEnter)
+	h.waitFor("Error", "analyze failed", "boom")
+	if strings.Contains(h.text(), "counted more than once") {
+		t.Errorf("warning dialog overwrote analyze error:\n%s", h.text())
+	}
 }
