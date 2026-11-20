@@ -37,7 +37,7 @@ func newCountingProgress(context.Context, bool) Progress {
 
 // newTestCommands returns Commands that use testEnv and countingProgress.
 func newTestCommands() *Commands {
-	return New(testEnv, newCountingProgress)
+	return New(testEnv, WithProgress(newCountingProgress))
 }
 
 func (c *countingProgress) update(fn func(s *Summary)) {

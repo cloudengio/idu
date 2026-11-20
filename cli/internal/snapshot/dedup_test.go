@@ -2,12 +2,11 @@
 // Use of this source code is governed by the Apache-2.0
 // license that can be found in the LICENSE file.
 
-package stats
+package snapshot
 
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,47 +15,12 @@ import (
 	"cloudeng.io/cmd/idu/cli/analyze"
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
+	"cloudeng.io/cmd/idu/internal/cli/clitest"
 	"cloudeng.io/cmd/idu/report"
 	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/cmd/idu/summary"
 	"cloudeng.io/file/localfs"
 )
-
-// createHardlinkTree creates a tree with hard links to files in sibling
-// directories whose names share a string prefix (a, a-b, ab).
-func createHardlinkTree(t *testing.T, root string) {
-	t.Helper()
-	for _, d := range []string{"a", "ab", "a-b", "b/c"} {
-		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for name, size := range map[string]int{"a/f1": 1000, "a/f2": 500, "ab/g": 300, "b/h": 200} {
-		if err := os.WriteFile(filepath.Join(root, name), make([]byte, size), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for link, target := range map[string]string{"ab/l1": "a/f1", "a-b/l2": "a/f1", "b/c/l3": "a/f2"} {
-		if err := os.Link(filepath.Join(root, target), filepath.Join(root, link)); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-func writeHardlinkConfig(t *testing.T, dir, root string, dedup iduconfig.HardlinkDedup) iduconfig.T {
-	t.Helper()
-	cfgFile := filepath.Join(dir, fmt.Sprintf("config-%v.yaml", dedup))
-	yaml := fmt.Sprintf("filesystems:\n  - prefix: %s\n    database: %s\n    count_hardlinks_as_files: false\n    hardlink_dedup: %s\n",
-		root, filepath.Join(dir, "db"), dedup)
-	if err := os.WriteFile(cfgFile, []byte(yaml), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := iduconfig.ReadConfig(cfgFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return cfg
-}
 
 func analyzeWithConfig(ctx context.Context, t *testing.T, cfg iduconfig.T, root string) {
 	t.Helper()
@@ -66,7 +30,7 @@ func analyzeWithConfig(ctx context.Context, t *testing.T, cfg iduconfig.T, root 
 func analyzeWithFlags(ctx context.Context, t *testing.T, cfg iduconfig.T, root string, af *analyze.Flags) {
 	t.Helper()
 	testEnv.Config = cfg
-	alz := analyze.New(testEnv, nil)
+	alz := analyze.New(testEnv)
 	if err := alz.Analyze(ctx, af, []string{root}); err != nil {
 		t.Fatal(err)
 	}
@@ -119,25 +83,13 @@ func computeBoth(ctx context.Context, t *testing.T, cfg iduconfig.T, target stri
 		t.Fatal(err)
 	}
 	defer db.Close(ctx)
-	st := New(testEnv)
-	fromSummaries, summaryErr = st.computeFromSummaries(ctx, db, pcfg, target, 10, false)
-	fromPrefixes, err = st.computeFromPrefixes(ctx, db, pcfg, hardlinkMatcher(ctx, t), target, 10, false)
+	st := Computer{}
+	fromSummaries, summaryErr = st.FromSummaries(ctx, db, pcfg, target, 10)
+	fromPrefixes, err = st.FromPrefixes(ctx, db, pcfg, hardlinkMatcher(ctx, t), target, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return
-}
-
-func newHardlinkTree(t *testing.T) (tmpDir, root string) {
-	t.Helper()
-	tmpDir = t.TempDir()
-	root, err := filepath.EvalSymlinks(tmpDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	root = filepath.Join(root, "tree")
-	createHardlinkTree(t, root)
-	return tmpDir, root
 }
 
 // verifyHardlinkTree verifies the stats for the tree created by
@@ -202,30 +154,19 @@ func checkStoredSubtree(ctx context.Context, t *testing.T, cfg iduconfig.T, root
 	}
 }
 
-// linkUnchanged creates a hardlink in a, which is therefore rescanned, to
-// b/h, a file in b, which is not rescanned since it is unchanged, and which
-// had a link count of 1 when last scanned. a/hl precedes b/h and is
-// counted, b/h is now a hardlink.
-func linkUnchanged(t *testing.T, root string) {
-	t.Helper()
-	if err := os.Link(filepath.Join(root, "b", "h"), filepath.Join(root, "a", "hl")); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestHardlinkDedupSummariesMatchRescan(t *testing.T) {
 	ctx := context.Background()
-	tmpDir, root := newHardlinkTree(t)
+	tmpDir, root := clitest.NewHardlinkTree(t)
 
 	// Freshly analyzed, potential hardlinks are recorded using their link counts.
-	summariesCfg := writeHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupSummaries)
+	summariesCfg := clitest.WriteHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupSummaries)
 	analyzeWithConfig(ctx, t, summariesCfg, root)
 	// f1, f2, g, h are counted once, l1, l2, l3 are hardlinks.
 	verifyHardlinkTree(ctx, t, summariesCfg, root, true, 4, 3, 2)
 
 	// The link count stored for b/h is stale, it is not recorded and hence
 	// is counted twice: a/hl and b/h are both counted.
-	linkUnchanged(t, root)
+	clitest.LinkUnchanged(t, root)
 	analyzeWithConfig(ctx, t, summariesCfg, root)
 	verifyHardlinkTree(ctx, t, summariesCfg, root, false, 5, 3, 3)
 
@@ -234,7 +175,7 @@ func TestHardlinkDedupSummariesMatchRescan(t *testing.T) {
 	verifyHardlinkTree(ctx, t, summariesCfg, root, true, 4, 4, 3)
 
 	// Switching to rescan rewrites the summaries without hardlink information.
-	rescanCfg := writeHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupRescan)
+	rescanCfg := clitest.WriteHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupRescan)
 	analyzeWithConfig(ctx, t, rescanCfg, root)
 	if _, _, err := computeBoth(ctx, t, rescanCfg, root); !errors.Is(err, idudb.ErrStaleSummaries) {
 		t.Fatalf("expected %v when summaries lack hardlinks, got %v", idudb.ErrStaleSummaries, err)
@@ -253,19 +194,19 @@ func TestHardlinkDedupSummariesMatchRescan(t *testing.T) {
 
 func TestHardlinkDedupSummariesAllMatchRescan(t *testing.T) {
 	ctx := context.Background()
-	tmpDir, root := newHardlinkTree(t)
+	tmpDir, root := clitest.NewHardlinkTree(t)
 
-	allCfg := writeHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupSummariesAll)
+	allCfg := clitest.WriteHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupSummariesAll)
 	analyzeWithConfig(ctx, t, allCfg, root)
 	verifyHardlinkTree(ctx, t, allCfg, root, true, 4, 3, 2)
 
 	// Every file is recorded, so the stale link count of b/h does not matter.
-	linkUnchanged(t, root)
+	clitest.LinkUnchanged(t, root)
 	analyzeWithConfig(ctx, t, allCfg, root)
 	verifyHardlinkTree(ctx, t, allCfg, root, true, 4, 4, 3)
 
 	// Switching from summaries to summaries-all requires reanalyzing.
-	summariesCfg := writeHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupSummaries)
+	summariesCfg := clitest.WriteHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupSummaries)
 	analyzeWithConfig(ctx, t, summariesCfg, root)
 	verifyHardlinkTree(ctx, t, summariesCfg, root, false, 5, 3, 3)
 	if _, _, err := computeBoth(ctx, t, allCfg, root); !errors.Is(err, idudb.ErrStaleSummaries) {
@@ -342,7 +283,7 @@ func TestSparseFilesSummariesMatchRescan(t *testing.T) {
 		wantFiles = 1
 	}
 
-	cfg := writeHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupSummaries)
+	cfg := clitest.WriteHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupSummaries)
 	analyzeWithConfig(ctx, t, cfg, root)
 	fromSummaries, fromPrefixes, err := computeBoth(ctx, t, cfg, root)
 	if err != nil {

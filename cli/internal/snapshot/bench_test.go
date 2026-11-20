@@ -2,7 +2,7 @@
 // Use of this source code is governed by the Apache-2.0
 // license that can be found in the LICENSE file.
 
-package stats
+package snapshot
 
 import (
 	"bytes"
@@ -102,10 +102,10 @@ func BenchmarkComputeFromPrefixes(b *testing.B) {
 			}
 		})
 		for _, readers := range []int{1, 2, 4, 8, runtime.GOMAXPROCS(0)} {
-			st := &Commands{env: testEnv, readers: readers}
+			st := Computer{Readers: readers}
 			b.Run(fmt.Sprintf("impl=readers-%02d/%s", readers, name), func(b *testing.B) {
 				for b.Loop() {
-					if _, err := st.computeFromPrefixes(ctx, db, &cfg.Settings, hardlinkMatcher(ctx, b), cfg.Root, 10, false); err != nil {
+					if _, err := st.FromPrefixes(ctx, db, &cfg.Settings, hardlinkMatcher(ctx, b), cfg.Root, 10); err != nil {
 						b.Fatal(err)
 					}
 				}
@@ -123,10 +123,10 @@ func BenchmarkComputeFromSummaries(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		st := New(testEnv)
+		st := Computer{}
 		b.Run(fmt.Sprintf("dirs=%d/files=%d", 100*100+100+1, nfiles), func(b *testing.B) {
 			for b.Loop() {
-				if _, err := st.computeFromSummaries(ctx, db, &cfg.Settings, cfg.Root, 10, false); err != nil {
+				if _, err := st.FromSummaries(ctx, db, &cfg.Settings, cfg.Root, 10); err != nil {
 					b.Fatal(err)
 				}
 			}

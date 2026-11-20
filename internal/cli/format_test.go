@@ -11,25 +11,23 @@ import (
 )
 
 func TestTimestampLayouts(t *testing.T) {
-	when := time.Date(2026, 11, 16, 0, 25, 28, 0, time.FixedZone("PST", -8*3600))
-	for _, goos := range []string{"windows", "linux", "darwin"} {
-		statsLayout, reportsLayout := TimestampLayouts(goos)
-		statsName, reportsName := when.Format(statsLayout), when.Format(reportsLayout)
-		if goos == "windows" {
-			for _, name := range []string{statsName, reportsName} {
-				if strings.ContainsAny(name, `<>:"/\|?*`) {
-					t.Errorf("%v: %q is not a valid windows filename", goos, name)
-				}
-			}
-		}
-		// reports locate parses the names of report directories.
-		parsed, err := time.Parse(reportsLayout, reportsName)
-		if err != nil || !parsed.Equal(when) {
-			t.Errorf("%v: time.Parse(%q, %q) = %v, %v, want %v", goos, reportsLayout, reportsName, parsed, err, when)
+	when := time.Date(2026, 11, 16, 0, 25, 28, 123456789, time.FixedZone("PST", -8*3600))
+	for _, layout := range []string{StatsFileLayout, ReportDirLayout} {
+		name := when.Format(layout)
+		// Names must be valid on Windows and contain no spaces.
+		if strings.ContainsAny(name, ` <>:"/\|?*`) {
+			t.Errorf("%q is not a valid filename", name)
 		}
 	}
-	// The layouts used on other systems are unchanged.
-	if s, r := TimestampLayouts("linux"); s != time.DateTime || r != time.RFC3339 {
-		t.Errorf("got %q, %q, want %q, %q", s, r, time.DateTime, time.RFC3339)
+	if got, want := when.Format(StatsFileLayout), "2026-11-16_00-25-28.123"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	// reports locate parses the names of report directories.
+	name := when.Format(ReportDirLayout)
+	if parsed, err := time.ParseInLocation(ReportDirLayout, name, when.Location()); err != nil || !parsed.Equal(when.Truncate(time.Millisecond)) {
+		t.Errorf("time.Parse(%q) = %v, %v, want %v", name, parsed, err, when)
+	}
+	if got, want := name, "2026-11-16_00-25-28.123"; got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }

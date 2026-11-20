@@ -2,7 +2,7 @@
 // Use of this source code is governed by the Apache-2.0
 // license that can be found in the LICENSE file.
 
-package stats
+package snapshot
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"cloudeng.io/cmd/idu/iduconfig"
-	"cloudeng.io/cmd/idu/internal/cli"
+	"cloudeng.io/cmd/idu/internal/cli/clitest"
 	"cloudeng.io/cmd/idu/report"
 )
 
@@ -25,9 +25,9 @@ func computeStoredAndSummaries(ctx context.Context, t *testing.T, cfg iduconfig.
 		t.Fatal(err)
 	}
 	defer db.Close(ctx)
-	st := New(testEnv)
-	stored, _, storedErr = st.computeFromStored(ctx, db, pcfg, target, n)
-	fromSummaries, err = st.computeFromSummaries(ctx, db, pcfg, target, n, false)
+	st := Computer{}
+	stored, _, storedErr = st.FromStored(ctx, db, pcfg, target, n)
+	fromSummaries, err = st.FromSummaries(ctx, db, pcfg, target, n)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,9 +67,9 @@ func compareHeaps[T comparable](t *testing.T, what string, got, want *report.Hea
 
 func TestStatsFromStored(t *testing.T) {
 	ctx := context.Background()
-	tmpDir, root := newHardlinkTree(t)
+	tmpDir, root := clitest.NewHardlinkTree(t)
 	createSparseFile(ctx, t, filepath.Join(root, "b", "sparse"), 1<<20)
-	cfg := writeHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupSummaries)
+	cfg := clitest.WriteHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupSummaries)
 	analyzeWithConfig(ctx, t, cfg, root)
 
 	stored, fromSummaries, err := computeStoredAndSummaries(ctx, t, cfg, root, 10)
@@ -112,8 +112,8 @@ func TestStatsFromStored(t *testing.T) {
 	}
 
 	// More entries than are maintained.
-	if _, _, err := computeStoredAndSummaries(ctx, t, cfg, root, 100000); !errors.Is(err, errStoredUnusable) {
-		t.Errorf("n=100000: got %v, want %v", err, errStoredUnusable)
+	if _, _, err := computeStoredAndSummaries(ctx, t, cfg, root, 100000); !errors.Is(err, ErrStoredUnusable) {
+		t.Errorf("n=100000: got %v, want %v", err, ErrStoredUnusable)
 	}
 
 	_, pcfg, _, db, err := openPrefixReadOnly(ctx, cfg, root)
@@ -122,30 +122,30 @@ func TestStatsFromStored(t *testing.T) {
 	}
 	defer db.Close(ctx)
 	for _, n := range []int{0, -1} {
-		if _, _, err := (New(testEnv)).computeFromStored(ctx, db, pcfg, root, n); !errors.Is(err, errStoredUnusable) {
-			t.Errorf("computeFromStored(n=%d): got %v, want %v", n, err, errStoredUnusable)
+		if _, _, err := (Computer{}).FromStored(ctx, db, pcfg, root, n); !errors.Is(err, ErrStoredUnusable) {
+			t.Errorf("computeFromStored(n=%d): got %v, want %v", n, err, ErrStoredUnusable)
 		}
 	}
 
 	// Stored deduplicated state must not be used when CountHardlinkAsFiles is enabled.
 	countedCfg := *pcfg
 	countedCfg.CountHardlinkAsFiles = true
-	if _, _, err := (New(testEnv)).computeFromStored(ctx, db, &countedCfg, root, 10); !errors.Is(err, errStoredUnusable) {
-		t.Errorf("CountHardlinkAsFiles: got %v, want %v", err, errStoredUnusable)
+	if _, _, err := (Computer{}).FromStored(ctx, db, &countedCfg, root, 10); !errors.Is(err, ErrStoredUnusable) {
+		t.Errorf("CountHardlinkAsFiles: got %v, want %v", err, ErrStoredUnusable)
 	}
 }
 
 func TestStatsSource(t *testing.T) {
 	ctx := context.Background()
-	tmpDir, root := newHardlinkTree(t)
-	cfg := writeHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupSummaries)
+	tmpDir, root := clitest.NewHardlinkTree(t)
+	cfg := clitest.WriteHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupSummaries)
 	analyzeWithConfig(ctx, t, cfg, root)
 	_, pcfg, _, db, err := openPrefixReadOnly(ctx, cfg, root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close(ctx)
-	st := New(testEnv)
+	st := Computer{}
 	match := hardlinkMatcher(ctx, t)
 	for _, tc := range []struct {
 		target    string
@@ -154,12 +154,12 @@ func TestStatsSource(t *testing.T) {
 		want      string
 		wantPerID int
 	}{
-		{root, true, 10, cli.StatsFromStored, iduconfig.DefaultTopNPerID},
-		{root, false, 10, cli.StatsFromSummaries, 0},
+		{root, true, 10, FromStoredSource, iduconfig.DefaultTopNPerID},
+		{root, false, 10, FromSummariesSource, 0},
 		// Too many entries are requested.
-		{root, true, 100000, cli.StatsFromSummaries, 0},
+		{root, true, 100000, FromSummariesSource, 0},
 	} {
-		_, source, perIDN, err := st.computeStats(ctx, db, pcfg, match, tc.target, tc.useStored, tc.n, false)
+		_, source, perIDN, err := st.Compute(ctx, db, pcfg, match, tc.target, tc.useStored, tc.n)
 		if err != nil || source != tc.want || perIDN != tc.wantPerID {
 			t.Errorf("%v %v %v: got %q perID=%v %v, want %q perID=%v", tc.target, tc.useStored, tc.n, source, perIDN, err, tc.want, tc.wantPerID)
 		}
@@ -167,8 +167,8 @@ func TestStatsSource(t *testing.T) {
 	// PerIDN must reflect the stored DB limit even if config changes afterwards.
 	changedCfg := *pcfg
 	changedCfg.TopNPerID = pcfg.TopNPerIDOrDefault() + 50
-	if _, source, perIDN, err := st.computeStats(ctx, db, &changedCfg, match, root, true, 10, false); err != nil || source != cli.StatsFromStored || perIDN != iduconfig.DefaultTopNPerID {
-		t.Errorf("changed config: got %q perID=%v %v, want %q perID=%v", source, perIDN, err, cli.StatsFromStored, iduconfig.DefaultTopNPerID)
+	if _, source, perIDN, err := st.Compute(ctx, db, &changedCfg, match, root, true, 10); err != nil || source != FromStoredSource || perIDN != iduconfig.DefaultTopNPerID {
+		t.Errorf("changed config: got %q perID=%v %v, want %q perID=%v", source, perIDN, err, FromStoredSource, iduconfig.DefaultTopNPerID)
 	}
 	for target, want := range map[string]bool{
 		root:                              true,
@@ -176,7 +176,7 @@ func TestStatsSource(t *testing.T) {
 		filepath.Join(root, "a"):          false,
 		filepath.Join(root, "a-b"):        false,
 	} {
-		if got := isFilesystemRoot(pcfg, root, target); got != want {
+		if got := IsFilesystemRoot(pcfg, root, target); got != want {
 			t.Errorf("%v: got %v, want %v", target, got, want)
 		}
 	}

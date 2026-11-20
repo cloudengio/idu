@@ -9,82 +9,48 @@
 package stats
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
 	"cloudeng.io/algo/container/heap"
+	"cloudeng.io/cmd/idu/cli/internal/snapshot"
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/internal/cli"
 	"cloudeng.io/cmd/idu/internal/usernames"
 	"cloudeng.io/cmd/idu/report"
-	"cloudeng.io/cmd/idu/stats"
-	"cloudeng.io/cmd/idu/summary"
 	"cloudeng.io/cmdutil/flags"
 	"cloudeng.io/file/filewalk"
 	"cloudeng.io/file/localfs"
 )
 
-func saveStats(dir, file string, stats cli.StatsFile) error {
+// saveSnapshot writes sf to file, - for stdout, if file is set, and
+// otherwise as a new snapshot in dir.
+func saveSnapshot(dir, file string, sf snapshot.File) (string, error) {
 	if len(file) > 0 {
 		out := os.Stdout
 		if file != "-" {
 			var err error
 			out, err = os.Create(file)
 			if err != nil {
-				return err
+				return "", err
 			}
 			defer out.Close()
 		}
-		return stats.Encode(out)
+		return file, sf.Encode(out)
 	}
-	buf := &bytes.Buffer{}
-	if err := stats.Encode(buf); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return err
-	}
-	basename := stats.Date.Format(cli.StatsFileLayout)
-	basename = strings.TrimSuffix(basename, ".idustats") + ".idustats"
-	filename := filepath.Join(dir, basename)
-	if err := os.WriteFile(filename, buf.Bytes(), 0660); err != nil { //nolint:gosec
-		return err
-	}
-	sl := filepath.Join(dir, "latest.idustats")
-	os.Remove(sl)
-	if err := os.Symlink(basename, sl); err != nil {
-		if runtime.GOOS != "windows" {
-			return err
-		}
-		// Creating symlinks on Windows requires developer mode or
-		// administrator privileges, so fall back to a copy.
-		return os.WriteFile(sl, buf.Bytes(), 0660) //nolint:gosec
-	}
-	return nil
+	return snapshot.NewStore(dir).Save(sf)
 }
 
 // Commands implements the stats commands, ie. compute, view and suggest.
 type Commands struct {
 	env *cli.Env
-	// readers is the number of goroutines used to read prefix metadata
-	// concurrently, defaultPrefixReaders if zero.
-	readers int
 }
-
-// defaultPrefixReaders is the default number of goroutines used to read
-// prefix metadata concurrently. Stats computation is generally limited by
-// the single goroutine that must process the metadata in order, so there is
-// little benefit to more readers unless the database is not cached in memory.
-const defaultPrefixReaders = 4
 
 // DisplayFlags are the flags that control how stats are displayed.
 type DisplayFlags struct {
@@ -95,22 +61,72 @@ type DisplayFlags struct {
 // ComputeFlags are the flags for the stats compute command.
 type ComputeFlags struct {
 	cli.FSFlag
-	ComputeN  int             `subcmd:"n,2000,number of top entries to compute"`
-	Scan      bool            `subcmd:"scan,false,'compute the stats from all of the summaries for the prefix, rather than from the rankings and recursive totals maintained by analyze, which are used by default for the root of a filesystem but do not include the distributed subtree statistics and limit the per user and group rankings to topn_per_id entries'"`
-	Progress  bool            `subcmd:"progress,false,show progress"`
-	StatsDir  string          `subcmd:"stats-dir,,'directory that stats files are written to, defaults to stats_dir from the configuration or stats'"`
-	StatsFile string          `subcmd:"stats-file,,'write stats to the specified file, rather than a directory, use - for stdout'"`
-	Prefix    flags.Repeating `subcmd:"prefix,,'prefix match expression'"`
+	ComputeN    int             `subcmd:"n,2000,number of top entries to compute"`
+	Scan        bool            `subcmd:"scan,false,'compute the stats from all of the summaries for the prefix, rather than from the rankings and recursive totals maintained by analyze, which are used by default for the root of a filesystem but do not include the distributed subtree statistics and limit the per user and group rankings to topn_per_id entries'"`
+	Progress    bool            `subcmd:"progress,false,show progress"`
+	SnapshotDir string          `subcmd:"snapshot-dir,,'directory that the snapshot is written to, defaults to snapshot_dir from the configuration'"`
+	StatsFile   string          `subcmd:"stats-file,,'write the snapshot to the specified file, rather than the snapshot directory, use - for stdout'"`
+	Prefix      flags.Repeating `subcmd:"prefix,,'prefix match expression'"`
 }
 
 // ViewFlags are the flags for the stats view command.
 type ViewFlags struct {
 	DisplayFlags
-	FS       string `subcmd:"fs,,'the name of the configured filesystem to operate on, overrides the global --fs flag'"`
-	StatsDir string `subcmd:"stats-dir,,'directory that stats files are read from, defaults to stats_dir from the configuration of the filesystem specified by --fs; --fs is not required if this flag is set'"`
-	User     string `subcmd:"user,,display stats for the specified user"`
-	Group    string `subcmd:"group,,display stats for the specified group"`
-	Info     bool   `subcmd:"info,false,display metadata for the stats file"`
+	FS          string `subcmd:"fs,,'the name of the configured filesystem to operate on, overrides the global --fs flag'"`
+	SnapshotDir string `subcmd:"snapshot-dir,,'directory that snapshots are read from, and written to, defaults to snapshot_dir from the configuration of the filesystem specified by --fs; --fs is not required if this flag is set and the configuration cannot be loaded, in which case the latest snapshot in it is displayed'"`
+	User        string `subcmd:"user,,'display stats for the specified user, subset by --summary, --bytes, --storage and --file-counts'"`
+	Group       string `subcmd:"group,,'display stats for the specified group, subset by --summary, --bytes, --storage and --file-counts'"`
+	Info        bool   `subcmd:"info,false,display metadata for the stats file"`
+	Summary     bool   `subcmd:"summary,false,'display the totals for the entire filesystem, or the user or group specified by --user or --group'"`
+	Bytes       bool   `subcmd:"bytes,false,'display the top entries by the number of bytes reported, ie. file sizes'"`
+	Storage     bool   `subcmd:"storage,false,'display the top entries by the number of bytes stored on the underlying filesystem'"`
+	FileCounts  bool   `subcmd:"file-counts,false,'display the top entries by the number of files'"`
+	Hotspots    bool   `subcmd:"hotspots,false,'display the distributed subtree hotspots, ie. subtrees whose usage is at least twice that of their largest directory; computing them requires a full pass over the database, which is saved as a snapshot, unless the snapshot used already includes them'"`
+	Hardlinks   bool   `subcmd:"hardlinks,false,'display the number of hardlinks, the top entries by the number of hardlinks and any files found by analyze to have links that it has not seen; the rankings require a full pass over the database, which is saved as a snapshot, unless the snapshot used already includes them'"`
+}
+
+// selection determines what stats view displays.
+type selection struct {
+	summary, bytes, storage, files, hotspots, hardlinks bool
+	// all is true if no selection flags were specified, in which case
+	// everything, other than the hardlinks section, is displayed,
+	// including the rankings by number of prefixes and sparse bytes.
+	all bool
+}
+
+func newSelection(af *ViewFlags) selection {
+	sel := selection{
+		summary:   af.Summary,
+		bytes:     af.Bytes,
+		storage:   af.Storage,
+		files:     af.FileCounts,
+		hotspots:  af.Hotspots,
+		hardlinks: af.Hardlinks,
+	}
+	sel.all = !sel.summary && !sel.anyMetric() && !sel.hotspots && !sel.hardlinks
+	return sel
+}
+
+func (sel selection) anyMetric() bool {
+	return sel.bytes || sel.storage || sel.files
+}
+
+// rankings returns true if the rankings of prefixes, subtrees, users and
+// groups are to be displayed, ie. if any of --bytes, --storage or
+// --file-counts were specified without --hotspots or --hardlinks, which
+// they otherwise subset.
+func (sel selection) rankings() bool {
+	return sel.all || (sel.anyMetric() && !sel.hotspots && !sel.hardlinks)
+}
+
+// showHotspots returns true if the distributed hotspots are to be displayed.
+func (sel selection) showHotspots() bool {
+	return sel.rankings() || sel.hotspots
+}
+
+// metric returns true if the ranking selected by flag is to be displayed.
+func (sel selection) metric(flag bool) bool {
+	return sel.all || flag || !sel.anyMetric()
 }
 
 // New returns the Commands that use env.
@@ -128,198 +144,57 @@ func (st *Commands) Compute(ctx context.Context, values interface{}, args []stri
 
 func (st *Commands) computeFS(ctx context.Context, fwfs filewalk.FS, cf *ComputeFlags, args []string) error {
 
-	parser := stats.NewParser(ctx, fwfs)
-
 	env := st.env.ForFS(cf.FS)
 	ctx, f, target, err := env.LookupPrefix(ctx, args[0])
 	if err != nil {
 		return err
 	}
 	cfg := f.Config()
+	dir := cf.SnapshotDir
+	if dir == "" {
+		dir = cfg.SnapshotDir
+	}
+	if dir == "" && cf.StatsFile == "" {
+		return fmt.Errorf("snapshot_dir is not set for %v, set it, or use --snapshot-dir or --stats-file", iduconfig.Label(f))
+	}
 	rdb, err := env.OpenReadOnlyDB(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("failed to open database for %v in %v: %w", iduconfig.Label(f), cfg.Database, err)
 	}
 	defer rdb.Close(ctx)
 
-	match, err := stats.NewMatcher(parser,
-		stats.WithExpression(args[1:]...),
-		stats.WithEmptyValue(true),
-		stats.WithFilewalkFS(fwfs),
-		stats.WithHardlinkHandling(!cfg.CountHardlinkAsFiles))
+	match, err := snapshot.NewMatcher(ctx, fwfs, cfg, args[1:]...)
 	if err != nil {
 		return err
 	}
 
-	useStored := !cf.Scan && isFilesystemRoot(cfg, f.Location(), target)
-	sdb, source, perIDN, err := st.computeStats(ctx, rdb, cfg, match, target, useStored, cf.ComputeN, cf.Progress)
+	isRoot := snapshot.IsFilesystemRoot(cfg, f.Location(), target)
+	c := snapshot.Computer{Progress: cf.Progress}
+	sdb, source, perIDN, err := c.Compute(ctx, rdb, cfg, match, target, !cf.Scan && isRoot, cf.ComputeN)
 	if err != nil {
 		return err
 	}
-
-	// Save stats.
-	stats := cli.StatsFile{
+	_, err = saveSnapshot(dir, cf.StatsFile, snapshot.File{
 		Prefix:     target,
 		Date:       time.Now(),
 		Expression: match.String(),
 		Stats:      sdb,
 		Source:     source,
+		Whole:      isRoot && !match.HasExpression(),
 		PerIDN:     perIDN,
-	}
-	return saveStats(selectStatsDir(cf.StatsDir, cfg.StatsDir), cf.StatsFile, stats)
-}
-
-// computeStats computes stats for prefix and returns them together with
-// their source and, when cli.StatsFromStored is used, the stored per-ID
-// ranking limit. If useStored is true, and prefix is the root of the
-// filesystem, they are constructed from the rankings and recursive totals
-// maintained by analyze when those are available and up to date. Otherwise
-// they are computed from the precomputed summaries unless they cannot be
-// used, in which case all of the file metadata is rescanned: summaries are
-// computed without any filter expression and only record what's needed to
-// deduplicate hardlinks if configured to do so.
-func (st *Commands) computeStats(ctx context.Context, db idudb.Reader, cfg *iduconfig.Settings, match stats.Matcher, prefix string, useStored bool, topN int, progress bool) (*report.AllStats, string, int, error) {
-	if match.HasExpression() || !cfg.CountHardlinkAsFiles && !cfg.RecordHardlinks() {
-		sdb, err := st.computeFromPrefixes(ctx, db, cfg, match, prefix, topN, progress)
-		return sdb, cli.StatsFromSummaries, 0, err
-	}
-	if useStored {
-		sdb, perIDN, err := st.computeFromStored(ctx, db, cfg, prefix, topN)
-		if err == nil {
-			return sdb, cli.StatsFromStored, perIDN, nil
-		}
-		if !errors.Is(err, errStoredUnusable) {
-			return nil, "", 0, err
-		}
-		fmt.Fprintf(os.Stderr, "computing stats from the summaries: %v\n", err)
-	}
-	sdb, err := st.computeFromSummaries(ctx, db, cfg, prefix, topN, progress)
-	return sdb, cli.StatsFromSummaries, 0, err
-}
-
-// isFilesystemRoot returns true if target is the root of the filesystem,
-// which is the only prefix for which the stored rankings and recursive
-// totals can be used, since they deduplicate hardlinks across the entire
-// filesystem.
-func isFilesystemRoot(cfg *iduconfig.Settings, root, target string) bool {
-	sep := cfg.SeparatorOrDefault()
-	rk, _ := stats.SummaryKeys(sep, root)
-	tk, _ := stats.SummaryKeys(sep, target)
-	return rk == tk
-}
-
-func (st *Commands) computeFromSummaries(ctx context.Context, db idudb.Reader, cfg *iduconfig.Settings, prefix string, topN int, progress bool) (*report.AllStats, error) {
-	sr := summary.New(db, cfg)
-	if err := sr.Check(ctx); err != nil {
-		return nil, err
-	}
-	sdb := report.NewAllStats(prefix, topN)
-	agg := report.NewSubtreeAggregator(prefix, topN)
-	n := 0
-	for e, err := range sr.Walk(ctx, prefix) {
-		if err != nil {
-			return nil, err
-		}
-		if progress && (n != 0 && n%1000 == 0) {
-			fmt.Printf("processed % 10v summary entries\n", cli.FmtCount(int64(n)))
-		}
-		n++
-		ps := e.Summary
-		sdb.RecordDirect(e.Path, ps.Direct, ps.PerUser, ps.PerGroup)
-		agg.Step(e.Key, e.Path, ps.Direct)
-	}
-	if progress {
-		fmt.Printf("processed % 10v summary entries\n", cli.FmtCount(int64(n)))
-	}
-	agg.Finish()
-	sdb.Subtree = agg.Subtree
-	sdb.Distributed = agg.Distributed
-	sdb.Finalize()
-	return sdb, nil
-}
-
-// computeFromPrefixes computes stats from all of the file metadata stored for
-// each prefix. The prefixes are visited in DFS pre-order using the summary
-// keys, which exist for every prefix, so that memory usage is proportional to
-// the depth of the tree and hardlinks are attributed to the same prefixes as
-// when using the summaries. The metadata is read and decoded concurrently,
-// but the stats, including hardlink deduplication, are computed in order.
-func (st *Commands) computeFromPrefixes(ctx context.Context, db idudb.Reader, cfg *iduconfig.Settings, match stats.Matcher, prefix string, topN int, progress bool) (*report.AllStats, error) {
-	if err := idudb.CheckSummaryKeys(ctx, db); err != nil {
-		return nil, err
-	}
-	calc, sep := cfg.CalculatorOrDefault(), cfg.SeparatorOrDefault()
-	sdb := report.NewAllStats(prefix, topN)
-	agg := report.NewSubtreeAggregator(prefix, topN)
-	exactKey, childPrefix := stats.SummaryKeys(sep, prefix)
-	readers := st.readers
-	if readers == 0 {
-		readers = min(defaultPrefixReaders, runtime.GOMAXPROCS(0))
-	}
-	n := 0
-	err := readPrefixesInOrder(ctx, db, sep, exactKey, childPrefix, readers, func(e *prefixEntry) {
-		if progress && (n != 0 && n%1000 == 0) {
-			fmt.Printf("processed % 10v entries\n", cli.FmtCount(int64(n)))
-		}
-		n++
-		switch {
-		case e.missing:
-			fmt.Fprintf(os.Stderr, "missing metadata for %v\n", e.prefix)
-			return
-		case e.decodeErr != nil:
-			fmt.Fprintf(os.Stderr, "failed to unmarshal value: %v\n", e.decodeErr)
-			return
-		}
-		if !e.pi.Match(match) {
-			return
-		}
-		totals, users, groups := e.pi.Totals(calc, match)
-		sdb.RecordDirect(e.prefix, totals, users, groups)
-		agg.Step(e.summaryKey, e.prefix, totals)
 	})
-	if err != nil {
-		return nil, err
-	}
-	if progress {
-		fmt.Printf("processed % 10v entries\n", cli.FmtCount(int64(n)))
-	}
-	agg.Finish()
-	sdb.Subtree = agg.Subtree
-	sdb.Distributed = agg.Distributed
-	sdb.Finalize()
-	return sdb, nil
+	return err
 }
 
-// statsSource describes the source of the stats in a stats file.
-func statsSource(sf cli.StatsFile) string {
-	switch sf.Source {
-	case cli.StatsFromStored:
-		return fmt.Sprintf("the rankings and recursive totals maintained by analyze (at most %v entries per user and group)", sf.PerIDN)
-	case "", cli.StatsFromSummaries:
-		return "the summaries"
-	}
-	return sf.Source
-}
-
-func selectStatsDir(statsDirFlag, cfgStatsDir string) string {
-	if len(statsDirFlag) > 0 {
-		return statsDirFlag
-	}
-	if len(cfgStatsDir) > 0 {
-		return cfgStatsDir
-	}
-	return "stats"
-}
-
-func resolveDirectStatsFile(statsDirFlag, arg string) (string, bool) {
+func resolveDirectStatsFile(snapshotDirFlag, arg string) (string, bool) {
 	if arg == "-" {
 		return "-", true
 	}
 	if info, err := os.Stat(arg); err == nil && !info.IsDir() {
 		return arg, true
 	}
-	if len(statsDirFlag) > 0 && !filepath.IsAbs(arg) {
-		candidate := filepath.Join(statsDirFlag, arg)
+	if len(snapshotDirFlag) > 0 && !filepath.IsAbs(arg) {
+		candidate := filepath.Join(snapshotDirFlag, arg)
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 			return candidate, true
 		}
@@ -327,37 +202,67 @@ func resolveDirectStatsFile(statsDirFlag, arg string) (string, bool) {
 	return "", false
 }
 
-// resolveStatsFilename returns the stats file to be viewed. With no
-// arguments it is the latest.idustats file in the stats directory. With a
-// single argument it is that file if it exists (or is -), otherwise it is
-// the named file in the stats directory. The stats directory is the one
-// specified by --stats-dir, if set, in which case --fs is not required,
-// otherwise it is the stats directory for the filesystem specified by --fs.
-func resolveStatsFilename(ctx context.Context, env *cli.Env, fsFlag, statsDirFlag string, args []string) (string, error) {
+// loadSnapshot returns the snapshot to be viewed and its path, which is
+// empty for stats constructed from the database without being saved.
+//
+// With a single argument it is that file if it exists (or is -), and
+// otherwise the named file in the snapshot directory, ie. the one
+// specified by --snapshot-dir or the snapshot_dir of the filesystem
+// specified by --fs.
+//
+// With no arguments it is the most recent snapshot of the entire
+// filesystem that is more recent than the last update to its database,
+// stats constructed from the database if there is no such snapshot, or a
+// new snapshot if constructing them requires a full pass over the
+// database, see snapshot.Computer.Current. If the configuration cannot be
+// loaded and --snapshot-dir is set, it is the latest snapshot in that
+// directory.
+func (st *Commands) loadSnapshot(ctx context.Context, af *ViewFlags, args []string) (snapshot.File, string, error) {
 	if len(args) > 1 {
-		return "", fmt.Errorf("too many arguments: expected [<filename>]")
+		return snapshot.File{}, "", fmt.Errorf("too many arguments: expected [<filename>]")
 	}
-	name := "latest.idustats"
-	if len(args) == 1 {
-		if f, ok := resolveDirectStatsFile(statsDirFlag, args[0]); ok {
-			return f, nil
-		}
-		name = args[0]
-		if filepath.IsAbs(name) {
-			return name, nil
-		}
-	}
-	if len(statsDirFlag) > 0 {
-		return filepath.Join(statsDirFlag, name), nil
-	}
-	pcfg, _, err := env.ForFS(fsFlag).LookupFS("")
-	if err != nil {
+	env := st.env.ForFS(af.FS)
+	f, _, lookupErr := env.LookupFS("")
+	if lookupErr != nil {
 		if loadErr := cli.ConfigLoadError(ctx); loadErr != nil {
-			return "", loadErr
+			lookupErr = loadErr
 		}
-		return "", err
 	}
-	return filepath.Join(selectStatsDir(statsDirFlag, pcfg.Config().StatsDir), name), nil
+	dir := af.SnapshotDir
+	if dir == "" && lookupErr == nil {
+		dir = f.Config().SnapshotDir
+	}
+	if len(args) == 1 {
+		filename, ok := resolveDirectStatsFile(af.SnapshotDir, args[0])
+		if !ok {
+			switch {
+			case filepath.IsAbs(args[0]):
+				filename = args[0]
+			case dir != "":
+				filename = filepath.Join(dir, args[0])
+			case lookupErr != nil:
+				return snapshot.File{}, "", lookupErr
+			default:
+				return snapshot.File{}, "", fmt.Errorf("%v: not found and snapshot_dir is not set for %v", args[0], iduconfig.Label(f))
+			}
+		}
+		sf, err := snapshot.Load(filename)
+		return sf, filename, err
+	}
+	if lookupErr != nil {
+		if af.SnapshotDir == "" {
+			return snapshot.File{}, "", lookupErr
+		}
+		filename := snapshot.NewStore(af.SnapshotDir).LatestPath()
+		sf, err := snapshot.Load(filename)
+		return sf, filename, err
+	}
+	ctx, f, _, err := env.LookupPrefix(ctx, "")
+	if err != nil {
+		return snapshot.File{}, "", err
+	}
+	c := snapshot.Computer{Progress: af.Progress, Hotspots: af.Hotspots, Hardlinks: af.Hardlinks}
+	return c.Current(ctx, env, f, dir, af.DisplayN)
 }
 
 // View implements the stats view command, values must be a *ViewFlags.
@@ -367,62 +272,147 @@ func (st *Commands) View(ctx context.Context, values interface{}, args []string)
 		return fmt.Errorf("only one of --user or --group may be specified")
 	}
 
-	filename, err := resolveStatsFilename(ctx, st.env, af.FS, af.StatsDir, args)
+	stats, filename, err := st.loadSnapshot(ctx, af, args)
 	if err != nil {
 		return err
 	}
-	stats, err := cli.LoadStats(filename)
-	if err != nil {
-		return err
+	if filename == "" {
+		filename = "none, computed from the database"
 	}
 
 	if af.Info {
 		fmt.Printf("Date       : %v\n", stats.Date)
 		fmt.Printf("Prefix     : %v\n", stats.Prefix)
 		fmt.Printf("Expression : %v\n", stats.Expression)
-		fmt.Printf("Source     : %v\n", statsSource(stats))
+		fmt.Printf("Source     : %v\n", stats.DescribeSource())
+		fmt.Printf("Snapshot   : %v\n", filename)
 		fmt.Println()
 	}
 
-	sdb := stats.Stats
-	when := stats.Date
-
+	sel := newSelection(af)
 	if len(af.User) != 0 {
-		return st.userOrGroup(af, stats, af.User, usernames.Manager.UIDForName, sdb.PerUser, usernames.Manager.NameForUID)
+		return st.userOrGroup(af, sel, stats, af.User, usernames.Manager.UIDForName, stats.Stats.PerUser, usernames.Manager.NameForUID)
 	}
-
 	if len(af.Group) != 0 {
-		return st.userOrGroup(af, stats, af.Group, usernames.Manager.GIDForName, sdb.PerGroup, usernames.Manager.NameForGID)
+		return st.userOrGroup(af, sel, stats, af.Group, usernames.Manager.GIDForName, stats.Stats.PerGroup, usernames.Manager.NameForGID)
 	}
-
-	heapFormatter[string]{fmtSize: st.env.FmtSize}.formatTotals(sdb.Prefix, os.Stdout)
-
-	cli.Banner(os.Stdout, "=", "Usage by top %v Prefixes as of: %v\n", af.DisplayN, when)
-	heapFormatter[string]{fmtSize: st.env.FmtSize}.formatHeaps(sdb.Prefix, os.Stdout, func(v string) string { return v }, af.DisplayN)
-
-	if sdb.Subtree != nil {
-		cli.Banner(os.Stdout, "=", "\nUsage by top %v Subtrees as of: %v\n", af.DisplayN, when)
-		heapFormatter[string]{fmtSize: st.env.FmtSize}.formatHeaps(sdb.Subtree, os.Stdout, func(v string) string { return v }, af.DisplayN)
+	st.viewFilesystem(os.Stdout, sel, stats, af.DisplayN)
+	if sel.hardlinks {
+		st.viewHardlinks(ctx, os.Stdout, af, stats)
 	}
-
-	if sdb.Distributed != nil {
-		cli.Banner(os.Stdout, "=", "\nDistributed Subtree Hotspots (top %v, modest fanout) as of: %v\n", af.DisplayN, when)
-		formatDistributedHeaps(sdb.Distributed, os.Stdout, st.env.FmtSize, af.DisplayN)
-	} else if stats.Source == cli.StatsFromStored {
-		fmt.Printf("\nDistributed subtree hotspots were not computed, use stats compute --scan to compute them.\n")
-	}
-
-	cli.Banner(os.Stdout, "=", "\nUsage by top %v users as of: %v\n", af.DisplayN, when)
-	heapFormatter[int64]{fmtSize: st.env.FmtSize}.formatHeaps(sdb.ByUser, os.Stdout,
-		usernames.Manager.NameForUID, af.DisplayN)
-
-	cli.Banner(os.Stdout, "=", "\nUsage by top %v groups as of: %v\n", af.DisplayN, when)
-	heapFormatter[int64]{fmtSize: st.env.FmtSize}.formatHeaps(sdb.ByGroup, os.Stdout,
-		usernames.Manager.NameForGID, af.DisplayN)
 	return nil
 }
 
-func (st *Commands) userOrGroup(af *ViewFlags, stats cli.StatsFile, name string, mapper func(string) (int64, error), perID report.PerIDStats, nameForID func(int64) string) error {
+// viewFilesystem displays the selected stats for the entire filesystem.
+func (st *Commands) viewFilesystem(out io.Writer, sel selection, sf snapshot.File, n int) {
+	sdb, when := sf.Stats, sf.Date
+	hf := heapFormatter[string]{fmtSize: st.env.FmtSize, sel: sel}
+	if sel.all || sel.summary {
+		hf.formatTotals(sdb.Prefix, out)
+	}
+	if sel.rankings() {
+		cli.Banner(out, "=", "Usage by top %v Prefixes as of: %v\n", n, when)
+		hf.formatHeaps(sdb.Prefix, out, func(v string) string { return v }, n)
+		if sdb.Subtree != nil {
+			cli.Banner(out, "=", "\nUsage by top %v Subtrees as of: %v\n", n, when)
+			hf.formatHeaps(sdb.Subtree, out, func(v string) string { return v }, n)
+		}
+	}
+	if sel.showHotspots() {
+		if sdb.Distributed != nil {
+			cli.Banner(out, "=", "\nDistributed Subtree Hotspots (top %v, modest fanout) as of: %v\n", n, when)
+			formatDistributedHeaps(sdb.Distributed, out, st.env.FmtSize, sel, n)
+		} else {
+			fmt.Fprintf(out, "\nDistributed subtree hotspots were not computed, use stats view --hotspots, or stats compute --scan, to compute them.\n")
+		}
+	}
+	if sel.rankings() {
+		idf := heapFormatter[int64]{fmtSize: st.env.FmtSize, sel: sel}
+		cli.Banner(out, "=", "\nUsage by top %v users as of: %v\n", n, when)
+		idf.formatHeaps(sdb.ByUser, out, usernames.Manager.NameForUID, n)
+		cli.Banner(out, "=", "\nUsage by top %v groups as of: %v\n", n, when)
+		idf.formatHeaps(sdb.ByGroup, out, usernames.Manager.NameForGID, n)
+	}
+}
+
+// hardlinksUnavailable is displayed when the snapshot does not include the
+// rankings by number of hardlinks.
+const hardlinksUnavailable = "The rankings by number of hardlinks are not included in this snapshot, use stats view --hardlinks, or stats compute --scan, to compute them.\n"
+
+// viewHardlinks displays the number of hardlinks, the top entries by
+// number of hardlinks and any missing links found by analyze.
+func (st *Commands) viewHardlinks(ctx context.Context, out io.Writer, af *ViewFlags, sf snapshot.File) {
+	sdb, n := sf.Stats, af.DisplayN
+	cli.Banner(out, "=", "\nHardlinks as of: %v\n", sf.Date)
+	fmt.Fprintf(out, "Links:     %v (counted once)\n", cli.FmtCount(sdb.Prefix.TotalHardlinks))
+	fmt.Fprintf(out, "Link dirs: %v (eg. bind mounts)\n", cli.FmtCount(sdb.Prefix.TotalHardlinkDirs))
+	if sdb.Prefix.Hardlinks == nil {
+		fmt.Fprint(out, "\n"+hardlinksUnavailable)
+	} else {
+		pf := heapFormatter[string]{}
+		cli.Banner(out, "-", "\nTop %v prefixes by number of hardlinks\n", n)
+		pf.formatHeap(sdb.Prefix.Hardlinks, out, cli.FmtCount, func(v string) string { return v }, n)
+		if sdb.Subtree != nil && sdb.Subtree.Hardlinks != nil {
+			cli.Banner(out, "-", "\nTop %v subtrees by number of hardlinks\n", n)
+			pf.formatHeap(sdb.Subtree.Hardlinks, out, cli.FmtCount, func(v string) string { return v }, n)
+		}
+		idf := heapFormatter[int64]{}
+		for _, ids := range []struct {
+			what string
+			h    *report.Heaps[int64]
+			name func(int64) string
+		}{{"users", sdb.ByUser, usernames.Manager.NameForUID}, {"groups", sdb.ByGroup, usernames.Manager.NameForGID}} {
+			if ids.h != nil && ids.h.Hardlinks != nil {
+				cli.Banner(out, "-", "\nTop %v %v by number of hardlinks\n", n, ids.what)
+				idf.formatHeap(ids.h.Hardlinks, out, cli.FmtCount, ids.name, n)
+			}
+		}
+	}
+	st.viewMissingLinks(ctx, out, af)
+}
+
+// viewMissingLinks displays a summary of the files found by analyze to
+// have links that it has not seen, if the configuration and database for
+// the filesystem are available.
+func (st *Commands) viewMissingLinks(ctx context.Context, out io.Writer, af *ViewFlags) {
+	env := st.env.ForFS(af.FS)
+	ctx, f, _, err := env.LookupPrefix(ctx, "")
+	if err != nil {
+		return
+	}
+	cfg := f.Config()
+	if cfg.CountHardlinkAsFiles {
+		fmt.Fprintf(out, "\nHardlinks are counted as separate files (count_hardlinks_as_files) and hence are not deduplicated.\n")
+		return
+	}
+	if !cfg.RecordHardlinks() || cfg.TopNOrDefault() == 0 {
+		return
+	}
+	db, err := env.OpenReadOnlyDB(ctx, cfg)
+	if err != nil {
+		return
+	}
+	defer db.Close(ctx)
+	ml, err := idudb.ReadMissingLinks(ctx, db)
+	if err != nil {
+		fmt.Fprintf(out, "\nFailed to read the missing links: %v\n", err)
+		return
+	}
+	var files int
+	var links uint64
+	for _, p := range ml.Prefixes {
+		files += p.Files
+		links += p.Links
+	}
+	if files == 0 {
+		fmt.Fprintf(out, "\nNo files with links that analyze has not seen were found.\n")
+		return
+	}
+	fmt.Fprintf(out, "\n%v files, in %v prefixes, have %v links that analyze has not seen; they may be counted more than once, see idu stats suggest.\n",
+		cli.FmtCount(int64(files)), len(ml.Prefixes), links)
+}
+
+func (st *Commands) userOrGroup(af *ViewFlags, sel selection, stats snapshot.File, name string, mapper func(string) (int64, error), perID report.PerIDStats, nameForID func(int64) string) error {
 	when := stats.Date
 
 	id, err := mapper(name)
@@ -431,12 +421,13 @@ func (st *Commands) userOrGroup(af *ViewFlags, stats cli.StatsFile, name string,
 	}
 
 	cli.Banner(os.Stdout, "=", "Usage by %v as of: %v\n", name, when)
-	st.formatPerIDStats(perID, os.Stdout, nameForID, map[int64]bool{id: true}, af.DisplayN)
+	st.formatPerIDStats(perID, os.Stdout, sel, nameForID, map[int64]bool{id: true}, af.DisplayN)
 	return nil
 }
 
 type heapFormatter[T comparable] struct {
 	fmtSize func(int64) string
+	sel     selection
 }
 
 func (hf heapFormatter[T]) formatHeap(heap *heap.MinMax[int64, T], out io.Writer, kf func(size int64) string, vf func(T) string, n int) {
@@ -452,14 +443,23 @@ func (hf heapFormatter[T]) formatHeap(heap *heap.MinMax[int64, T], out io.Writer
 }
 
 func (hf heapFormatter[T]) formatHeaps(h *report.Heaps[T], out io.Writer, valueFormatter func(T) string, n int) {
-	cli.Banner(out, "-", "Bytes used\n")
-	hf.formatHeap(h.Bytes, out, hf.fmtSize, valueFormatter, n)
-	cli.Banner(out, "-", "\nBytes used on underlying filesystem\n")
-	hf.formatHeap(h.StorageBytes, out, hf.fmtSize, valueFormatter, n)
-	cli.Banner(out, "-", "\nNumber of Files\n")
-	hf.formatHeap(h.Files, out, cli.FmtCount, valueFormatter, n)
-	cli.Banner(out, "-", "\nNumber of Prefixes/Directories\n")
-	hf.formatHeap(h.Prefixes, out, cli.FmtCount, valueFormatter, n)
+	sel := hf.sel
+	sep := ""
+	section := func(show bool, title string, heap *heap.MinMax[int64, T], kf func(int64) string) {
+		if !sel.metric(show) {
+			return
+		}
+		cli.Banner(out, "-", "%s%s\n", sep, title)
+		hf.formatHeap(heap, out, kf, valueFormatter, n)
+		sep = "\n"
+	}
+	section(sel.bytes, "Bytes used", h.Bytes, hf.fmtSize)
+	section(sel.storage, "Bytes used on underlying filesystem", h.StorageBytes, hf.fmtSize)
+	section(sel.files, "Number of Files", h.Files, cli.FmtCount)
+	if !sel.all {
+		return
+	}
+	section(true, "Number of Prefixes/Directories", h.Prefixes, cli.FmtCount)
 	if h.SparseBytes != nil && h.SparseBytes.Len() > 0 {
 		cli.Banner(out, "-", "\nBytes in sparse files not allocated on the underlying filesystem\n")
 		hf.formatHeap(h.SparseBytes, out, hf.fmtSize, valueFormatter, n)
@@ -478,35 +478,68 @@ func (hf heapFormatter[T]) formatTotals(h *report.Heaps[T], out io.Writer) {
 	fmt.Fprintf(out, "Sparse:    %v (%v not allocated)\n\n", cli.FmtCount(h.TotalSparseFiles), strings.TrimSpace(hf.fmtSize(h.TotalSparseBytes)))
 }
 
-func formatDistributedHeaps(dh *report.DistributedHeaps, out io.Writer, fmtSize func(int64) string, n int) {
-	printSection := func(title string, list []report.DistributedStats, metric func(report.DistributedStats) (string, string, float64)) {
-		if len(list) == 0 {
+func formatDistributedHeaps(dh *report.DistributedHeaps, out io.Writer, fmtSize func(int64) string, sel selection, n int) {
+	empty := func(h *heap.MinMax[int64, report.DistributedStats]) bool { return h == nil || h.Len() <= 0 }
+	if empty(dh.Bytes) && empty(dh.StorageBytes) && empty(dh.Files) {
+		fmt.Fprintf(out, "No distributed subtree hotspots were found.\n")
+		return
+	}
+	sep := ""
+	printSection := func(show bool, title string, list []report.DistributedStats, metric func(report.DistributedStats) (string, string, float64)) {
+		if len(list) == 0 || !sel.metric(show) {
 			return
 		}
-		cli.Banner(out, "-", "%s\n", title)
+		cli.Banner(out, "-", "%s%s\n", sep, title)
+		sep = "\n"
 		for _, ds := range list {
 			distVal, maxLeafVal, amp := metric(ds)
 			fmt.Fprintf(out, "%s (distributed; max-leaf: %s, %.1fx across %s dirs, max-child: %.0f%%): %s\n",
 				distVal, maxLeafVal, amp, cli.FmtCount(ds.SubtreeDirs), ds.MaxChildShare*100, ds.Prefix)
 		}
 	}
-	printSection("Distributed Bytes used", report.TopDistributed(dh.Bytes, n), func(ds report.DistributedStats) (string, string, float64) {
+	printSection(sel.bytes, "Distributed Bytes used", report.TopDistributed(dh.Bytes, n), func(ds report.DistributedStats) (string, string, float64) {
 		return fmtSize(ds.DistributedBytes), fmtSize(ds.MaxLeafBytes), ds.BytesAmplification
 	})
-	printSection("\nDistributed Storage Bytes used", report.TopDistributed(dh.StorageBytes, n), func(ds report.DistributedStats) (string, string, float64) {
+	printSection(sel.storage, "Distributed Storage Bytes used", report.TopDistributed(dh.StorageBytes, n), func(ds report.DistributedStats) (string, string, float64) {
 		return fmtSize(ds.DistributedStorage), fmtSize(ds.MaxLeafStorage), ds.StorageAmplification
 	})
-	printSection("\nDistributed Files", report.TopDistributed(dh.Files, n), func(ds report.DistributedStats) (string, string, float64) {
+	printSection(sel.files, "Distributed Files", report.TopDistributed(dh.Files, n), func(ds report.DistributedStats) (string, string, float64) {
 		return cli.FmtCount(ds.DistributedFiles), cli.FmtCount(ds.MaxLeafFiles), ds.FilesAmplification
 	})
 }
 
-func (st *Commands) formatPerIDStats(s report.PerIDStats, out io.Writer, nameForID func(int64) string, ids map[int64]bool, n int) {
+func (st *Commands) formatPerIDStats(s report.PerIDStats, out io.Writer, sel selection, nameForID func(int64) string, ids map[int64]bool, n int) {
+	hf := heapFormatter[string]{fmtSize: st.env.FmtSize, sel: sel}
 	for id, h := range s.ByPrefix {
 		if len(ids) != 0 && !ids[id] {
 			continue
 		}
 		cli.Banner(out, "=", "\n%v\n", nameForID(id))
-		heapFormatter[string]{fmtSize: st.env.FmtSize}.formatHeaps(h, out, func(v string) string { return v }, n)
+		if sel.summary {
+			hf.formatTotals(h, out)
+		}
+		if sel.rankings() {
+			hf.formatHeaps(h, out, func(v string) string { return v }, n)
+		}
+		if sel.hardlinks {
+			fmt.Fprintf(out, "Links:     %v (counted once)\n", cli.FmtCount(h.TotalHardlinks))
+			if h.Hardlinks == nil {
+				fmt.Fprint(out, hardlinksUnavailable)
+			} else {
+				cli.Banner(out, "-", "\nTop %v prefixes by number of hardlinks\n", n)
+				hf.formatHeap(h.Hardlinks, out, cli.FmtCount, func(v string) string { return v }, n)
+			}
+		}
 	}
+}
+
+// Snapshot computes stats for the entire filesystem f from its database
+// and saves them as a new snapshot in its snapshot_dir, returning its
+// path. It implements analyze.SnapshotFunc.
+func (st *Commands) Snapshot(ctx context.Context, f iduconfig.Filesystem) (string, error) {
+	dir := f.Config().SnapshotDir
+	if dir == "" {
+		return "", fmt.Errorf("snapshot_dir is not set for %v", iduconfig.Label(f))
+	}
+	return snapshot.Computer{}.Take(ctx, st.env, f, dir)
 }

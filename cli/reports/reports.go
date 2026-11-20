@@ -14,10 +14,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
-	"sort"
 	"time"
 
+	"cloudeng.io/cmd/idu/cli/internal/snapshot"
+	"cloudeng.io/cmd/idu/cli/internal/statedir"
 	"cloudeng.io/cmd/idu/internal/cli"
 
 	"cloudeng.io/cmd/idu/internal/usernames"
@@ -27,7 +27,8 @@ import (
 
 // GenerateFlags are the flags for the reports generate command.
 type GenerateFlags struct {
-	ReportDir string `subcmd:"report-dir,reports,directory to write reports to"`
+	cli.FSFlag
+	ReportDir string `subcmd:"report-dir,,'directory to write reports to, defaults to reports_dir from the configuration of the filesystem specified by --fs, or reports'"`
 	TSV       int    `subcmd:"tsv,100,'generate tsv reports with the requested number of entries, 0 for none'"`
 	Markdown  int    `subcmd:"markdown,20,'generate markdown reports with the requested number of entries, 0 for none'"`
 	JSON      int    `subcmd:"json,100,'generate json reports with the requested number of entries, 0 for none'"`
@@ -47,9 +48,13 @@ func New(env *cli.Env) *Commands {
 // Generate implements the reports generate command, values must be a
 // *GenerateFlags.
 func (rc *Commands) Generate(ctx context.Context, values interface{}, args []string) error {
-	rf := values.(*GenerateFlags)
+	rf := *values.(*GenerateFlags)
+	rf.ReportDir = rc.reportsDirFor(rf.FS, rf.ReportDir)
 	if err := os.MkdirAll(rf.ReportDir, 0770); err != nil {
 		return err
+	}
+	if len(args) == 0 {
+		return rc.generateCurrent(ctx, &rf)
 	}
 	errs := &errors.M{}
 	for _, filename := range args {
@@ -59,7 +64,7 @@ func (rc *Commands) Generate(ctx context.Context, values interface{}, args []str
 			continue
 		}
 		rc.statsData = data
-		if err := rc.generateReports(ctx, rf); err != nil {
+		if err := rc.generateReports(ctx, &rf); err != nil {
 			errs.Append(err)
 			continue
 		}
@@ -67,20 +72,48 @@ func (rc *Commands) Generate(ctx context.Context, values interface{}, args []str
 	return errs.Err()
 }
 
-// Need to recreate stats for every report as the topN values are
-// removed from the heaps as they are used.
-func (rc *Commands) getStats() (cli.StatsFile, error) {
-	return cli.DecodeStats(bytes.NewReader(rc.statsData))
+// generateCurrent generates reports from the most recent snapshot of the
+// entire filesystem specified by --fs, or from its database, see
+// snapshot.Computer.Current.
+func (rc *Commands) generateCurrent(ctx context.Context, rf *GenerateFlags) error {
+	if err := cli.ConfigLoadError(ctx); err != nil {
+		return err
+	}
+	env := rc.env.ForFS(rf.FS)
+	ctx, f, _, err := env.LookupPrefix(ctx, "")
+	if err != nil {
+		return err
+	}
+	n := max(rf.TSV, rf.JSON, rf.Markdown)
+	sf, path, err := snapshot.Computer{}.Current(ctx, env, f, f.Config().SnapshotDir, n)
+	if err != nil {
+		return err
+	}
+	if path != "" {
+		fmt.Printf("snapshot: %v\n", path)
+	}
+	var buf bytes.Buffer
+	if err := sf.Encode(&buf); err != nil {
+		return err
+	}
+	rc.statsData = buf.Bytes()
+	return rc.generateReports(ctx, rf)
 }
 
-func (rc *Commands) statsFor(reportDir, suffix string) (cli.StatsFile, *reportFilenames, error) {
+// Need to recreate stats for every report as the topN values are
+// removed from the heaps as they are used.
+func (rc *Commands) getStats() (snapshot.File, error) {
+	return snapshot.Decode(bytes.NewReader(rc.statsData))
+}
+
+func (rc *Commands) statsFor(reportDir, suffix string) (snapshot.File, *reportFilenames, error) {
 	stats, err := rc.getStats()
 	if err != nil {
-		return cli.StatsFile{}, nil, err
+		return snapshot.File{}, nil, err
 	}
 	filenames, err := newReportFilenames(reportDir, stats.Date, suffix)
 	if err != nil {
-		return cli.StatsFile{}, nil, err
+		return snapshot.File{}, nil, err
 	}
 	return stats, filenames, nil
 }
@@ -132,52 +165,65 @@ func (rc *Commands) generateReports(_ context.Context, rf *GenerateFlags) error 
 		return err
 	}
 
-	src, dst := filenames.latest()
-	if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if err := os.Symlink(src, dst); err != nil {
-		if runtime.GOOS != "windows" {
+	if err := filenames.dir.SetLatest(filenames.when); err != nil {
+		if !errors.Is(err, statedir.ErrNoSymlinks) {
 			return err
 		}
-		// Creating symlinks on Windows requires developer mode or
-		// administrator privileges, the reports can still be found
-		// using reports locate.
-		fmt.Fprintf(os.Stderr, "failed to link %v to %v: %v\n", dst, src, err)
+		// The reports can still be found using reports locate.
+		fmt.Fprintf(os.Stderr, "%v\n", err)
 	}
 	return nil
 }
 
+// DefaultReportsDir is the directory that reports are written to if
+// neither --report-dir nor reports_dir is set.
+const DefaultReportsDir = "reports"
+
+// reportsDirFor returns the directory that reports are to be written to:
+// flag, if set, otherwise the reports_dir of the filesystem named fs, or
+// the only one configured, if set, and DefaultReportsDir otherwise.
+func (rc *Commands) reportsDirFor(fs, flag string) string {
+	if flag != "" {
+		return flag
+	}
+	if f, _, err := rc.env.ForFS(fs).LookupFS(""); err == nil && f.Config().ReportsDir != "" {
+		return f.Config().ReportsDir
+	}
+	return DefaultReportsDir
+}
+
+// reportsDir returns the statedir.Dir for reports written to root.
+func reportsDir(root string) statedir.Dir {
+	return statedir.New(root, cli.ReportDirLayout, "", cli.LegacyReportDirLayouts...)
+}
+
 type reportFilenames struct {
-	root string
+	dir  statedir.Dir
 	when time.Time
 	ext  string
+	path string
 }
 
 func newReportFilenames(root string, when time.Time, ext string) (*reportFilenames, error) {
-	rf := &reportFilenames{root: root, when: when, ext: ext}
-	for _, sd := range []string{
-		rf.rootDir(),
-		rf.usersDir(),
-		rf.groupsDir(),
-	} {
-		if err := os.MkdirAll(sd, 0770); err != nil {
-			return nil, err
-		}
+	rf := &reportFilenames{dir: reportsDir(root), when: when, ext: ext}
+	path, err := rf.dir.MkdirAll(when, "users", "groups")
+	if err != nil {
+		return nil, err
 	}
+	rf.path = path
 	return rf, nil
 }
 
 func (rf *reportFilenames) rootDir() string {
-	return filepath.Join(rf.root, rf.when.Format(cli.ReportDirLayout))
+	return rf.path
 }
 
 func (rf *reportFilenames) usersDir() string {
-	return filepath.Join(rf.root, rf.when.Format(cli.ReportDirLayout), "users")
+	return filepath.Join(rf.path, "users")
 }
 
 func (rf *reportFilenames) groupsDir() string {
-	return filepath.Join(rf.root, rf.when.Format(cli.ReportDirLayout), "groups")
+	return filepath.Join(rf.path, "groups")
 }
 
 func (rf *reportFilenames) summary(file string) string {
@@ -192,10 +238,6 @@ func (rf *reportFilenames) user(uid int64) string {
 func (rf *reportFilenames) group(gid int64) string {
 	un := usernames.Manager.NameForGID(gid)
 	return filepath.Join(rf.groupsDir(), un+rf.ext)
-}
-
-func (rf *reportFilenames) latest() (src, dst string) {
-	return rf.when.Format(cli.ReportDirLayout), filepath.Join(rf.root, "latest")
 }
 
 func writeReportFiles(sdb *report.AllStats,
@@ -265,6 +307,7 @@ func writeReportFiles(sdb *report.AllStats,
 
 // LocateFlags are the flags for the reports locate command.
 type LocateFlags struct {
+	cli.FSFlag
 	N        int    `subcmd:"n,2,'locate the n most recent reports'"`
 	Extesion string `subcmd:"extension,,file extension to match"`
 }
@@ -292,10 +335,27 @@ func (rc *Commands) listfiles(dir, ext string) ([]string, error) {
 
 // Locate implements the reports locate command, values must be a
 // *LocateFlags.
-func (rc *Commands) Locate(_ context.Context, values interface{}, args []string) error {
+func (rc *Commands) Locate(ctx context.Context, values interface{}, args []string) error {
 	lf := values.(*LocateFlags)
-	dir := args[0]
-	dirs, err := os.ReadDir(dir)
+	var dir string
+	if len(args) == 1 {
+		dir = args[0]
+	} else {
+		f, _, err := rc.env.ForFS(lf.FS).LookupFS("")
+		if err != nil {
+			if loadErr := cli.ConfigLoadError(ctx); loadErr != nil {
+				return loadErr
+			}
+			return err
+		}
+		if dir = f.Config().ReportsDir; dir == "" {
+			dir = DefaultReportsDir
+		}
+	}
+	if _, err := os.Stat(dir); err != nil {
+		return err
+	}
+	entries, err := reportsDir(dir).Entries()
 	if err != nil {
 		return err
 	}
@@ -304,17 +364,11 @@ func (rc *Commands) Locate(_ context.Context, values interface{}, args []string)
 		dir  string
 	}
 	candidates := []candidate{}
-	for _, d := range dirs {
-		if !d.IsDir() {
-			continue
+	for _, e := range entries {
+		if e.IsDir {
+			candidates = append(candidates, candidate{e.When, e.Name})
 		}
-		when, err := time.Parse(cli.ReportDirLayout, d.Name())
-		if err != nil {
-			continue
-		}
-		candidates = append(candidates, candidate{when, d.Name()})
 	}
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].dir > candidates[j].dir })
 
 	type reportDir struct {
 		ReportTime time.Time `json:"report_time"`

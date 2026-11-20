@@ -33,7 +33,8 @@ filesystems:
   - name: home
     root: /Users/cnicolaou
     database: ${db_root}/cnicolaou
-    stats_dir: ./stats/home
+    snapshot_dir: ./snapshots/home
+    reports_dir: ./reports/home
     concurrent_scans: 5000
     concurrent_stats: 2000
     concurrent_stats_threshold: 10

@@ -38,6 +38,14 @@ Compute implements the stats compute command, values must be a
 
 
 ```go
+func (st *Commands) Snapshot(ctx context.Context, f iduconfig.Filesystem) (string, error)
+```
+Snapshot computes stats for the entire filesystem f from its database and
+saves them as a new snapshot in its snapshot_dir, returning its path.
+It implements analyze.SnapshotFunc.
+
+
+```go
 func (st *Commands) Suggest(ctx context.Context, values interface{}, args []string) error
 ```
 Suggest implements the stats suggest command, values must be a
@@ -56,12 +64,12 @@ View implements the stats view command, values must be a *ViewFlags.
 ```go
 type ComputeFlags struct {
 	cli.FSFlag
-	ComputeN  int             `subcmd:"n,2000,number of top entries to compute"`
-	Scan      bool            `subcmd:"scan,false,'compute the stats from all of the summaries for the prefix, rather than from the rankings and recursive totals maintained by analyze, which are used by default for the root of a filesystem but do not include the distributed subtree statistics and limit the per user and group rankings to topn_per_id entries'"`
-	Progress  bool            `subcmd:"progress,false,show progress"`
-	StatsDir  string          `subcmd:"stats-dir,,'directory that stats files are written to, defaults to stats_dir from the configuration or stats'"`
-	StatsFile string          `subcmd:"stats-file,,'write stats to the specified file, rather than a directory, use - for stdout'"`
-	Prefix    flags.Repeating `subcmd:"prefix,,'prefix match expression'"`
+	ComputeN    int             `subcmd:"n,2000,number of top entries to compute"`
+	Scan        bool            `subcmd:"scan,false,'compute the stats from all of the summaries for the prefix, rather than from the rankings and recursive totals maintained by analyze, which are used by default for the root of a filesystem but do not include the distributed subtree statistics and limit the per user and group rankings to topn_per_id entries'"`
+	Progress    bool            `subcmd:"progress,false,show progress"`
+	SnapshotDir string          `subcmd:"snapshot-dir,,'directory that the snapshot is written to, defaults to snapshot_dir from the configuration'"`
+	StatsFile   string          `subcmd:"stats-file,,'write the snapshot to the specified file, rather than the snapshot directory, use - for stdout'"`
+	Prefix      flags.Repeating `subcmd:"prefix,,'prefix match expression'"`
 }
 ```
 ComputeFlags are the flags for the stats compute command.
@@ -92,11 +100,17 @@ SuggestFlags are the flags for the stats suggest command.
 ```go
 type ViewFlags struct {
 	DisplayFlags
-	FS       string `subcmd:"fs,,'the name of the configured filesystem to operate on, overrides the global --fs flag'"`
-	StatsDir string `subcmd:"stats-dir,,'directory that stats files are read from, defaults to stats_dir from the configuration of the filesystem specified by --fs; --fs is not required if this flag is set'"`
-	User     string `subcmd:"user,,display stats for the specified user"`
-	Group    string `subcmd:"group,,display stats for the specified group"`
-	Info     bool   `subcmd:"info,false,display metadata for the stats file"`
+	FS          string `subcmd:"fs,,'the name of the configured filesystem to operate on, overrides the global --fs flag'"`
+	SnapshotDir string `subcmd:"snapshot-dir,,'directory that snapshots are read from, and written to, defaults to snapshot_dir from the configuration of the filesystem specified by --fs; --fs is not required if this flag is set and the configuration cannot be loaded, in which case the latest snapshot in it is displayed'"`
+	User        string `subcmd:"user,,'display stats for the specified user, subset by --summary, --bytes, --storage and --file-counts'"`
+	Group       string `subcmd:"group,,'display stats for the specified group, subset by --summary, --bytes, --storage and --file-counts'"`
+	Info        bool   `subcmd:"info,false,display metadata for the stats file"`
+	Summary     bool   `subcmd:"summary,false,'display the totals for the entire filesystem, or the user or group specified by --user or --group'"`
+	Bytes       bool   `subcmd:"bytes,false,'display the top entries by the number of bytes reported, ie. file sizes'"`
+	Storage     bool   `subcmd:"storage,false,'display the top entries by the number of bytes stored on the underlying filesystem'"`
+	FileCounts  bool   `subcmd:"file-counts,false,'display the top entries by the number of files'"`
+	Hotspots    bool   `subcmd:"hotspots,false,'display the distributed subtree hotspots, ie. subtrees whose usage is at least twice that of their largest directory; computing them requires a full pass over the database, which is saved as a snapshot, unless the snapshot used already includes them'"`
+	Hardlinks   bool   `subcmd:"hardlinks,false,'display the number of hardlinks, the top entries by the number of hardlinks and any files found by analyze to have links that it has not seen; the rankings require a full pass over the database, which is saved as a snapshot, unless the snapshot used already includes them'"`
 }
 ```
 ViewFlags are the flags for the stats view command.

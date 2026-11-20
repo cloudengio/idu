@@ -14,6 +14,29 @@ func CaptureStdout(t *testing.T, fn func() error) (string, error)
 ```
 CaptureStdout returns the output written to os.Stdout by fn.
 
+### Func CreateHardlinkTree
+```go
+func CreateHardlinkTree(t *testing.T, root string)
+```
+CreateHardlinkTree creates a tree with hard links to files in sibling
+directories whose names share a string prefix (a, a-b, ab).
+
+### Func LinkUnchanged
+```go
+func LinkUnchanged(t *testing.T, root string)
+```
+LinkUnchanged creates a hardlink in a, which is therefore rescanned, to b/h,
+a file in b, which is not rescanned since it is unchanged, and which had
+a link count of 1 when last scanned. a/hl precedes b/h and is counted,
+b/h is now a hardlink.
+
+### Func NewHardlinkTree
+```go
+func NewHardlinkTree(t *testing.T) (tmpDir, root string)
+```
+NewHardlinkTree creates the tree created by CreateHardlinkTree in a new
+temporary directory, returning the directory and the root of the tree.
+
 ### Func NumDirsAndFiles
 ```go
 func NumDirsAndFiles(paths []string) (d, f int64)
@@ -45,6 +68,13 @@ WithConfig sets env.Config for the duration of the test.
 func WithFS(t *testing.T, env *cli.Env, name string)
 ```
 WithFS sets env.FS, ie. the --fs flag, for the duration of the test.
+
+### Func WriteHardlinkConfig
+```go
+func WriteHardlinkConfig(t *testing.T, dir, root string, dedup iduconfig.HardlinkDedup) iduconfig.T
+```
+WriteHardlinkConfig writes a configuration for root, with its database in
+dir, that uses the hardlink deduplication strategy dedup.
 
 
 

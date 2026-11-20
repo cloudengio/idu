@@ -164,9 +164,10 @@ default to the filesystem's root:
 $ idu --fs=shared-project analyze
 $ idu --fs=shared-project analyze some/subdir
 $ idu --fs=shared-project errors
-$ idu --fs=shared-project stats compute --stats-dir=./stats .
-$ idu stats view ./stats/latest.idustats
-$ idu reports generate ./stats/latest.idustats
+$ idu --fs=shared-project analyze --snapshot
+$ idu --fs=shared-project stats view
+$ idu --fs=shared-project reports generate
+$ idu --fs=shared-project stats compute some/subdir 'user=alice'
 ```
 
 You can also inspect the current configuration and database location:
@@ -186,18 +187,48 @@ that errors are common and most often due to permission problems; `idu` records
 errors and leaves it to the user to decide whether they are relevant (for example,
 whether significant disk usage sits behind an inaccessible path).
 
-`stats compute <prefix>` computes stats from the database and stores them in a
-timestamped file in `--stats-dir` (or `stats_dir` from the filesystem's
-configuration, defaulting to `stats`, and creates a symlink `latest.idustats` to
-the file produced). `stats view <idustats-file>` reads stats and prints them to
-stdout. `reports generate <idustats-file>` generates reports (Markdown, JSON,
-TSV).
+`stats view` displays the statistics for the entire filesystem and
+`reports generate` writes reports (Markdown, JSON, TSV) for them. Both use the
+most recent snapshot in the filesystem's `snapshot_dir` if it is more recent
+than the last update to the database, and otherwise construct the statistics
+from the rankings and totals that `analyze` maintains in the database. When
+those cannot be used, for example after an interrupted analysis, the
+statistics require a full pass over the database and are saved as a new
+snapshot, if `snapshot_dir` is set, so that the pass is not repeated.
 
-Per-user or per-group statistics can be viewed as follows:
+Snapshots are stored in `snapshot_dir`, each named by the time it was
+created, with a symlink `latest` to the most recent. `analyze --snapshot`
+writes one once the analysis has completed, which requires `snapshot_dir` to
+be set. `stats compute <prefix> [<expression>...]` computes statistics for any
+prefix, optionally restricted by an expression, and saves them as a snapshot
+in `--snapshot-dir` or `snapshot_dir` (or to `--stats-file`). A snapshot can be
+viewed, or reported on, by naming it: `stats view <snapshot>` and
+`reports generate <snapshot>...`.
+
+Reports are written to `--report-dir`, or the filesystem's `reports_dir`,
+defaulting to `reports`, each set in a directory named by the time of the
+statistics it was generated from, with a symlink `latest` to the most recent.
+`reports locate` lists the most recent sets in the same directory.
+
+`stats view` displays everything other than the hardlinks section by default;
+`--summary`, `--bytes`, `--storage`, `--file-counts`, `--hotspots` and
+`--hardlinks` select what is displayed, and may be combined. `--summary`
+displays the totals, `--bytes`, `--storage` and `--file-counts` the top
+entries by reported bytes, bytes stored and number of files respectively,
+`--hotspots` the distributed subtree hotspots, ie. subtrees whose usage is at
+least twice that of their largest directory, and `--hardlinks` the number of
+hardlinks, the top entries by number of hardlinks and any files found by
+analyze to have links that it has not seen. The hotspots and the hardlink
+rankings are not part of the state maintained by analyze and hence require a
+full pass over the database, which is saved as a snapshot, unless the current
+snapshot already includes them.
+
+Per-user or per-group statistics can be viewed as follows, subset by the same
+flags:
 
 ```sh
-$ idu stats view --user=<user> <idustats-file>
-$ idu stats view --group=<group> <idustats-file>
+$ idu stats view --user=<user> [<snapshot>]
+$ idu stats view --group=<group> [<snapshot>]
 ```
 
 ## Anticipated Changes and Improvements

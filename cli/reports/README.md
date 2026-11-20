@@ -8,6 +8,16 @@ import cloudeng.io/cmd/idu/cli/reports
 Package reports implements idu's reports commands: generate, which writes
 tsv, json and markdown reports from a stats file, and locate.
 
+## Constants
+### DefaultReportsDir
+```go
+const DefaultReportsDir = "reports"
+```
+DefaultReportsDir is the directory that reports are written to if neither
+--report-dir nor reports_dir is set.
+
+
+
 ## Types
 ### Type Commands
 ```go
@@ -36,7 +46,7 @@ Generate implements the reports generate command, values must be a
 
 
 ```go
-func (rc *Commands) Locate(_ context.Context, values interface{}, args []string) error
+func (rc *Commands) Locate(ctx context.Context, values interface{}, args []string) error
 ```
 Locate implements the reports locate command, values must be a *LocateFlags.
 
@@ -46,7 +56,8 @@ Locate implements the reports locate command, values must be a *LocateFlags.
 ### Type GenerateFlags
 ```go
 type GenerateFlags struct {
-	ReportDir string `subcmd:"report-dir,reports,directory to write reports to"`
+	cli.FSFlag
+	ReportDir string `subcmd:"report-dir,,'directory to write reports to, defaults to reports_dir from the configuration of the filesystem specified by --fs, or reports'"`
 	TSV       int    `subcmd:"tsv,100,'generate tsv reports with the requested number of entries, 0 for none'"`
 	Markdown  int    `subcmd:"markdown,20,'generate markdown reports with the requested number of entries, 0 for none'"`
 	JSON      int    `subcmd:"json,100,'generate json reports with the requested number of entries, 0 for none'"`
@@ -58,6 +69,7 @@ GenerateFlags are the flags for the reports generate command.
 ### Type LocateFlags
 ```go
 type LocateFlags struct {
+	cli.FSFlag
 	N        int    `subcmd:"n,2,'locate the n most recent reports'"`
 	Extesion string `subcmd:"extension,,file extension to match"`
 }

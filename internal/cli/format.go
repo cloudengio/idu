@@ -7,7 +7,6 @@ package cli
 import (
 	"fmt"
 	"io"
-	"runtime"
 	"strings"
 	"time"
 
@@ -46,34 +45,20 @@ func Banner(out io.Writer, ul string, format string, args ...any) {
 	out.Write([]byte(buf.String())) //nolint:errcheck
 }
 
-// The layouts used for timestamped stats files and report directories on
-// Windows avoid ':', which is not permitted in its filenames.
-const (
-	windowsStatsFileLayout = "2006-01-02 15-04-05"
-	windowsReportDirLayout = "2006-01-02T15-04-05Z0700"
-)
+// StatsFileLayout is the time layout used to name stats files, ie.
+// snapshots. Names are in local time, with millisecond resolution, contain
+// neither spaces nor ':', which is not permitted in Windows filenames, and
+// are the same on all systems.
+const StatsFileLayout = "2006-01-02_15-04-05.000"
 
-// StatsFileLayout is the time layout used to name stats files.
-var StatsFileLayout = statsFileLayout()
+// ReportDirLayout is the time layout used to name report directories, it
+// is the same as StatsFileLayout.
+const ReportDirLayout = StatsFileLayout
 
-// ReportDirLayout is the time layout used to name report directories.
-var ReportDirLayout = reportDirLayout()
+// LegacyStatsFileLayouts are the layouts previously used to name stats
+// files, which are still recognized.
+var LegacyStatsFileLayouts = []string{time.DateTime, "2006-01-02 15-04-05", "2006-01-02_15-04-05"}
 
-func statsFileLayout() string {
-	l, _ := TimestampLayouts(runtime.GOOS)
-	return l
-}
-
-func reportDirLayout() string {
-	_, l := TimestampLayouts(runtime.GOOS)
-	return l
-}
-
-// TimestampLayouts returns the time layouts used to name stats files and
-// report directories on goos.
-func TimestampLayouts(goos string) (stats, reports string) {
-	if goos == "windows" {
-		return windowsStatsFileLayout, windowsReportDirLayout
-	}
-	return time.DateTime, time.RFC3339
-}
+// LegacyReportDirLayouts are the layouts previously used to name report
+// directories, which are still recognized.
+var LegacyReportDirLayouts = []string{time.RFC3339, "2006-01-02T15-04-05Z0700", "2006-01-02_15-04-05Z0700", "2006-01-02_15-04-05"}

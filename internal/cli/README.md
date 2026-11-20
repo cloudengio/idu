@@ -11,44 +11,47 @@ the filesystem and database to operate on, opening databases, per-filesystem
 logging, formatting sizes and counts and the format of stats files.
 
 ## Constants
-### StatsFromSummaries, StatsFromStored
+### ReportDirLayout
 ```go
-const (
-	// StatsFromSummaries denotes stats computed by a pass over all of the
-	// summaries, or the file metadata, of the prefix.
-	StatsFromSummaries = "summaries"
-	// StatsFromStored denotes stats constructed from the recursive totals
-	// and rankings maintained by analyze. They do not include the
-	// distributed subtree statistics, and the rankings of prefixes for each
-	// user and group are limited to topn_per_id entries.
-	StatsFromStored = "stored"
-)
+const ReportDirLayout = StatsFileLayout
 ```
-The sources of the statistics in a stats file.
+ReportDirLayout is the time layout used to name report directories, it is
+the same as StatsFileLayout.
+
+### StatsFileLayout
+```go
+const StatsFileLayout = "2006-01-02_15-04-05.000"
+```
+StatsFileLayout is the time layout used to name stats files, ie. snapshots.
+Names are in local time, with millisecond resolution, contain neither spaces
+nor ':', which is not permitted in Windows filenames, and are the same on
+all systems.
 
 
 
 ## Variables
+### LegacyReportDirLayouts
+```go
+LegacyReportDirLayouts = []string{time.RFC3339, "2006-01-02T15-04-05Z0700", "2006-01-02_15-04-05Z0700", "2006-01-02_15-04-05"}
+
+```
+LegacyReportDirLayouts are the layouts previously used to name report
+directories, which are still recognized.
+
+### LegacyStatsFileLayouts
+```go
+LegacyStatsFileLayouts = []string{time.DateTime, "2006-01-02 15-04-05", "2006-01-02_15-04-05"}
+
+```
+LegacyStatsFileLayouts are the layouts previously used to name stats files,
+which are still recognized.
+
 ### Printer
 ```go
 Printer = message.NewPrinter(language.English)
 
 ```
 Printer formats numbers using English conventions, eg. 1,000.
-
-### ReportDirLayout
-```go
-ReportDirLayout = reportDirLayout()
-
-```
-ReportDirLayout is the time layout used to name report directories.
-
-### StatsFileLayout
-```go
-StatsFileLayout = statsFileLayout()
-
-```
-StatsFileLayout is the time layout used to name stats files.
 
 
 
@@ -104,12 +107,17 @@ func PrefixArg(args []string) string
 PrefixArg returns the optional <prefix> argument, or the empty string,
 which refers to the root of the filesystem, if it was not supplied.
 
-### Func TimestampLayouts
+### Func SquashCanceled
 ```go
-func TimestampLayouts(goos string) (stats, reports string)
+func SquashCanceled(err error) error
 ```
-TimestampLayouts returns the time layouts used to name stats files and
-report directories on goos.
+SquashCanceled returns err with all but one of the instances of
+context.Canceled and context.DeadlineExceeded removed, so that a command
+that is interrupted, or times out, while many operations are in flight
+reports each once, together with the number of times that it occurred,
+rather than once per operation. Any errors.M within err, at any depth,
+are flattened into a single errors.M first since errors.M.Squash does not
+descend into an errors.M that contains a single error.
 
 ### Func WithConfigLoadError
 ```go
@@ -268,50 +276,6 @@ func (ls *Loggers) NewLogger(cfg cmdutil.LoggingConfig) (*cmdutil.Logger, error)
 ```
 NewLogger creates a logger for cfg, overridden by any of the logging flags
 that are set.
-
-
-
-
-### Type StatsFile
-```go
-type StatsFile struct {
-	Prefix     string
-	Date       time.Time
-	Expression string
-	Stats      *report.AllStats
-	// Source is StatsFromSummaries or StatsFromStored, it is empty for
-	// files written before stats could be constructed from the stored
-	// state, which were always computed from the summaries.
-	Source string
-	// PerIDN is the maximum number of entries in the rankings of prefixes
-	// for each user and group when Source is StatsFromStored.
-	PerIDN int
-}
-```
-StatsFile is the format of the files written by stats compute and read by
-stats view and reports generate.
-
-### Functions
-
-```go
-func DecodeStats(rd io.Reader) (StatsFile, error)
-```
-DecodeStats decodes a stats file from rd.
-
-
-```go
-func LoadStats(filename string) (StatsFile, error)
-```
-LoadStats reads a stats file, - denotes os.Stdin.
-
-
-
-### Methods
-
-```go
-func (sf StatsFile) Encode(w io.Writer) error
-```
-Encode writes sf to w.
 
 
 

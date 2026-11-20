@@ -31,6 +31,12 @@ type Heaps[T comparable] struct {
 	// SparseBytes will be nil for stats computed before sparse files
 	// were tracked.
 	SparseBytes *heap.MinMax[int64, T]
+	// Hardlinks ranks items by the number of hardlinks, ie. links to files
+	// that are counted elsewhere, that they contain. It is nil for stats
+	// computed before it was introduced and for stats constructed from
+	// rankings that do not include it, eg. those maintained by analyze,
+	// see AllStats.ClearHardlinkRankings.
+	Hardlinks *heap.MinMax[int64, T]
 }
 
 // PerIDStats is a collection of statistics on a per user/group basis.
@@ -69,6 +75,7 @@ func newHeaps[T comparable](prefix string, n int) *Heaps[T] {
 		Prefixes:     heap.NewMinMax[int64, T](),
 		StorageBytes: heap.NewMinMax[int64, T](),
 		SparseBytes:  heap.NewMinMax[int64, T](),
+		Hardlinks:    heap.NewMinMax[int64, T](),
 	}
 	return h
 }
@@ -83,6 +90,9 @@ func (h *Heaps[T]) pushMax(item T, t stats.Totals, children int64) {
 	h.PrefixBytes.PushMaxN(t.PrefixBytes, item, h.MaxN)
 	if t.SparseBytes > 0 {
 		h.SparseBytes.PushMaxN(t.SparseBytes, item, h.MaxN)
+	}
+	if t.Hardlinks > 0 && h.Hardlinks != nil {
+		h.Hardlinks.PushMaxN(t.Hardlinks, item, h.MaxN)
 	}
 }
 
@@ -306,4 +316,26 @@ func (s *AllStats) RecordDirect(prefix string, totals stats.Totals, users, group
 	s.Prefix.TotalHardlinkDirs += totals.HardlinkDirs
 	s.PushPerUserStats(prefix, users)
 	s.PushPerGroupStats(prefix, groups)
+}
+
+// ClearHardlinkRankings removes the rankings by number of hardlinks, see
+// Heaps.Hardlinks, from s. It is used for stats constructed from rankings
+// that do not include them, so that they are not mistaken for there being
+// no hardlinks.
+func (s *AllStats) ClearHardlinkRankings() {
+	for _, h := range []*Heaps[string]{s.Prefix, s.Subtree} {
+		if h != nil {
+			h.Hardlinks = nil
+		}
+	}
+	for _, h := range []*Heaps[int64]{s.ByUser, s.ByGroup} {
+		if h != nil {
+			h.Hardlinks = nil
+		}
+	}
+	for _, ids := range []PerIDStats{s.PerUser, s.PerGroup} {
+		for _, h := range ids.ByPrefix {
+			h.Hardlinks = nil
+		}
+	}
 }

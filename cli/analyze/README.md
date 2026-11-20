@@ -23,10 +23,9 @@ analyze, logs, errors and database locate.
 ### Functions
 
 ```go
-func New(env *cli.Env, newProgress NewProgress) *Commands
+func New(env *cli.Env, opts ...Option) *Commands
 ```
-New returns the Commands that use env. newProgress creates the Progress for
-each analysis, if it is nil progress is neither displayed nor reported.
+New returns the Commands that use env.
 
 
 
@@ -78,6 +77,7 @@ type Flags struct {
 	Force       bool          `subcmd:"force,false,reanalyze even if the database is up to date"`
 	SlowScans   time.Duration `subcmd:"slow-scan-duration,10s,duration at which scans are reported as slow"`
 	Defaults    bool          `subcmd:"show-defaults,false,display default scanning options and exit"`
+	Snapshot    bool          `subcmd:"snapshot,false,'write a snapshot of the statistics for the entire filesystem to its snapshot_dir once the analysis has completed successfully, it is an error if snapshot_dir is not set'"`
 	RefreshTopN bool          `subcmd:"refresh-topn,false,recompute the recursive totals and top-N rankings from scratch once the analysis is complete; they are otherwise maintained incrementally and rebuilt automatically when needed"`
 }
 ```
@@ -115,6 +115,30 @@ progress should be displayed as the analysis proceeds. Any display must stop
 when ctx is canceled or Stop is called.
 
 
+### Type Option
+```go
+type Option func(*Commands)
+```
+Option configures the Commands created by New.
+
+### Functions
+
+```go
+func WithProgress(newProgress NewProgress) Option
+```
+WithProgress sets the function used to create the Progress for each
+analysis. Without it progress is neither displayed nor reported.
+
+
+```go
+func WithSnapshot(fn SnapshotFunc) Option
+```
+WithSnapshot sets the function used to write a snapshot once an analysis has
+completed, as requested by --snapshot, which is an error without it.
+
+
+
+
 ### Type Progress
 ```go
 type Progress interface {
@@ -130,6 +154,14 @@ type Progress interface {
 }
 ```
 Progress is notified of the progress of an analysis and reports on it.
+
+
+### Type SnapshotFunc
+```go
+type SnapshotFunc func(ctx context.Context, f iduconfig.Filesystem) (string, error)
+```
+SnapshotFunc writes a snapshot of the stats for the entire filesystem f,
+computed from its database, to its snapshot_dir and returns its path.
 
 
 ### Type Summary
