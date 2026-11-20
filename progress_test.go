@@ -43,7 +43,7 @@ func TestProgressTracker_DisplayAndCounters(t *testing.T) {
 				cancel()
 				wg.Wait()
 
-				s := pt.summarize()
+				s := pt.Summary()
 				if s.PrefixesStarted != 1 || s.PrefixesFinished != 1 {
 					t.Errorf("prefixes started=%d finished=%d, want 1, 1", s.PrefixesStarted, s.PrefixesFinished)
 				}

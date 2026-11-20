@@ -7,7 +7,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
@@ -19,31 +18,32 @@ import (
 	"runtime"
 	debugpkg "runtime/debug"
 
+	"cloudeng.io/cmd/idu/cli/analyze"
+	"cloudeng.io/cmd/idu/cli/find"
+	"cloudeng.io/cmd/idu/cli/reports"
+	"cloudeng.io/cmd/idu/cli/stats"
 	"cloudeng.io/cmd/idu/iduconfig"
+	"cloudeng.io/cmd/idu/internal/cli"
 	"cloudeng.io/cmdutil"
 	"cloudeng.io/cmdutil/cmdconfig"
 	"cloudeng.io/cmdutil/flags"
 	"cloudeng.io/cmdutil/profiling"
 	"cloudeng.io/cmdutil/subcmd"
-	"cloudeng.io/file/diskusage"
 	"cloudeng.io/file/filewalk"
 	"cloudeng.io/file/filewalk/asyncstat"
-	"golang.org/x/text/language"
-	"golang.org/x/text/message"
 )
 
 var (
-	globalFlags  GlobalFlags
-	globalConfig iduconfig.T
+	globalFlags GlobalFlags
+	// env is the environment shared by all of the commands, its Config
+	// and FS are set by mainWrapper.
+	env = cli.NewEnv()
 )
 
-var (
-	panicBuf     = make([]byte, 1024*1024)
-	bytesPrinter func(size int64) (float64, string)
-)
+var panicBuf = make([]byte, 1024*1024)
 
 var commands = `name: idu
-summary: analyze disk usage using a database for incremental updates. The filesystem to operate on is selected by name using the --fs flag, which may be omitted if only one filesystem is configured. Commands that accept a <prefix> interpret it relative to that filesystem's configured root, or as a key prefix for a filesystem configured as a key range, and it must be contained within that root or range; an omitted [<prefix>] refers to the entire filesystem. Many of the commands accept an expression that is used to restrict which prefixes/directories and files are processed.
+summary: analyze disk usage using a database for incremental updates. The filesystem to operate on is selected by name using the --fs flag, which every command that operates on a filesystem accepts, and which may also be given as a global flag that the command flag overrides; it may be omitted if only one filesystem is configured. Commands that accept a <prefix> interpret it relative to that filesystem's configured root, or as a key prefix for a filesystem configured as a key range, and it must be contained within that root or range; an omitted [<prefix>] refers to the entire filesystem. Many of the commands accept an expression that is used to restrict which prefixes/directories and files are processed.
 commands:
   - name: expression-syntax
     summary: display the syntax for the expression language supported by commands such as analyze, find etc.
@@ -150,44 +150,48 @@ func init() {
 
 func requireConfig(runner subcmd.Runner) subcmd.Runner {
 	return func(ctx context.Context, flagValues any, args []string) error {
-		if loadErr, ok := cmdutil.ContextValue[configLoadError](ctx); ok && loadErr.err != nil {
-			return loadErr.err
+		if loadErr := cli.ConfigLoadError(ctx); loadErr != nil {
+			return loadErr
 		}
 		return runner(ctx, flagValues, args)
 	}
 }
 
-func cli() *subcmd.CommandSetYAML {
+// squashErrors returns a runner that squashes the, potentially thousands
+// of, context.Canceled and context.DeadlineExceeded errors returned by
+// runner when it is interrupted, see cli.SquashCanceled.
+func squashErrors(runner subcmd.Runner) subcmd.Runner {
+	return func(ctx context.Context, flagValues any, args []string) error {
+		return cli.SquashCanceled(runner(ctx, flagValues, args))
+	}
+}
+
+func newCommandSet() *subcmd.CommandSetYAML {
 	cmdSet := subcmd.MustFromYAMLTemplate(commands, newConfigExtension())
 	cmdSet.MustAddExtensions()
-	cmdSet.Set("config", "show").MustRunner(configShow, &struct{}{})
-	cmdSet.Set("config", "describe").MustRunner(configDescribe, &struct{}{})
+	cmdSet.Set("config", "show").MustRunner(squashErrors(configShow), &struct{}{})
+	cmdSet.Set("config", "describe").MustRunner(squashErrors(configDescribe), &struct{}{})
 
 	expr := &exprCmd{}
-	cmdSet.Set("expression-syntax").MustRunner(expr.explain, &struct{}{})
+	cmdSet.Set("expression-syntax").MustRunner(squashErrors(expr.explain), &struct{}{})
 
-	analyzer := &analyzeCmd{}
-	cmdSet.Set("analyze").MustRunner(requireConfig(analyzer.analyze), &analyzeFlags{})
+	alz := analyze.New(env, newAnalyzeProgress)
+	cmdSet.Set("analyze").MustRunner(squashErrors(requireConfig(alz.Analyze)), &analyze.Flags{})
+	cmdSet.Set("errors").MustRunner(squashErrors(requireConfig(alz.Errors)), &analyze.ErrorFlags{})
+	cmdSet.Set("logs").MustRunner(squashErrors(requireConfig(alz.Logs)), &analyze.LogFlags{})
+	cmdSet.Set("database", "locate").MustRunner(squashErrors(requireConfig(alz.Locate)), &analyze.LocateFlags{})
 
-	ls := &lister{}
-	cmdSet.Set("errors").MustRunner(requireConfig(ls.errors), &errorFlags{})
-	cmdSet.Set("logs").MustRunner(requireConfig(ls.logs), &logFlags{})
+	st := stats.New(env)
+	cmdSet.Set("stats", "compute").MustRunner(squashErrors(requireConfig(st.Compute)), &stats.ComputeFlags{})
+	cmdSet.Set("stats", "view").MustRunner(squashErrors(st.View), &stats.ViewFlags{})
+	cmdSet.Set("stats", "suggest").MustRunner(squashErrors(requireConfig(st.Suggest)), &stats.SuggestFlags{})
 
-	statsCmd := &statsCmds{}
-	cmdSet.Set("stats", "compute").MustRunner(requireConfig(statsCmd.compute), &computeFlags{})
+	rpts := reports.New(env)
+	cmdSet.Set("reports", "generate").MustRunner(squashErrors(rpts.Generate), &reports.GenerateFlags{})
+	cmdSet.Set("reports", "locate").MustRunner(squashErrors(rpts.Locate), &reports.LocateFlags{})
 
-	cmdSet.Set("stats", "view").MustRunner(statsCmd.view, &viewFlags{})
-	cmdSet.Set("stats", "suggest").MustRunner(requireConfig(statsCmd.suggest), &suggestFlags{})
-
-	reportsCmds := &reportCmds{}
-	cmdSet.Set("reports", "generate").MustRunner(reportsCmds.generate, &generateReportsFlags{})
-	cmdSet.Set("reports", "locate").MustRunner(reportsCmds.locate, &locateReportsFlags{})
-
-	findCmds := &findCmds{}
-	cmdSet.Set("find").MustRunner(requireConfig(findCmds.find), &findFlags{})
-
-	db := &dbCmd{}
-	cmdSet.Set("database", "locate").MustRunner(requireConfig(db.locate), &locateFlags{})
+	fnd := find.New(env)
+	cmdSet.Set("find").MustRunner(squashErrors(requireConfig(fnd.Find)), &find.Flags{})
 
 	cmdSet.AppendPreHooks(loggingHook)
 
@@ -204,13 +208,9 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 
 	switch globalFlags.Units.Value {
 	case unitsDecimal:
-		bytesPrinter = func(size int64) (float64, string) {
-			return diskusage.Decimal(size).Standardize()
-		}
+		env.BytesPrinter = cli.DecimalBytes
 	case unitsBinary:
-		bytesPrinter = func(size int64) (float64, string) {
-			return diskusage.Binary(size).Standardize()
-		}
+		env.BytesPrinter = cli.BinaryBytes
 	}
 	for _, profile := range globalFlags.ExitProfile.Profiles {
 		if !profiling.IsPredefined(profile.Name) {
@@ -232,10 +232,11 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 	}()
 
 	cfg, loc, err := iduconfig.Load(ctx, &globalFlags.Config)
-	globalConfig = cfg
+	env.Config = cfg
+	env.FS = globalFlags.FS
 	ctx = cmdutil.ContextWithValue(ctx, cfg)
 	ctx = cmdutil.ContextWithValue(ctx, loc)
-	ctx = cmdutil.ContextWithValue(ctx, configLoadError{err: err})
+	ctx = cli.WithConfigLoadError(ctx, err)
 
 	var ln net.Listener
 	if port := globalFlags.HTTP; len(port) > 0 {
@@ -253,25 +254,5 @@ func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error)
 }
 
 func main() {
-	cli().MustDispatch(context.Background())
-}
-
-var printer = message.NewPrinter(language.English)
-
-func fmtSize(size int64) string {
-	f, u := bytesPrinter(size)
-	return printer.Sprintf("% 8.3f %s", f, u)
-}
-
-func fmtCount(count int64) string {
-	return printer.Sprintf("% 11v", count)
-}
-
-func banner(out io.Writer, ul string, format string, args ...any) {
-	buf := strings.Builder{}
-	o := fmt.Sprintf(format, args...)
-	buf.WriteString(o)
-	buf.WriteString(strings.Repeat(ul, len(o)))
-	buf.WriteRune('\n')
-	out.Write([]byte(buf.String())) //nolint:errcheck
+	newCommandSet().MustDispatch(context.Background())
 }

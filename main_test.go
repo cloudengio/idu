@@ -85,7 +85,7 @@ func TestHelp(t *testing.T) {
 	out, _ = runIDU("help", "analyze") // will return exit status 1 for help.
 
 	err = containsAnyOf(out, "Usage of command \"analyze\": analyze the file system to build a database of directory and file metadata.",
-		"analyze [--force=false --progress=true --refresh-topn=false --show-defaults=false --slow-scan-duration=10s] [<prefix>]")
+		"analyze [--force=false --fs= --progress=true --refresh-topn=false --show-defaults=false --slow-scan-duration=10s] [<prefix>]")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -483,4 +483,78 @@ func assertLogsRange(t *testing.T, env []string) {
 	if out, err := runIDUEnv(env, "--fs=mytree", "logs", "--range=2026-11-05..2026-11-01"); err == nil {
 		t.Errorf("expected an error for an invalid range, got %q", out)
 	}
+}
+
+// TestPerCommandFS verifies that every command that operates on a
+// configured filesystem accepts --fs, which overrides the global --fs.
+func TestPerCommandFS(t *testing.T) {
+	cfgFile, trees := writePerCommandFSConfig(t)
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := runIDU(append([]string{"--config=" + cfgFile}, args...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	runErr := func(args ...string) string {
+		t.Helper()
+		out, err := runIDU(append([]string{"--config=" + cfgFile}, args...)...)
+		if err == nil {
+			t.Fatalf("%v: expected an error: %s", args, out)
+		}
+		return out
+	}
+	expect := func(out string, want, notWant string) {
+		t.Helper()
+		if !strings.Contains(out, want) || (notWant != "" && strings.Contains(out, notWant)) {
+			t.Errorf("want %q but not %q: %s", want, notWant, out)
+		}
+	}
+
+	// Without --fs the filesystem is ambiguous.
+	expect(runErr("database", "locate"), "--fs", "")
+	expect(run("database", "locate", "--fs=fb"), "db-fb", "")
+	// The command's --fs overrides the global one.
+	expect(run("--fs=fa", "database", "locate", "--fs=fb"), "db-fb", "")
+	expect(run("--fs=fa", "database", "locate"), "db-fa", "")
+
+	run("analyze", "--fs=fb", "--progress=false")
+	expect(run("find", "--fs=fb", trees["fb"]), "file-fb", "file-fa")
+	// fa has not been analyzed.
+	runErr("find", "--fs=fa", trees["fa"])
+	expect(run("logs", "--fs=fb", "--json=false"), "analyze", "")
+	run("errors", "--fs=fb")
+	run("errors", "--fs=fb", "--erase")
+	run("stats", "compute", "--fs=fb", trees["fb"])
+	expect(run("stats", "view", "--fs=fb"), "sub-fb", "")
+	expect(run("stats", "suggest", "--fs=fb"), "tree-fb", "")
+	run("logs", "--fs=fb", "--erase")
+}
+
+// writePerCommandFSConfig writes a configuration for two filesystems, fa
+// and fb, and returns its filename and the root of each.
+func writePerCommandFSConfig(t *testing.T) (string, map[string]string) {
+	t.Helper()
+	tmp := t.TempDir()
+	trees := map[string]string{}
+	var cfg strings.Builder
+	cfg.WriteString("filesystems:\n")
+	for _, name := range []string{"fa", "fb"} {
+		root := filepath.Join(tmp, "tree-"+name)
+		if err := os.MkdirAll(filepath.Join(root, "sub-"+name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "sub-"+name, "file-"+name), []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		trees[name] = root
+		fmt.Fprintf(&cfg, "  - name: %s\n    root: %s\n    database: %s\n    stats_dir: %s\n",
+			name, root, filepath.Join(tmp, "db-"+name), filepath.Join(tmp, "stats-"+name))
+	}
+	cfgFile := filepath.Join(tmp, "config.yaml")
+	if err := os.WriteFile(cfgFile, []byte(cfg.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return cfgFile, trees
 }

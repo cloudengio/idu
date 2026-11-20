@@ -60,7 +60,7 @@ type Settings struct {
 	ConcurrentStatsThreshold int                `yaml:"concurrent_stats_threshold" doc:"minimum number of files before stats are performed concurrently"`
 	SetMaxThreads            int                `yaml:"set_max_threads" doc:"if non-zero used for debug.SetMaxThreads"`
 	ScanSize                 int                `yaml:"scan_size" doc:"maximum number of items to fetch from the filesystem in a single operation"`
-	Exclusions               cmdyaml.RegexpList `yaml:"exclusions" doc:"prefixes and files matching these regular expressions will be ignored when building a database"`
+	Exclusions               cmdyaml.RegexpList `yaml:"exclusions" doc:"prefixes and files matching these regular expressions will be ignored when building a database. The database directory itself and pseudo filesystems such as /dev (and /proc and /sys on linux) are always ignored."`
 	Restat                   cmdyaml.RegexpList `yaml:"restat" doc:"files whose full paths match these regular expressions are re-stat'ed by analyze even when their directory is unchanged, so that changes to files that are modified in place, such as logs and databases, are detected; analyze otherwise reuses the stored metadata for all of the files in an unchanged directory"`
 	CountHardlinkAsFiles     bool               `yaml:"count_hardlinks_as_files" doc:"if true, hardlinks will be counted as separate files"`
 	HardlinkDedup            HardlinkDedup      `yaml:"hardlink_dedup" doc:"the strategy used to deduplicate hardlinks when count_hardlinks_as_files is false (summaries, summaries-all, rescan), defaults to summaries, see Hardlink deduplication strategies below"`
