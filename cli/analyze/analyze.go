@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -53,6 +54,7 @@ type Commands struct {
 	env         *cli.Env
 	newProgress NewProgress
 	snapshot    SnapshotFunc
+	out         io.Writer
 	// openDB may be overridden by tests.
 	openDB func(context.Context, *iduconfig.Settings) (*idudb.DB, error)
 	// beforeClose, if set, is called by tests immediately before the
@@ -82,6 +84,22 @@ func WithSnapshot(fn SnapshotFunc) Option {
 	return func(c *Commands) {
 		c.snapshot = fn
 	}
+}
+
+// WithOutput sets the writer for the messages, other than progress, that
+// are displayed during an analysis, eg. its configuration, it defaults to
+// os.Stdout.
+func WithOutput(w io.Writer) Option {
+	return func(c *Commands) {
+		c.out = w
+	}
+}
+
+func (alz *Commands) output() io.Writer {
+	if alz.out == nil {
+		return os.Stdout
+	}
+	return alz.out
 }
 
 // New returns the Commands that use env.
@@ -157,7 +175,7 @@ func (alz *Commands) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *Flags,
 		select {
 		case <-sigCh:
 			cancel()
-			fmt.Printf("interrupted, waiting for all filesystem operations to finish\n")
+			fmt.Fprintf(alz.output(), "interrupted, waiting for all filesystem operations to finish\n")
 		case <-sigDone:
 		}
 	}()
@@ -174,7 +192,7 @@ func (alz *Commands) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *Flags,
 	analyzer := idudb.NewAnalyzer(db, root.Root, opts...)
 
 	c := analyzer.Configuration()
-	fmt.Printf("configuration: scan size %v, concurrent scans %v, concurrent stats %v, concurrent stats threshold %v\n", c.ScanSize, c.ConcurrentScans, c.ConcurrentStats, c.ConcurrentStatsThreshold)
+	fmt.Fprintf(alz.output(), "configuration: scan size %v, concurrent scans %v, concurrent stats %v, concurrent stats threshold %v\n", c.ScanSize, c.ConcurrentScans, c.ConcurrentStats, c.ConcurrentStatsThreshold)
 
 	errs := errors.M{}
 	errs.Append(analyzer.Analyze(ctx, target))
@@ -188,7 +206,7 @@ func (alz *Commands) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *Flags,
 	}
 	errs.Append(summarizeAndLog(ctx, db, pt, start))
 	dbClosed = true
-	reportDatabaseSize(ctx, env, cfg.Database)
+	reportDatabaseSize(ctx, alz.output(), env, cfg.Database)
 	if af.Snapshot && errs.Err() == nil {
 		errs.Append(alz.takeSnapshot(ctx, f))
 	}
@@ -236,19 +254,19 @@ func (alz *Commands) takeSnapshot(ctx context.Context, f iduconfig.Filesystem) e
 	if err != nil {
 		return fmt.Errorf("failed to write snapshot: %w", err)
 	}
-	fmt.Printf("snapshot: %v\n", path)
+	fmt.Fprintf(alz.output(), "snapshot: %v\n", path)
 	return nil
 }
 
 // reportDatabaseSize reports the size of the database, which is excluded from
 // the analysis itself, once it has been closed.
-func reportDatabaseSize(ctx context.Context, env *cli.Env, dir string) {
+func reportDatabaseSize(ctx context.Context, out io.Writer, env *cli.Env, dir string) {
 	size, err := idudb.DatabaseSize(dir)
 	if err != nil {
 		ctxlog.Error(ctx, "failed to determine the database size", "database", dir, "error", err)
 		return
 	}
-	fmt.Printf("database: %v: %v\n", dir, strings.TrimSpace(env.FmtSize(size)))
+	fmt.Fprintf(out, "database: %v: %v\n", dir, strings.TrimSpace(env.FmtSize(size)))
 	ctxlog.Info(ctx, "database size", "database", dir, "bytes", size)
 }
 

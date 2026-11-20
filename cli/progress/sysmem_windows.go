@@ -4,11 +4,15 @@
 
 //go:build windows
 
-package main
+package progress
 
 type sysMemstats struct{}
 
 func (s *sysMemstats) update() {
+}
+
+func (s *sysMemstats) maxRSSBytes() int64 {
+	return -1
 }
 
 func (s *sysMemstats) MaxRSSGiB() float64 {

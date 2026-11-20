@@ -2,7 +2,10 @@
 // Use of this source code is governed by the Apache-2.0
 // license that can be found in the LICENSE file.
 
-package main
+// Package progress provides the text based display of the progress of an
+// analysis used by the analyze command, see NewAnalyze, and the memory
+// statistics, see ReadMemory, also displayed by the tui.
+package progress
 
 import (
 	"context"
@@ -81,8 +84,11 @@ func (pt progressStats) meanStatLatency() int64 {
 	return 0
 }
 
-// newAnalyzeProgress implements analyze.NewProgress.
-func newAnalyzeProgress(ctx context.Context, display bool) analyze.Progress {
+// NewAnalyze implements analyze.NewProgress. If display is true the
+// progress is displayed on a single line, rewritten once a second, on an
+// interactive terminal and on a new line every 30 seconds otherwise. A
+// summary is displayed, and logged, by Report.
+func NewAnalyze(ctx context.Context, display bool) analyze.Progress {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	return newProgressTracker(ctx, time.Second, display, true, &wg)

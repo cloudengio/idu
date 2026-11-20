@@ -295,3 +295,48 @@ func TestStale(t *testing.T) {
 		t.Errorf("Get: got %v, want ErrStaleSummaries", err)
 	}
 }
+
+func TestCheckCompatible(t *testing.T) {
+	ctx := context.Background()
+	root, cfg := createTree(t, true)
+	// The summaries for rescan do not record any hardlink information and
+	// hence cannot be used for exact totals, but can be used.
+	cfg.HardlinkDedup = iduconfig.HardlinkDedupRescan
+	analyze(ctx, t, root, cfg)
+	sr, err := summary.Open(ctx, cfg, withBadger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sr.Close(ctx)
+	if err := sr.Check(ctx); !errors.Is(err, idudb.ErrStaleSummaries) {
+		t.Errorf("Check: got %v, want ErrStaleSummaries", err)
+	}
+	if err := sr.CheckCompatible(ctx); err != nil {
+		t.Errorf("CheckCompatible: %v", err)
+	}
+	// Their summaries can be read, without deduplicating hardlinks.
+	if _, ok, err := sr.Get(ctx, root); !ok || err != nil {
+		t.Errorf("Get: %v %v", ok, err)
+	}
+	// They are usable, but cannot deduplicate hardlinks, when the default
+	// strategy is configured.
+	linked := *cfg
+	linked.HardlinkDedup = iduconfig.HardlinkDedupSummaries
+	lsr := summary.New(sr.DB(), &linked)
+	if err := lsr.Check(ctx); !errors.Is(err, idudb.ErrStaleSummaries) {
+		t.Errorf("Check: got %v, want ErrStaleSummaries", err)
+	}
+	if err := lsr.CheckCompatible(ctx); err != nil {
+		t.Errorf("CheckCompatible: %v", err)
+	}
+	// A different calculator is not compatible.
+	block, err := iduconfig.ParseConfig([]byte("filesystems:\n  - root: " + root +
+		"\n    database: " + cfg.Database +
+		"\n    layout:\n      calculator: block\n      parameters:\n        size: 4KiB\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := summary.New(sr.DB(), block.Filesystems[0].Config()).CheckCompatible(ctx); !errors.Is(err, idudb.ErrStaleSummaries) {
+		t.Errorf("CheckCompatible: got %v, want ErrStaleSummaries", err)
+	}
+}

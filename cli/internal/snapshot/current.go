@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	"cloudeng.io/cmd/idu/iduconfig"
@@ -54,6 +53,12 @@ func (c Computer) Current(ctx context.Context, env *cli.Env, f iduconfig.Filesys
 		return File{}, "", fmt.Errorf("failed to open database for %v in %v: %w", iduconfig.Label(f), cfg.Database, err)
 	}
 	defer db.Close(ctx)
+	return c.CurrentFrom(ctx, db, f, dir, n)
+}
+
+// CurrentFrom is like Current but uses db, the open database for f.
+func (c Computer) CurrentFrom(ctx context.Context, db idudb.Reader, f iduconfig.Filesystem, dir string, n int) (File, string, error) {
+	cfg := f.Config()
 	if dir != "" {
 		if updated, ok := lastUpdate(ctx, db); ok {
 			sf, path, ok, err := NewStore(dir).FreshFor(cfg.SeparatorOrDefault(), f.Location(), updated, c.Satisfies)
@@ -66,7 +71,7 @@ func (c Computer) Current(ctx context.Context, env *cli.Env, f iduconfig.Filesys
 		}
 	}
 	if reason, ok := c.needsFullPass(); ok {
-		fmt.Fprintf(os.Stderr, "computing stats from the summaries: %v\n", reason)
+		c.logf("computing stats from the summaries: %v\n", reason)
 	} else {
 		sf, err := c.fromStored(ctx, db, f, n)
 		if err == nil {
@@ -75,7 +80,7 @@ func (c Computer) Current(ctx context.Context, env *cli.Env, f iduconfig.Filesys
 		if !errors.Is(err, ErrStoredUnusable) {
 			return File{}, "", err
 		}
-		fmt.Fprintf(os.Stderr, "computing stats from the summaries: %v\n", err)
+		c.logf("computing stats from the summaries: %v\n", err)
 	}
 	sf, err := c.fullPass(ctx, db, f, max(n, DefaultN))
 	if err != nil || dir == "" {
@@ -103,7 +108,7 @@ func (c Computer) Take(ctx context.Context, env *cli.Env, f iduconfig.Filesystem
 		if !errors.Is(err, ErrStoredUnusable) {
 			return "", err
 		}
-		fmt.Fprintf(os.Stderr, "computing the snapshot from the summaries: %v\n", err)
+		c.logf("computing the snapshot from the summaries: %v\n", err)
 		if sf, err = c.fullPass(ctx, db, f, max(n, DefaultN)); err != nil {
 			return "", err
 		}

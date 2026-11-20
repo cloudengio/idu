@@ -76,6 +76,13 @@ type Computer struct {
 	Readers int
 	// Progress requests that progress be displayed.
 	Progress bool
+	// Log is where notes, eg. why a full pass is required, and errors in
+	// the metadata of individual prefixes are written, os.Stderr if nil.
+	Log io.Writer
+	// Lenient allows summaries that do not record the information needed
+	// to deduplicate hardlinks as configured, see summary.Reader.Check, to
+	// be used, in which case hardlinks may be counted more than once.
+	Lenient bool
 	// Hotspots and Hardlinks require that the stats returned by Current
 	// include the distributed subtree hotspots and the rankings by number
 	// of hardlinks respectively. Neither is included in the stats
@@ -118,6 +125,12 @@ filesystem f. They are, in order of preference:
 
 It returns the path of the snapshot used or saved, which is empty for stats
 constructed in memory or not saved.
+
+
+```go
+func (c Computer) CurrentFrom(ctx context.Context, db idudb.Reader, f iduconfig.Filesystem, dir string, n int) (File, string, error)
+```
+CurrentFrom is like Current but uses db, the open database for f.
 
 
 ```go

@@ -20,8 +20,10 @@ import (
 
 	"cloudeng.io/cmd/idu/cli/analyze"
 	"cloudeng.io/cmd/idu/cli/find"
+	"cloudeng.io/cmd/idu/cli/progress"
 	"cloudeng.io/cmd/idu/cli/reports"
 	"cloudeng.io/cmd/idu/cli/stats"
+	"cloudeng.io/cmd/idu/cli/tui"
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/internal/cli"
 	"cloudeng.io/cmdutil"
@@ -60,6 +62,11 @@ commands:
 
   - name: errors
     summary: list the errors stored in the database
+    arguments:
+      - '[<prefix>]'
+
+  - name: tui
+    summary: an interactive, terminal based, view of the filesystem specified by --fs that displays its prefixes as a tree together with the summary of, and the top-N rankings beneath, the highlighted prefix, and can run analyze, see tui-design.md. The optional prefix is highlighted initially.
     arguments:
       - '[<prefix>]'
 
@@ -173,7 +180,7 @@ func newCommandSet() *subcmd.CommandSetYAML {
 	cmdSet.Set("expression-syntax").MustRunner(squashErrors(expr.explain), &struct{}{})
 
 	st := stats.New(env)
-	alz := analyze.New(env, analyze.WithProgress(newAnalyzeProgress), analyze.WithSnapshot(st.Snapshot))
+	alz := analyze.New(env, analyze.WithProgress(progress.NewAnalyze), analyze.WithSnapshot(st.Snapshot))
 	cmdSet.Set("analyze").MustRunner(squashErrors(requireConfig(alz.Analyze)), &analyze.Flags{})
 	cmdSet.Set("errors").MustRunner(squashErrors(requireConfig(alz.Errors)), &analyze.ErrorFlags{})
 	cmdSet.Set("logs").MustRunner(squashErrors(requireConfig(alz.Logs)), &analyze.LogFlags{})
@@ -186,6 +193,9 @@ func newCommandSet() *subcmd.CommandSetYAML {
 	rpts := reports.New(env)
 	cmdSet.Set("reports", "generate").MustRunner(squashErrors(rpts.Generate), &reports.GenerateFlags{})
 	cmdSet.Set("reports", "locate").MustRunner(squashErrors(rpts.Locate), &reports.LocateFlags{})
+
+	ui := tui.New(env)
+	cmdSet.Set("tui").MustRunner(squashErrors(requireConfig(ui.TUI)), &tui.Flags{})
 
 	fnd := find.New(env)
 	cmdSet.Set("find").MustRunner(squashErrors(requireConfig(fnd.Find)), &find.Flags{})

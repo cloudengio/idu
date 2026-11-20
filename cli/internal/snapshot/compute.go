@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 
@@ -26,12 +27,35 @@ type Computer struct {
 	Readers int
 	// Progress requests that progress be displayed.
 	Progress bool
+	// Log is where notes, eg. why a full pass is required, and errors in
+	// the metadata of individual prefixes are written, os.Stderr if nil.
+	Log io.Writer
+	// Lenient allows summaries that do not record the information needed
+	// to deduplicate hardlinks as configured, see summary.Reader.Check, to
+	// be used, in which case hardlinks may be counted more than once.
+	Lenient bool
 	// Hotspots and Hardlinks require that the stats returned by Current
 	// include the distributed subtree hotspots and the rankings by number
 	// of hardlinks respectively. Neither is included in the stats
 	// constructed from the rankings maintained by analyze and hence either
 	// requires a full pass over the database.
 	Hotspots, Hardlinks bool
+}
+
+// check checks that the summaries can be used, see Lenient.
+func (c Computer) check(ctx context.Context, sr *summary.Reader) error {
+	if c.Lenient {
+		return sr.CheckCompatible(ctx)
+	}
+	return sr.Check(ctx)
+}
+
+func (c Computer) logf(format string, args ...any) {
+	w := c.Log
+	if w == nil {
+		w = os.Stderr
+	}
+	fmt.Fprintf(w, format, args...)
 }
 
 // needsFullPass returns a description of why a full pass over the
@@ -90,7 +114,7 @@ func (c Computer) Compute(ctx context.Context, db idudb.Reader, cfg *iduconfig.S
 		if !errors.Is(err, ErrStoredUnusable) {
 			return nil, "", 0, err
 		}
-		fmt.Fprintf(os.Stderr, "computing stats from the summaries: %v\n", err)
+		c.logf("computing stats from the summaries: %v\n", err)
 	}
 	sdb, err := c.FromSummaries(ctx, db, cfg, prefix, topN)
 	return sdb, FromSummariesSource, 0, err
@@ -110,7 +134,7 @@ func IsFilesystemRoot(cfg *iduconfig.Settings, root, target string) bool {
 // FromSummaries computes stats for prefix from the precomputed summaries.
 func (c Computer) FromSummaries(ctx context.Context, db idudb.Reader, cfg *iduconfig.Settings, prefix string, topN int) (*report.AllStats, error) {
 	sr := summary.New(db, cfg)
-	if err := sr.Check(ctx); err != nil {
+	if err := c.check(ctx, sr); err != nil {
 		return nil, err
 	}
 	sdb := report.NewAllStats(prefix, topN)
@@ -164,10 +188,10 @@ func (c Computer) FromPrefixes(ctx context.Context, db idudb.Reader, cfg *iducon
 		n++
 		switch {
 		case e.missing:
-			fmt.Fprintf(os.Stderr, "missing metadata for %v\n", e.prefix)
+			c.logf("missing metadata for %v\n", e.prefix)
 			return
 		case e.decodeErr != nil:
-			fmt.Fprintf(os.Stderr, "failed to unmarshal value: %v\n", e.decodeErr)
+			c.logf("failed to unmarshal value: %v\n", e.decodeErr)
 			return
 		}
 		if !e.pi.Match(match) {

@@ -56,6 +56,10 @@ func New(db idudb.Reader, cfg *iduconfig.Settings) *Reader {
 	if cfg == nil {
 		return &Reader{db: db, err: errors.New("summary: nil settings configuration")}
 	}
+	// Exact totals require the summaries to record the information needed
+	// to deduplicate hardlinks, unless they are counted as files, whatever
+	// the configured strategy; with rescan they do not, and hence only the
+	// file metadata can be used for exact totals.
 	rec := stats.RecordNoFiles
 	if !cfg.CountHardlinkAsFiles {
 		rec = stats.RecordLinkedFiles
@@ -109,11 +113,28 @@ func (r *Reader) Check(ctx context.Context) error {
 	return idudb.CheckSummaryRecording(ctx, r.db, r.calcID, r.rec)
 }
 
+// CheckCompatible returns an error, which wraps idudb.ErrStaleSummaries, if
+// the summaries are incomplete or were computed with a different
+// calculator or format, ie. if they cannot be used at all. Unlike Check it
+// does not require that they record the information needed to
+// deduplicate hardlinks as configured, which is only needed for exact
+// totals when there are hardlinks; summaries that pass CheckCompatible but
+// not Check may count hardlinks more than once.
+func (r *Reader) CheckCompatible(ctx context.Context) error {
+	if r.err != nil {
+		return r.err
+	}
+	return idudb.CheckSummaryRecording(ctx, r.db, r.calcID, stats.RecordNoFiles)
+}
+
 func (r *Reader) decode(path string, val []byte, ps *stats.PrefixSummary) error {
 	if err := ps.UnmarshalBinary(val); err != nil {
 		return fmt.Errorf("%v: %w", path, err)
 	}
-	if ps.CalcID != r.calcID || r.dedup && !ps.HardlinkInfo {
+	// A summary that does not record the information needed to
+	// deduplicate hardlinks is still usable, its hardlinks are just not
+	// deduplicated; callers that require exact totals use Check.
+	if ps.CalcID != r.calcID {
 		return fmt.Errorf("%v: %w", path, idudb.ErrStaleSummaries)
 	}
 	return nil
