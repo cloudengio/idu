@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"cloudeng.io/cmd/idu/cli/analyze"
+	"cloudeng.io/cmd/idu/cli/progress"
 	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/internal/cli"
 	"github.com/gdamore/tcell/v2"
@@ -79,6 +80,7 @@ type analyzeScreen struct {
 	stats       *rate
 	outstanding *tvxwidgets.BarChart
 	events      *tvxwidgets.BarChart
+	heap        *tvxwidgets.Sparkline
 	output      *tview.TextView
 
 	mu       sync.Mutex
@@ -124,6 +126,9 @@ func newAnalyzeScreen(u *ui) *analyzeScreen {
 	a.events.AddBar(barRestated, 0, tcell.ColorAqua)
 	a.events.AddBar(barSlow, 0, tcell.ColorOrange)
 	a.events.AddBar(barErrors, 0, tcell.ColorRed)
+	a.heap = tvxwidgets.NewSparkline()
+	a.heap.SetBorder(true).SetTitle(" Heap in use ")
+	a.heap.SetLineColor(tcell.ColorBlue)
 	a.output = tview.NewTextView().SetDynamicColors(false).SetScrollable(true)
 	a.output.SetBorder(true).SetTitle(" Output ")
 	// The changed function is called by whichever goroutine writes to the
@@ -139,9 +144,10 @@ func newAnalyzeScreen(u *ui) *analyzeScreen {
 		AddItem(a.stats.layout, 0, 1, false)
 	charts := tview.NewFlex().
 		AddItem(a.outstanding, 0, 1, false).
-		AddItem(a.events, 0, 2, false)
+		AddItem(a.events, 0, 2, false).
+		AddItem(a.heap, 0, 1, false)
 	a.layout = tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(a.info, 9, 0, false).
+		AddItem(a.info, 10, 0, false).
 		AddItem(a.progress, 3, 0, false).
 		AddItem(rates, 0, 3, false).
 		AddItem(charts, 0, 2, false).
@@ -151,13 +157,6 @@ func newAnalyzeScreen(u *ui) *analyzeScreen {
 
 func (a *analyzeScreen) input(ev *tcell.EventKey) *tcell.EventKey {
 	switch ev.Key() {
-	case tcell.KeyUp:
-		// Up at the top of the output selects the menu bar.
-		if row, _ := a.output.GetScrollOffset(); row > 0 {
-			return ev
-		}
-		a.u.menu.Activate()
-		return nil
 	case tcell.KeyEscape:
 		if a.cancelAnalysis() {
 			a.u.setStatus("canceling the analysis, waiting for all filesystem operations to finish")
@@ -203,6 +202,10 @@ type sample struct {
 	// The rates, their peaks and histories for prefixes, files and stats.
 	rates, peaks [3]float64
 	history      [3][]float64
+	// memory is the memory used by the process, and heapHistory the
+	// history of the heap in use.
+	memory      progress.Memory
+	heapHistory []float64
 }
 
 // render displays s. It must be called on the tui's goroutine.
@@ -220,6 +223,8 @@ func (a *analyzeScreen) render(s sample, kind string) {
 	for i, r := range []*rate{a.prefixes, a.files, a.stats} {
 		r.update(s.history[i], s.rates[i], s.peaks[i])
 	}
+	a.heap.SetData(s.heapHistory)
+	a.heap.SetDataTitle(fmt.Sprintf("%v, peak RSS %v", gib(float64(s.memory.HeapBytes)), rssText(s.memory)))
 	setBars(a.outstanding, map[string]int64{
 		barPrefixes:  s.PrefixesStarted - s.PrefixesFinished,
 		barStats:     s.statsStarted - s.FSStats,
@@ -232,6 +237,24 @@ func (a *analyzeScreen) render(s sample, kind string) {
 		barSlow:      s.SlowScans,
 		barErrors:    s.Errors,
 	})
+}
+
+func rssText(m progress.Memory) string {
+	if m.MaxRSSBytes < 0 {
+		return "unknown"
+	}
+	return gib(float64(m.MaxRSSBytes))
+}
+
+// gib formats a number of bytes in GiB.
+func gib(v float64) string {
+	return fmt.Sprintf("%.3f GiB", v/(1<<30))
+}
+
+// formatMemory describes the memory used by the process.
+func formatMemory(m progress.Memory) string {
+	return fmt.Sprintf("%-10s heap %v, total %v, peak RSS %v, goroutines %v, GC cycles %v",
+		"memory", gib(float64(m.HeapBytes)), gib(float64(m.TotalBytes)), rssText(m), count(int64(m.Goroutines)), count(int64(m.GCCycles)))
 }
 
 func formatSample(s sample, prev previousTotals, kind string) string {
@@ -255,6 +278,7 @@ func formatSample(s sample, prev previousTotals, kind string) string {
 	if prev.known && !prev.when.IsZero() {
 		when = prev.when.Format(time.DateTime)
 	}
+	fmt.Fprintf(&b, "%v\n", formatMemory(s.memory))
 	fmt.Fprintf(&b, "[::d]previous analysis: %v; errors %v, deleted %v, unchanged %v, restated %v (%v changed)[::-]",
 		when, count(s.Errors), count(s.PrefixesDeleted), count(s.ParentUnchanged), count(s.FilesRestated), count(s.FilesRestatedChanged))
 	return b.String()
@@ -404,6 +428,7 @@ type tuiProgress struct {
 	last    sample
 	history [3][]float64
 	peaks   [3]float64
+	heap    []float64
 }
 
 func newTUIProgress(u *ui, kind string) *tuiProgress {
@@ -482,6 +507,12 @@ func (p *tuiProgress) sampleLocked(done bool) sample {
 		s.history[i] = append([]float64(nil), p.history[i]...)
 	}
 	s.peaks = p.peaks
+	s.memory = progress.ReadMemory()
+	p.heap = append(p.heap, float64(s.memory.HeapBytes))
+	if n := len(p.heap); n > historyLength {
+		p.heap = p.heap[n-historyLength:]
+	}
+	s.heapHistory = append([]float64(nil), p.heap...)
 	p.last = s
 	return s
 }

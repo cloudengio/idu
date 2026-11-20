@@ -517,6 +517,15 @@ func (v *viewScreen) input(ev *tcell.EventKey) *tcell.EventKey {
 		}
 		v.cycleFocus(-1)
 		return nil
+	case tcell.KeyHome:
+		if v.u.app.GetFocus() != v.tree {
+			return ev
+		}
+		// The tree's own handling of home only scrolls to the top, this
+		// also highlights the root, the tree's change func is called once
+		// it has been drawn.
+		v.tree.SetCurrentNode(v.tree.GetRoot())
+		return nil
 	case tcell.KeyUp:
 		if ctrl {
 			v.resize(1)
@@ -534,33 +543,22 @@ func (v *viewScreen) input(ev *tcell.EventKey) *tcell.EventKey {
 	return ev
 }
 
-// up moves the focus to whatever is above the focused primitive if it is
-// at its top: the top-N table's tab bar, and otherwise the menu bar.
+// up moves the focus from the top row of the top-N table to its tab bar.
+// Otherwise up stays within the focused pane: it never moves the focus to
+// the menu bar, which is selected with / or m.
 func (v *viewScreen) up(ev *tcell.EventKey) *tcell.EventKey {
-	focus := v.u.app.GetFocus()
 	switch {
 	case v.tabs.IsActive():
-		v.u.menu.Activate()
-	case focus == v.tree:
-		if v.tree.GetCurrentNode() != v.tree.GetRoot() {
-			return ev
-		}
-		v.u.menu.Activate()
-	case focus == v.summary:
-		if row, _ := v.summary.GetScrollOffset(); row > 0 {
-			return ev
-		}
-		v.u.menu.Activate()
-	case focus == v.tables[v.tabs.Current()]:
+		return nil
+	case v.u.app.GetFocus() == v.tables[v.tabs.Current()]:
 		// Row 0 is the table's header, which cannot be selected.
 		if row, _ := v.tables[v.tabs.Current()].GetSelection(); row > 1 {
 			return ev
 		}
 		v.tabs.Activate()
-	default:
-		return ev
+		return nil
 	}
-	return nil
+	return ev
 }
 
 func (v *viewScreen) runeInput(ev *tcell.EventKey) *tcell.EventKey {
@@ -577,6 +575,9 @@ func (v *viewScreen) runeInput(ev *tcell.EventKey) *tcell.EventKey {
 		v.toggleMaximized()
 	case 'r':
 		v.u.refresh()
+	case 'e':
+		v.u.showErrors()
+		return nil
 	default:
 		return ev
 	}

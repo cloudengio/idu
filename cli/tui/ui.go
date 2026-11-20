@@ -59,10 +59,16 @@ type ui struct {
 	status  *tview.TextView
 	view    *viewScreen
 	analyze *analyzeScreen
+	errors  *errorsScreen
 
 	// statuses are the messages to be displayed in the status line, see
 	// setStatus.
 	statuses chan string
+	// waitModal is the dialog displayed while waiting for a database to
+	// open, and waitFocus the primitive that had the focus before it was
+	// displayed; both are only accessed on the tui's goroutine.
+	waitModal *tview.Modal
+	waitFocus tview.Primitive
 
 	mu  sync.Mutex
 	src *sourceHandle
@@ -99,20 +105,21 @@ func (h *sourceHandle) close(ctx context.Context) {
 
 func newUI(ctx context.Context, cfg uiConfig) *ui {
 	ctx, cancel := context.WithCancel(ctx)
-	// Messages written while waiting for the database to open would
-	// otherwise be written to the terminal.
-	env := *cfg.env
-	cfg.env = &env
 	u := &ui{ctx: ctx, cancel: cancel, cfg: cfg, app: tview.NewApplication().SetScreen(cfg.screen).EnableMouse(true), statuses: make(chan string, 100)}
-	env.OpenProgress = statusWriter{u}
+	// Messages written while waiting for a database to open, both by the
+	// tui and by the analyses that it runs, which share cfg.env, are
+	// displayed in a dialog rather than written to the terminal.
+	cfg.env.OpenProgress = openWaitWriter{u}
 	u.pages = tview.NewPages()
 	u.body = tview.NewPages()
 	u.status = tview.NewTextView().SetDynamicColors(true).SetWrap(false)
 	u.menu = widgets.NewMenuBar(u.app, u.pages)
 	u.view = newViewScreen(u)
 	u.analyze = newAnalyzeScreen(u)
+	u.errors = newErrorsScreen(u)
 	u.body.AddPage(viewPage, u.view.layout, true, true)
 	u.body.AddPage(analyzePage, u.analyze.layout, true, false)
+	u.body.AddPage(errorsPage, u.errors.layout, true, false)
 	u.setupMenu()
 	main := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(u.menu, 1, 0, false).
@@ -129,6 +136,7 @@ func (u *ui) setupMenu() {
 		{Label: "Home", Action: func() { u.showView(); u.view.home() }},
 		{Label: "Refresh", Action: u.refresh},
 		{Label: "Hotspots", Action: func() { u.showView(); u.view.tabs.Select(hotspotsTab) }},
+		{Label: "Errors", Action: u.showErrors},
 	}
 	u.menu.AddMenu("View", view...).AddAction("Analyze", func() { u.startAnalyze(false) }).AddAction("Quit", u.quit).
 		SetRight(fmt.Sprintf("idu: %v   [::d]/ m: menu  ←/→ tab: panes  [ ]: tabs  +/-/z: resize  q: quit", tview.Escape(iduconfig.Label(u.cfg.fs))))
@@ -244,6 +252,7 @@ func (u *ui) openSource() error {
 
 func (u *ui) openSourceWithWarning(showWarning bool) error {
 	src, err := u.cfg.openSource(u.ctx, u.cfg.env, u.cfg.fs, statusWriter{u})
+	u.queueUpdateDraw(u.closeWaitDialog)
 	if err != nil {
 		return err
 	}
@@ -387,6 +396,13 @@ func (u *ui) isAnalyzing() bool {
 	return u.analyzing
 }
 
+// showErrors displays the errors recorded for the prefix highlighted in
+// the tree and everything beneath it. It must be called on the tui's
+// goroutine.
+func (u *ui) showErrors() {
+	u.errors.show(u.view.currentPath())
+}
+
 func (u *ui) showView() {
 	u.body.SwitchToPage(viewPage)
 	u.app.SetFocus(u.view.tree)
@@ -435,6 +451,66 @@ func (u *ui) displayStatuses() {
 	}
 }
 
+// waitPage is the name of the page used to display the dialog displayed
+// while waiting for a database to open.
+const waitPage = "wait"
+
+// openWaitWriter displays the messages written, once a second, while
+// waiting for a database to open, eg. because another process has it
+// locked, in a dialog, which is closed once the database has opened, ie.
+// when an empty line is written. It must not be written to from the tui's
+// goroutine.
+type openWaitWriter struct{ u *ui }
+
+func (w openWaitWriter) Write(p []byte) (int, error) {
+	msg := strings.TrimSpace(string(p))
+	w.u.queueUpdateDraw(func() {
+		if msg == "" {
+			w.u.closeWaitDialog()
+			return
+		}
+		w.u.showWaitDialog(msg)
+	})
+	return len(p), nil
+}
+
+// showWaitDialog displays, or updates, the dialog displayed while waiting
+// for a database to open. It must be called on the tui's goroutine.
+func (u *ui) showWaitDialog(msg string) {
+	text := "The database is locked by another process, eg. an analysis, waiting for it to open:\n\n" + msg
+	if u.waitModal != nil {
+		u.waitModal.SetText(text)
+		return
+	}
+	u.waitFocus = u.app.GetFocus()
+	u.waitModal = tview.NewModal().SetText(text).AddButtons([]string{"Quit"}).
+		SetDoneFunc(func(int, string) { u.stop() })
+	u.waitModal.SetBorderColor(tcell.ColorYellow).SetTitle(" Waiting ")
+	u.pages.AddPage(waitPage, u.waitModal, true, true)
+	u.app.SetFocus(u.waitModal)
+}
+
+// closeWaitDialog closes the dialog displayed while waiting for a
+// database to open, if it is displayed. It must be called on the tui's
+// goroutine.
+func (u *ui) closeWaitDialog() {
+	if u.waitModal == nil {
+		return
+	}
+	u.pages.RemovePage(waitPage)
+	u.waitModal = nil
+	if u.waitFocus != nil {
+		u.app.SetFocus(u.waitFocus)
+		u.waitFocus = nil
+	}
+}
+
+// waiting returns true if the dialog displayed while waiting for a
+// database to open is displayed. It must be called on the tui's goroutine.
+func (u *ui) waiting() bool {
+	return u.waitModal != nil
+}
+
 // statusWriter displays whatever is written to it in the status line.
 type statusWriter struct{ u *ui }
 
@@ -448,7 +524,7 @@ func trimNewline(s string) string {
 }
 
 func (u *ui) input(ev *tcell.EventKey) *tcell.EventKey {
-	if u.dialogOpen() || u.menu.IsOpen() || u.app.GetFocus() == u.menu {
+	if u.waiting() || u.dialogOpen() || u.menu.IsOpen() || u.app.GetFocus() == u.menu {
 		if ev.Key() == tcell.KeyCtrlC {
 			u.quit()
 			return nil
@@ -467,8 +543,11 @@ func (u *ui) input(ev *tcell.EventKey) *tcell.EventKey {
 			return nil
 		}
 	}
-	if name, _ := u.body.GetFrontPage(); name == viewPage {
+	switch name, _ := u.body.GetFrontPage(); name {
+	case viewPage:
 		return u.view.input(ev)
+	case errorsPage:
+		return u.errors.input(ev)
 	}
 	return u.analyze.input(ev)
 }
@@ -479,11 +558,11 @@ func (u *ui) runeInput(ev *tcell.EventKey) bool {
 	switch {
 	case ev.Rune() == 'q':
 		u.quit()
-	case ev.Rune() == '/', ev.Rune() == 'm' && ev.Modifiers()&tcell.ModAlt != 0:
+	case ev.Rune() == 'm' && ev.Modifiers()&tcell.ModAlt != 0:
 		u.menu.Activate()
-	case ev.Rune() == 'm':
-		// In the top-N pane m selects its tabs, and in the tab bar the
-		// main menu.
+	case ev.Rune() == '/', ev.Rune() == 'm':
+		// In the top-N pane / and m select its tab bar, and in the tab bar
+		// the main menu.
 		if name, _ := u.body.GetFrontPage(); name == viewPage && u.view.inBottomPane() && !u.view.tabs.IsActive() {
 			u.view.tabs.Activate()
 		} else {

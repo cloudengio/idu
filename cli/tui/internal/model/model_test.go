@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -236,5 +237,43 @@ func TestLenient(t *testing.T) {
 	cancel()
 	if _, err := src2.Children(cctx, root); !errors.Is(err, context.Canceled) {
 		t.Errorf("Children with canceled ctx: got %v, want %v", err, context.Canceled)
+	}
+}
+
+func TestErrors(t *testing.T) {
+	if os.Geteuid() == 0 || runtime.GOOS == "windows" {
+		t.Skip("permissions cannot make a directory unreadable")
+	}
+	ctx, env, f, root := setup(t)
+	locked := filepath.Join(root, "b", "locked")
+	if err := os.Mkdir(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
+	analyzeFS(ctx, t, env, root)
+	src, err := model.Open(ctx, env, f, "", io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close(ctx)
+	for _, path := range []string{root, filepath.Join(root, "b"), locked} {
+		checkLockedError(ctx, t, src, path, locked)
+	}
+	if errs, _, err := src.Errors(ctx, filepath.Join(root, "a"), 10); err != nil || len(errs) != 0 {
+		t.Errorf("got %v, %v", errs, err)
+	}
+	if errs, more, err := src.Errors(ctx, root, 0); err != nil || len(errs) != 0 || !more {
+		t.Errorf("got %v, %v, %v", errs, more, err)
+	}
+}
+
+func checkLockedError(ctx context.Context, t *testing.T, src *model.DB, path, locked string) {
+	t.Helper()
+	errs, more, err := src.Errors(ctx, path, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(errs) != 1 || more || errs[0].Path != locked || errs[0].Message == "" || errs[0].When.IsZero() {
+		t.Errorf("%v: got %+v, %v", path, errs, more)
 	}
 }

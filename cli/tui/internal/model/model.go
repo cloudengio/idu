@@ -22,6 +22,7 @@ import (
 	"cloudeng.io/cmd/idu/cli/internal/snapshot"
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
+	"cloudeng.io/cmd/idu/internal"
 	"cloudeng.io/cmd/idu/internal/cli"
 	"cloudeng.io/cmd/idu/report"
 	"cloudeng.io/cmd/idu/stats"
@@ -134,6 +135,10 @@ type Source interface {
 	Summary(ctx context.Context, path string) (Summary, error)
 	// TopN returns the top n entries beneath path.
 	TopN(ctx context.Context, path string, n int) (TopN, error)
+	// Errors returns the errors recorded by the most recent analyses for
+	// path and the files and prefixes beneath it, in key order, up to
+	// limit of them, and whether there were more than limit.
+	Errors(ctx context.Context, path string, limit int) ([]ErrorEntry, bool, error)
 	// LastUpdate returns the time of the most recent analysis, if known.
 	LastUpdate(ctx context.Context) time.Time
 	// Warning returns a description of any limitations of the data, eg.
@@ -142,6 +147,14 @@ type Source interface {
 	Warning() (msg string, analyzeFixes bool)
 	// Close releases any resources, eg. the database.
 	Close(ctx context.Context) error
+}
+
+// ErrorEntry is an error recorded by an analysis.
+type ErrorEntry struct {
+	// Path is the file or prefix that the error relates to.
+	Path    string
+	When    time.Time
+	Message string
 }
 
 // ErrNotAnalyzed is returned by Open if the filesystem has not been
@@ -331,6 +344,29 @@ func describe(sf snapshot.File, path string) string {
 		return "computed from the database at " + sf.Date.Format(time.DateTime)
 	}
 	return "snapshot " + path
+}
+
+// Errors implements Source.
+func (s *DB) Errors(ctx context.Context, path string, limit int) ([]ErrorEntry, bool, error) {
+	sep := s.f.Config().SeparatorOrDefault()
+	var entries []ErrorEntry
+	more := false
+	err := s.db.VisitErrors(ctx, path, func(_ context.Context, key string, when time.Time, detail []byte) bool {
+		match, stop := internal.SubtreeMatch(key, path, sep)
+		if stop {
+			return false
+		}
+		if !match {
+			return true
+		}
+		if len(entries) >= limit {
+			more = true
+			return false
+		}
+		entries = append(entries, ErrorEntry{Path: key, When: when, Message: string(detail)})
+		return true
+	})
+	return entries, more, err
 }
 
 // Close implements Source.

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"cloudeng.io/cmd/idu/cli/analyze"
+	"cloudeng.io/cmd/idu/cli/progress"
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/internal/cli"
 	"cloudeng.io/cmd/idu/internal/cli/clitest"
@@ -56,6 +58,10 @@ func startWith(t *testing.T, analyzeWith func(tmpDir, root string) iduconfig.T) 
 
 // startHarness is like startWith, but uses analyzer, if not nil, for the
 // analyses run by the tui.
+// beforeStart, if set, is called by startHarness immediately before the
+// tui is started.
+var beforeStart func(t *testing.T, env *cli.Env, f iduconfig.Filesystem)
+
 func startHarness(t *testing.T, analyzeWith func(tmpDir, root string) iduconfig.T,
 	analyzer func(context.Context, analyze.Progress, io.Writer, *analyze.Flags) error) *harness {
 	t.Helper()
@@ -77,6 +83,9 @@ func startHarness(t *testing.T, analyzeWith func(tmpDir, root string) iduconfig.
 		if err := c.analyzer(&aenv, acfg.Filesystems[0])(ctx, nil, io.Discard, &analyze.Flags{}); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if beforeStart != nil {
+		beforeStart(t, env, f)
 	}
 	screen := tcell.NewSimulationScreen("UTF-8")
 	u := newUI(ctx, uiConfig{
@@ -327,8 +336,9 @@ func bytesConfig(t *testing.T, tmpDir, root string) iduconfig.T {
 
 func TestIncompatibleSummaries(t *testing.T) {
 	h := startWith(t, func(tmpDir, root string) iduconfig.T { return bytesConfig(t, tmpDir, root) })
-	// The error is displayed in a dialog that offers to analyze.
-	h.waitFor("Error", "cannot be used", "calculator", "Analyze", "Quit")
+	// The error is displayed in a dialog that offers to analyze; the path
+	// precedes "cannot be used:" and may wrap before "be used" on Windows.
+	h.waitFor("Error", "cannot", "be used", "calculator", "Analyze", "Quit")
 	h.eventually("the dialog", func() bool { return h.u.dialogOpen() })
 	// Keys other than those for the dialog are ignored.
 	h.rune('m')
@@ -493,6 +503,16 @@ func TestBottomPaneMenu(t *testing.T) {
 	h.rune('m')
 	h.rune('m')
 	h.eventually("the main menu", func() bool { return h.u.app.GetFocus() == h.u.menu })
+	// / behaves in the same way as m. Escape returns the focus to the tab
+	// bar, and enter from there to the table.
+	h.key(tcell.KeyEscape)
+	h.eventually("the tab bar to be active again", h.u.view.tabs.IsActive)
+	h.key(tcell.KeyEnter)
+	h.eventually("the files table to have the focus again", func() bool { return h.u.app.GetFocus() == h.u.view.tables[filesTab] })
+	h.rune('/')
+	h.eventually("the tab bar to be selected by /", h.u.view.tabs.IsActive)
+	h.rune('/')
+	h.eventually("the main menu again", func() bool { return h.u.app.GetFocus() == h.u.menu })
 }
 
 func TestAnalyzeScreen(t *testing.T) {
@@ -506,7 +526,7 @@ func TestAnalyzeScreen(t *testing.T) {
 	h.key(tcell.KeyRight)
 	h.key(tcell.KeyEnter)
 	h.eventually("the analysis to start", h.u.isAnalyzing)
-	h.waitFor("running", "analyze for", "previous analysis", "Prefixes completed per second",
+	h.waitFor("running", "analyze for", "previous analysis", "Prefixes completed per second", "Heap in use", "peak RSS", "GC cycles",
 		"Files completed per second", "Stats completed per second", "Outstanding operations", "Events",
 		"Prefixes scanned, relative to the previous analysis")
 	// The previous analysis found 6 prefixes and 4 files, see
@@ -524,8 +544,10 @@ func TestAnalyzeScreen(t *testing.T) {
 func TestFormatSample(t *testing.T) {
 	s := sample{elapsed: 90 * time.Second}
 	s.PrefixesFinished, s.Files, s.FSStats, s.Errors = 3, 1234, 4000, 2
+	s.memory = progress.Memory{HeapBytes: 1 << 30, TotalBytes: 2 << 30, MaxRSSBytes: 3 << 30, Goroutines: 12, GCCycles: 7}
 	out := formatSample(s, previousTotals{known: true, prefixes: 6, files: 4}, "analyze --snapshot")
-	for _, want := range []string{"running", "analyze --snapshot for 1m30s", "1,234", "4,000", "errors 2"} {
+	for _, want := range []string{"running", "analyze --snapshot for 1m30s", "1,234", "4,000", "errors 2",
+		"heap 1.000 GiB, total 2.000 GiB, peak RSS 3.000 GiB, goroutines 12, GC cycles 7"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("%q does not contain %q", out, want)
 		}
@@ -604,16 +626,18 @@ func TestArrowKeys(t *testing.T) {
 	focused("the menu bar", menu)
 	h.key(tcell.KeyEscape)
 	focused("the tree", tree)
-	// Up moves up the tree, and at its root selects the menu bar.
+	// Up moves up the tree, and at its root stays there: down then
+	// highlights a rather than opening a menu.
 	h.key(tcell.KeyDown)
 	h.eventually("a to be highlighted", func() bool { return h.u.view.currentPath() == filepath.Join(h.root, "a") })
 	h.key(tcell.KeyUp)
 	h.eventually("the root to be highlighted", func() bool { return h.u.view.currentPath() == h.root })
+	h.key(tcell.KeyUp)
+	h.key(tcell.KeyDown)
+	h.eventually("a to be highlighted again", func() bool { return h.u.view.currentPath() == filepath.Join(h.root, "a") })
 	focused("the tree", tree)
 	h.key(tcell.KeyUp)
-	focused("the menu bar", menu)
-	h.key(tcell.KeyEscape)
-	focused("the tree", tree)
+	h.eventually("the root to be highlighted", func() bool { return h.u.view.currentPath() == h.root })
 	// Left and right move between the panes.
 	h.key(tcell.KeyRight)
 	focused("the summary", summary)
@@ -624,13 +648,23 @@ func TestArrowKeys(t *testing.T) {
 	h.key(tcell.KeyLeft)
 	focused("the top-N table", table)
 	// Up at the top of the table selects the tab bar, where left and right
-	// select tabs, and then the menu bar.
+	// select tabs and up does nothing.
 	h.key(tcell.KeyUp)
 	h.eventually("the tab bar", h.u.view.tabs.IsActive)
 	h.key(tcell.KeyRight)
 	h.eventually("the storage tab", func() bool { return h.u.view.tabs.Current() == storageTab })
 	h.key(tcell.KeyUp)
-	focused("the menu bar", menu)
+	h.key(tcell.KeyRight)
+	h.eventually("the files tab", func() bool { return h.u.view.tabs.Current() == filesTab })
+	h.eventually("the tab bar to keep the focus", h.u.view.tabs.IsActive)
+	// Up at the top of the summary stays in the summary.
+	h.key(tcell.KeyDown)
+	focused("the files table", table)
+	h.key(tcell.KeyLeft)
+	focused("the summary", summary)
+	h.key(tcell.KeyUp)
+	h.key(tcell.KeyLeft)
+	focused("the tree", tree)
 }
 
 func TestBracketPathsEscaped(t *testing.T) {
@@ -720,4 +754,92 @@ func TestAnalyzeErrorPreservesErrorDialog(t *testing.T) {
 	if strings.Contains(h.text(), "counted more than once") {
 		t.Errorf("warning dialog overwrote analyze error:\n%s", h.text())
 	}
+}
+
+func TestWaitingForLockedDatabase(t *testing.T) {
+	// Hold the database open for writing, and hence locked, until the tui
+	// is waiting for it.
+	release := make(chan struct{})
+	released := make(chan struct{})
+	beforeStart = func(t *testing.T, env *cli.Env, f iduconfig.Filesystem) {
+		db, err := env.OpenWritableDB(context.Background(), f.Config())
+		if err != nil {
+			t.Fatal(err)
+		}
+		go func() {
+			<-release
+			_ = db.Close(context.Background())
+			close(released)
+		}()
+	}
+	defer func() { beforeStart = nil }()
+	h := start(t, true)
+	h.waitFor("Waiting", "locked by another process", "waiting for database to open", "Quit")
+	// Keys other than those for the dialog are ignored.
+	h.rune('m')
+	h.eventually("the dialog", h.u.waiting)
+	close(release)
+	<-released
+	h.eventually("the dialog to close", func() bool { return !h.u.waiting() })
+	h.waitFor("+ b ", "Top-N beneath "+h.root+" ")
+}
+
+func TestErrorsView(t *testing.T) {
+	if os.Geteuid() == 0 || runtime.GOOS == "windows" {
+		t.Skip("permissions cannot make a directory unreadable")
+	}
+	var locked string
+	h := startWith(t, func(tmpDir, root string) iduconfig.T {
+		locked = filepath.Join(root, "b", "locked")
+		if err := os.Mkdir(locked, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
+		return clitest.WriteHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupSummaries)
+	})
+	h.waitFor("+ b ", "Top-N beneath "+h.root+" ")
+	h.rune('e')
+	h.waitFor("Errors beneath "+h.root+": 1 ", "When", "b/locked", "permission denied")
+	// Enter highlights the prefix in the tree.
+	h.key(tcell.KeyEnter)
+	h.waitFor("Summary", "Top-N beneath "+locked+" ")
+	// The errors beneath a prefix without any, via the menu.
+	h.inUI(func() { h.u.view.home() })
+	h.inUI(func() { h.u.errors.show(filepath.Join(h.root, "a")) })
+	h.waitFor("Errors beneath "+filepath.Join(h.root, "a")+": 0 ", "No errors were recorded")
+	h.key(tcell.KeyEscape)
+	h.eventually("the view", func() bool {
+		name, _ := h.u.body.GetFrontPage()
+		return name == viewPage
+	})
+	h.rune('/')
+	h.waitFor("Errors")
+}
+
+func TestHomeKey(t *testing.T) {
+	h := startWith(t, func(tmpDir, root string) iduconfig.T {
+		// Enough prefixes that the tree must be scrolled to display them.
+		for i := range 60 {
+			if err := os.Mkdir(filepath.Join(root, fmt.Sprintf("d%02d", i)), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return clitest.WriteHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupSummaries)
+	})
+	h.waitFor("+ b ", "Top-N beneath "+h.root+" ")
+	for range 40 {
+		h.key(tcell.KeyDown)
+	}
+	h.eventually("the tree to scroll", func() bool {
+		return h.u.view.tree.GetScrollOffset() > 0 && h.u.view.currentPath() != h.root
+	})
+	h.key(tcell.KeyHome)
+	h.eventually("the root to be highlighted", func() bool {
+		return h.u.view.currentPath() == h.root && h.u.view.tree.GetScrollOffset() == 0
+	})
+	h.waitFor("Top-N beneath " + h.root + " ")
+	// Home in other panes is handled by them.
+	h.key(tcell.KeyRight)
+	h.key(tcell.KeyHome)
+	h.eventually("the summary to keep the focus", func() bool { return h.u.app.GetFocus() == h.u.view.summary })
 }

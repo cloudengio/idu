@@ -4,9 +4,10 @@
 
 //go:build unix
 
-package main
+package progress
 
 import (
+	"runtime"
 	"syscall"
 )
 
@@ -18,6 +19,15 @@ func (s *sysMemstats) update() {
 	_ = syscall.Getrusage(0, &s.Rusage)
 }
 
+// maxRSSBytes returns the peak resident set size, Maxrss is in bytes on
+// macOS and in kilobytes on other systems.
+func (s *sysMemstats) maxRSSBytes() int64 {
+	if runtime.GOOS == "darwin" || runtime.GOOS == "ios" {
+		return s.Maxrss
+	}
+	return s.Maxrss * 1024
+}
+
 func (s *sysMemstats) MaxRSSGiB() float64 {
-	return float64(s.Maxrss) / (1024 * 1024)
+	return float64(s.maxRSSBytes()) / (1024 * 1024 * 1024)
 }

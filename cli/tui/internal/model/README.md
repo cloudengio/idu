@@ -56,6 +56,12 @@ Close implements Source.
 
 
 ```go
+func (s *DB) Errors(ctx context.Context, path string, limit int) ([]ErrorEntry, bool, error)
+```
+Errors implements Source.
+
+
+```go
 func (s *DB) LastUpdate(ctx context.Context) time.Time
 ```
 LastUpdate returns the time of the most recent analysis.
@@ -87,6 +93,18 @@ func (s *DB) Warning() (string, bool)
 Warning implements Source.
 
 
+
+
+### Type ErrorEntry
+```go
+type ErrorEntry struct {
+	// Path is the file or prefix that the error relates to.
+	Path    string
+	When    time.Time
+	Message string
+}
+```
+ErrorEntry is an error recorded by an analysis.
 
 
 ### Type Node
@@ -149,6 +167,10 @@ type Source interface {
 	Summary(ctx context.Context, path string) (Summary, error)
 	// TopN returns the top n entries beneath path.
 	TopN(ctx context.Context, path string, n int) (TopN, error)
+	// Errors returns the errors recorded by the most recent analyses for
+	// path and the files and prefixes beneath it, in key order, up to
+	// limit of them, and whether there were more than limit.
+	Errors(ctx context.Context, path string, limit int) ([]ErrorEntry, bool, error)
 	// LastUpdate returns the time of the most recent analysis, if known.
 	LastUpdate(ctx context.Context) time.Time
 	// Warning returns a description of any limitations of the data, eg.
@@ -182,7 +204,8 @@ type TopN struct {
 	// Source describes where the rankings came from.
 	Source                         string
 	Bytes, Storage, Files, Subdirs []Ranked[string]
-	// Users and Groups are ranked by bytes.
+	// Users and Groups are ranked by the storage that they use, ie.
+	// StorageBytes, rather than the size of their files.
 	Users, Groups []Ranked[int64]
 	// Hotspots are the distributed subtree hotspots ranked by bytes, they
 	// are only valid if HasHotspots is true.

@@ -20,6 +20,7 @@ import (
 
 	"cloudeng.io/cmd/idu/cli/analyze"
 	"cloudeng.io/cmd/idu/cli/find"
+	"cloudeng.io/cmd/idu/cli/progress"
 	"cloudeng.io/cmd/idu/cli/reports"
 	"cloudeng.io/cmd/idu/cli/stats"
 	"cloudeng.io/cmd/idu/cli/tui"
@@ -179,7 +180,7 @@ func newCommandSet() *subcmd.CommandSetYAML {
 	cmdSet.Set("expression-syntax").MustRunner(squashErrors(expr.explain), &struct{}{})
 
 	st := stats.New(env)
-	alz := analyze.New(env, analyze.WithProgress(newAnalyzeProgress), analyze.WithSnapshot(st.Snapshot))
+	alz := analyze.New(env, analyze.WithProgress(progress.NewAnalyze), analyze.WithSnapshot(st.Snapshot))
 	cmdSet.Set("analyze").MustRunner(squashErrors(requireConfig(alz.Analyze)), &analyze.Flags{})
 	cmdSet.Set("errors").MustRunner(squashErrors(requireConfig(alz.Errors)), &analyze.ErrorFlags{})
 	cmdSet.Set("logs").MustRunner(squashErrors(requireConfig(alz.Logs)), &analyze.LogFlags{})
