@@ -73,15 +73,13 @@ commands:
     summary: compute and display statistics from the database.
     commands:
       - name: compute
-        summary: compute all statistics based on the current state of the database and
-                 save the results to a file. The results can be viewed using the
-				 stats view command.
+        summary: compute statistics for a prefix, optionally restricted by an expression, from the current state of the database and save them as a snapshot in snapshot_dir, or --snapshot-dir, or to the file specified by --stats-file. The results can be viewed using the stats view command.
         arguments:
           - <prefix>
           - <expression>...
 
       - name: view
-        summary: view the statistics stored in a file created using the compute command. If no filename is specified then the latest statistics for the filesystem specified by --fs are displayed, otherwise the named file is displayed, a relative filename that does not exist is looked for in the stats directory, which is specified by --stats-dir or is the stats directory of the filesystem specified by --fs.
+        summary: view the current statistics for the filesystem specified by --fs, ie. the most recent snapshot in its snapshot_dir that is more recent than the last update to its database or, if there is none, statistics constructed from the database; a new snapshot is written to snapshot_dir, if set, when using the database requires a full pass over it. If a filename is specified that snapshot is displayed instead, a relative filename that does not exist is looked for in the snapshot directory, which is specified by --snapshot-dir or is the snapshot_dir of the filesystem specified by --fs.
         arguments:
           - '[<filename>]'
 
@@ -95,15 +93,14 @@ commands:
     summary: generate and manage reports.
     commands:
       - name: generate
-        summary:  generate reports in a variety of formats, including tsv, json and markdown from the statistics stored in the specified file.
+        summary: generate reports in a variety of formats, including tsv, json and markdown, from the specified snapshot files or, if none are specified, from the current statistics for the filesystem specified by --fs, ie. the most recent snapshot in its snapshot_dir that is more recent than the last update to its database, or the database itself; a new snapshot is written to snapshot_dir, if set, when using the database requires a full pass over it.
         arguments:
-          - <filename>
-          - ...
+          - '[<filename>]...'
 
       - name: locate
-        summary: locate the last n sets of reports in a given directory as a json array of filenames. This is intended to be used by other scripts that analyze the reports.
+        summary: locate the last n sets of reports in a given directory, or the reports_dir of the filesystem specified by --fs if none is given, as a json array of filenames. This is intended to be used by other scripts that analyze the reports.
         arguments:
-          - <report-directory>
+          - '[<report-directory>]'
 
   {{range subcmdExtension "config"}}{{.}}
   {{end}}
@@ -175,13 +172,13 @@ func newCommandSet() *subcmd.CommandSetYAML {
 	expr := &exprCmd{}
 	cmdSet.Set("expression-syntax").MustRunner(squashErrors(expr.explain), &struct{}{})
 
-	alz := analyze.New(env, newAnalyzeProgress)
+	st := stats.New(env)
+	alz := analyze.New(env, analyze.WithProgress(newAnalyzeProgress), analyze.WithSnapshot(st.Snapshot))
 	cmdSet.Set("analyze").MustRunner(squashErrors(requireConfig(alz.Analyze)), &analyze.Flags{})
 	cmdSet.Set("errors").MustRunner(squashErrors(requireConfig(alz.Errors)), &analyze.ErrorFlags{})
 	cmdSet.Set("logs").MustRunner(squashErrors(requireConfig(alz.Logs)), &analyze.LogFlags{})
 	cmdSet.Set("database", "locate").MustRunner(squashErrors(requireConfig(alz.Locate)), &analyze.LocateFlags{})
 
-	st := stats.New(env)
 	cmdSet.Set("stats", "compute").MustRunner(squashErrors(requireConfig(st.Compute)), &stats.ComputeFlags{})
 	cmdSet.Set("stats", "view").MustRunner(squashErrors(st.View), &stats.ViewFlags{})
 	cmdSet.Set("stats", "suggest").MustRunner(squashErrors(requireConfig(st.Suggest)), &stats.SuggestFlags{})

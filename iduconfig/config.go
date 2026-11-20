@@ -53,7 +53,8 @@ const (
 type Settings struct {
 	Name                     string             `yaml:"name" doc:"optional name used to refer to this configuration"`
 	Database                 string             `yaml:"database" doc:"the location of the database to use for this prefix"`
-	StatsDir                 string             `yaml:"stats_dir" doc:"the directory to use for stats files, defaults to stats"`
+	ReportsDir               string             `yaml:"reports_dir" doc:"the directory that reports generate writes reports to, and reports locate looks in, when --report-dir, or the report directory argument, is not specified; each set of reports is in a sub-directory named by the time of the statistics it was generated from and latest links to the most recent; it defaults to reports"`
+	SnapshotDir              string             `yaml:"snapshot_dir" doc:"the directory in which snapshots of the statistics, written by analyze --snapshot, stats compute and, when they require a full pass over the database, stats view and reports generate, are stored; each is named by the time it was created and latest links to the most recent; there is no default and snapshots are not stored if it is not set"`
 	Separator                string             `yaml:"separator" doc:"filename separator to use, defaults to /"`
 	ConcurrentScans          int                `yaml:"concurrent_scans" doc:"maximum number of concurrent scan operations"`
 	ConcurrentStats          int                `yaml:"concurrent_stats" doc:"maximum number of concurrent stat operations"`
@@ -469,10 +470,8 @@ func (t *T) SetDefaults() {
 		p := f.Config()
 		p.Name = os.ExpandEnv(p.Name)
 		p.Database = os.ExpandEnv(p.Database)
-		p.StatsDir = os.ExpandEnv(p.StatsDir)
-		if len(p.StatsDir) == 0 {
-			p.StatsDir = "stats"
-		}
+		p.SnapshotDir = os.ExpandEnv(p.SnapshotDir)
+		p.ReportsDir = os.ExpandEnv(p.ReportsDir)
 		if len(p.Separator) == 0 {
 			p.Separator = string(filepath.Separator)
 		}

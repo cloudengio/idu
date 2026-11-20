@@ -1,4 +1,5 @@
 # Package [cloudeng.io/cmd/idu/report](https://pkg.go.dev/cloudeng.io/cmd/idu/report?tab=doc)
+[![CircleCI](https://circleci.com/gh/cloudengio/go.gotools.svg?style=svg)](https://circleci.com/gh/cloudengio/go.gotools) [![Go Report Card](https://goreportcard.com/badge/cloudeng.io/cmd/idu/report)](https://goreportcard.com/report/cloudeng.io/cmd/idu/report)
 
 ```go
 import cloudeng.io/cmd/idu/report
@@ -42,6 +43,15 @@ func NewAllStats(prefix string, n int) *AllStats
 
 
 ### Methods
+
+```go
+func (s *AllStats) ClearHardlinkRankings()
+```
+ClearHardlinkRankings removes the rankings by number of hardlinks,
+see Heaps.Hardlinks, from s. It is used for stats constructed from rankings
+that do not include them, so that they are not mistaken for there being no
+hardlinks.
+
 
 ```go
 func (s *AllStats) Finalize()
@@ -170,6 +180,12 @@ type Heaps[T comparable] struct {
 	// SparseBytes will be nil for stats computed before sparse files
 	// were tracked.
 	SparseBytes *heap.MinMax[int64, T]
+	// Hardlinks ranks items by the number of hardlinks, ie. links to files
+	// that are counted elsewhere, that they contain. It is nil for stats
+	// computed before it was introduced and for stats constructed from
+	// rankings that do not include it, eg. those maintained by analyze,
+	// see AllStats.ClearHardlinkRankings.
+	Hardlinks *heap.MinMax[int64, T]
 }
 ```
 Heaps is a collection of heap data structures for determining the top N

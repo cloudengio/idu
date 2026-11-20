@@ -43,6 +43,7 @@ type Flags struct {
 	Force       bool          `subcmd:"force,false,reanalyze even if the database is up to date"`
 	SlowScans   time.Duration `subcmd:"slow-scan-duration,10s,duration at which scans are reported as slow"`
 	Defaults    bool          `subcmd:"show-defaults,false,display default scanning options and exit"`
+	Snapshot    bool          `subcmd:"snapshot,false,'write a snapshot of the statistics for the entire filesystem to its snapshot_dir once the analysis has completed successfully, it is an error if snapshot_dir is not set'"`
 	RefreshTopN bool          `subcmd:"refresh-topn,false,recompute the recursive totals and top-N rankings from scratch once the analysis is complete; they are otherwise maintained incrementally and rebuilt automatically when needed"`
 }
 
@@ -51,6 +52,7 @@ type Flags struct {
 type Commands struct {
 	env         *cli.Env
 	newProgress NewProgress
+	snapshot    SnapshotFunc
 	// openDB may be overridden by tests.
 	openDB func(context.Context, *iduconfig.Settings) (*idudb.DB, error)
 	// beforeClose, if set, is called by tests immediately before the
@@ -58,11 +60,37 @@ type Commands struct {
 	beforeClose func()
 }
 
-// New returns the Commands that use env. newProgress creates the Progress
-// for each analysis, if it is nil progress is neither displayed nor
-// reported.
-func New(env *cli.Env, newProgress NewProgress) *Commands {
-	return &Commands{env: env, newProgress: newProgress}
+// SnapshotFunc writes a snapshot of the stats for the entire filesystem f,
+// computed from its database, to its snapshot_dir and returns its path.
+type SnapshotFunc func(ctx context.Context, f iduconfig.Filesystem) (string, error)
+
+// Option configures the Commands created by New.
+type Option func(*Commands)
+
+// WithProgress sets the function used to create the Progress for each
+// analysis. Without it progress is neither displayed nor reported.
+func WithProgress(newProgress NewProgress) Option {
+	return func(c *Commands) {
+		c.newProgress = newProgress
+	}
+}
+
+// WithSnapshot sets the function used to write a snapshot once an
+// analysis has completed, as requested by --snapshot, which is an error
+// without it.
+func WithSnapshot(fn SnapshotFunc) Option {
+	return func(c *Commands) {
+		c.snapshot = fn
+	}
+}
+
+// New returns the Commands that use env.
+func New(env *cli.Env, opts ...Option) *Commands {
+	c := &Commands{env: env}
+	for _, fn := range opts {
+		fn(c)
+	}
+	return c
 }
 
 func (alz *Commands) progress(ctx context.Context, display bool) Progress {
@@ -91,14 +119,11 @@ func (alz *Commands) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *Flags,
 	}
 	start := time.Now()
 	env := alz.env.ForFS(af.FS)
-	ctx, f, target, err := env.LookupPrefix(ctx, cli.PrefixArg(args))
+	ctx, root, target, err := alz.lookupRoot(ctx, env, af, args)
 	if err != nil {
 		return err
 	}
-	root, ok := f.(*iduconfig.Root)
-	if !ok {
-		return fmt.Errorf("filesystem %v is a key range, analyzing key ranges is not yet supported", iduconfig.Label(f))
-	}
+	var f iduconfig.Filesystem = root
 	cfg := &root.Settings
 	if cfg.SetMaxThreads > 0 {
 		debug.SetMaxThreads(cfg.SetMaxThreads)
@@ -164,7 +189,55 @@ func (alz *Commands) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *Flags,
 	errs.Append(summarizeAndLog(ctx, db, pt, start))
 	dbClosed = true
 	reportDatabaseSize(ctx, env, cfg.Database)
+	if af.Snapshot && errs.Err() == nil {
+		errs.Append(alz.takeSnapshot(ctx, f))
+	}
 	return cli.SquashCanceled(errs.Err())
+}
+
+// lookupRoot returns the root filesystem, and the target within it, to be
+// analyzed and checks that any requested snapshot can be written so that
+// the analysis is not started if it cannot.
+func (alz *Commands) lookupRoot(ctx context.Context, env *cli.Env, af *Flags, args []string) (context.Context, *iduconfig.Root, string, error) {
+	ctx, f, target, err := env.LookupPrefix(ctx, cli.PrefixArg(args))
+	if err != nil {
+		return ctx, nil, "", err
+	}
+	root, ok := f.(*iduconfig.Root)
+	if !ok {
+		return ctx, nil, "", fmt.Errorf("filesystem %v is a key range, analyzing key ranges is not yet supported", iduconfig.Label(f))
+	}
+	return ctx, root, target, alz.checkSnapshot(af, f)
+}
+
+// checkSnapshot returns an error if a snapshot is requested but cannot be
+// written, so that the analysis is not started.
+func (alz *Commands) checkSnapshot(af *Flags, f iduconfig.Filesystem) error {
+	switch {
+	case !af.Snapshot:
+		return nil
+	case f.Config().SnapshotDir == "":
+		return fmt.Errorf("--snapshot requires snapshot_dir to be set for %v", iduconfig.Label(f))
+	case alz.snapshot == nil:
+		return fmt.Errorf("--snapshot is not supported")
+	}
+	return nil
+}
+
+// takeSnapshot writes a snapshot for f. It must be called once the
+// database has been closed, and hence the analysis logged, so that the
+// snapshot is more recent than the last update to the database.
+func (alz *Commands) takeSnapshot(ctx context.Context, f iduconfig.Filesystem) error {
+	if ctx.Err() != nil {
+		// The analysis was interrupted.
+		return nil
+	}
+	path, err := alz.snapshot(ctx, f)
+	if err != nil {
+		return fmt.Errorf("failed to write snapshot: %w", err)
+	}
+	fmt.Printf("snapshot: %v\n", path)
+	return nil
 }
 
 // reportDatabaseSize reports the size of the database, which is excluded from

@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"cloudeng.io/cmd/idu/internal/cli/clitest"
 	"cloudeng.io/os/executil"
 )
 
@@ -85,7 +86,7 @@ func TestHelp(t *testing.T) {
 	out, _ = runIDU("help", "analyze") // will return exit status 1 for help.
 
 	err = containsAnyOf(out, "Usage of command \"analyze\": analyze the file system to build a database of directory and file metadata.",
-		"analyze [--force=false --fs= --progress=true --refresh-topn=false --show-defaults=false --slow-scan-duration=10s] [<prefix>]")
+		"analyze [--force=false --fs= --progress=true --refresh-topn=false --show-defaults=false --slow-scan-duration=10s --snapshot=false] [<prefix>]")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +221,7 @@ func TestConfigFallbackAndCLIFlowByName(t *testing.T) {
 		}
 	}
 	// No config.yaml: fallback merges all .yaml/.yml files in $HOME/.config/idu.
-	write("a.yaml", fmt.Sprintf("filesystems:\n  - name: mytree\n    prefix: %s\n    database: %s\n    stats_dir: %s\n", treeDir, dbPath, statsDir))
+	write("a.yaml", fmt.Sprintf("filesystems:\n  - name: mytree\n    prefix: %s\n    database: %s\n    snapshot_dir: %s\n", treeDir, dbPath, statsDir))
 	write("b.yml", "filesystems:\n  - name: other\n    prefix: /other\n    database: /tmp/db-other\n")
 
 	env := append(os.Environ(), "HOME="+home, "APPDATA="+filepath.Join(home, ".config"), "IDU_CONFIG=", "IDU_ENV=")
@@ -249,15 +250,15 @@ func TestConfigFallbackAndCLIFlowByName(t *testing.T) {
 	if _, err := runIDUEnv(env, "--fs=mytree", "stats", "compute", "."); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(statsDir, "latest.idustats")); err != nil {
-		t.Fatalf("expected latest.idustats in configured stats_dir %s: %v", statsDir, err)
+	if _, err := os.Stat(filepath.Join(statsDir, "latest")); err != nil {
+		t.Fatalf("expected latest in configured snapshot_dir %s: %v", statsDir, err)
 	}
 
-	if _, err := runIDUEnv(env, "--fs=mytree", "stats", "compute", "--stats-dir="+overrideStatsDir, "."); err != nil {
+	if _, err := runIDUEnv(env, "--fs=mytree", "stats", "compute", "--snapshot-dir="+overrideStatsDir, "."); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(overrideStatsDir, "latest.idustats")); err != nil {
-		t.Fatalf("expected latest.idustats in --stats-dir override %s: %v", overrideStatsDir, err)
+	if _, err := os.Stat(filepath.Join(overrideStatsDir, "latest")); err != nil {
+		t.Fatalf("expected latest in --snapshot-dir override %s: %v", overrideStatsDir, err)
 	}
 
 	assertStatsViews(t, env, treeDir, statsDir, overrideStatsDir)
@@ -271,18 +272,18 @@ func assertStatsViews(t *testing.T, env []string, treeDir, statsDir, overrideSta
 	assertStatsViewOutput(t, env, treeDir, mytree)
 	assertStatsViewOutput(t, env, treeDir, nil, "--fs=mytree")
 	assertStatsViewOutput(t, env, treeDir, []string{"--fs=other"}, "--fs=mytree")
-	assertStatsViewOutput(t, env, treeDir, nil, filepath.Join(statsDir, "latest.idustats"))
-	assertStatsViewOutput(t, env, treeDir, mytree, "--stats-dir="+overrideStatsDir)
-	if targetFile, err := os.Readlink(filepath.Join(statsDir, "latest.idustats")); err == nil {
+	assertStatsViewOutput(t, env, treeDir, nil, filepath.Join(statsDir, "latest"))
+	assertStatsViewOutput(t, env, treeDir, mytree, "--snapshot-dir="+overrideStatsDir)
+	if targetFile, err := os.Readlink(filepath.Join(statsDir, "latest")); err == nil {
 		assertStatsViewOutput(t, env, treeDir, mytree, filepath.Base(targetFile))
 		assertStatsViewOutput(t, env, treeDir, nil, "--fs=mytree", filepath.Base(targetFile))
 	}
 	if out, err := runIDUEnv(env, "stats", "view"); err == nil {
 		t.Fatalf("expected stats view without --fs to fail, got %q", out)
 	}
-	// --fs is not required when --stats-dir is specified.
-	assertStatsViewOutput(t, env, treeDir, nil, "--stats-dir="+overrideStatsDir)
-	assertStatsViewOutput(t, env, treeDir, nil, "--stats-dir="+statsDir, "latest.idustats")
+	// --fs is not required when --snapshot-dir is specified.
+	assertStatsViewOutput(t, env, treeDir, nil, "--snapshot-dir="+overrideStatsDir)
+	assertStatsViewOutput(t, env, treeDir, nil, "--snapshot-dir="+statsDir, "latest")
 }
 
 func TestConfigShowAndCommandsOnLoadError(t *testing.T) {
@@ -375,7 +376,7 @@ func verifyDistributedMode(t *testing.T, home, confDir, treeDir, fanoutRoot, nam
 	statsDir := filepath.Join(home, "stats-"+name)
 	reportsDir := filepath.Join(home, "reports-"+name)
 	cfgPath := filepath.Join(confDir, name+".yaml")
-	cfgYAML := fmt.Sprintf("filesystems:\n  - name: %s\n    prefix: %s\n    database: %s\n    stats_dir: %s\n    count_hardlinks_as_files: %v\n    hardlink_dedup: %s\n",
+	cfgYAML := fmt.Sprintf("filesystems:\n  - name: %s\n    prefix: %s\n    database: %s\n    snapshot_dir: %s\n    count_hardlinks_as_files: %v\n    hardlink_dedup: %s\n",
 		name, treeDir, dbPath, statsDir, countHardlinks, hardlinkDedup)
 	if err := os.WriteFile(cfgPath, []byte(cfgYAML), 0o600); err != nil {
 		t.Fatal(err)
@@ -385,7 +386,7 @@ func verifyDistributedMode(t *testing.T, home, confDir, treeDir, fanoutRoot, nam
 	if out, err := runIDUEnv(env, "analyze"); err != nil {
 		t.Fatalf("%s analyze failed: %v\n%s", name, err, out)
 	}
-	latestStats := filepath.Join(statsDir, "latest.idustats")
+	latestStats := filepath.Join(statsDir, "latest")
 	// By default, the stats for the root of the filesystem are constructed
 	// from the stored rankings, which do not include the distributed
 	// subtree statistics.
@@ -549,7 +550,7 @@ func writePerCommandFSConfig(t *testing.T) (string, map[string]string) {
 			t.Fatal(err)
 		}
 		trees[name] = root
-		fmt.Fprintf(&cfg, "  - name: %s\n    root: %s\n    database: %s\n    stats_dir: %s\n",
+		fmt.Fprintf(&cfg, "  - name: %s\n    root: %s\n    database: %s\n    snapshot_dir: %s\n",
 			name, root, filepath.Join(tmp, "db-"+name), filepath.Join(tmp, "stats-"+name))
 	}
 	cfgFile := filepath.Join(tmp, "config.yaml")
@@ -557,4 +558,116 @@ func writePerCommandFSConfig(t *testing.T) (string, map[string]string) {
 		t.Fatal(err)
 	}
 	return cfgFile, trees
+}
+
+// TestSnapshots verifies the snapshots written by analyze --snapshot and
+// their use by stats view and reports generate.
+func TestSnapshots(t *testing.T) {
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "tree")
+	if err := os.MkdirAll(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "sub", "f"), []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshots := filepath.Join(tmp, "snapshots")
+	writeConfig := func(name string, withSnapshots bool) string {
+		text := fmt.Sprintf("filesystems:\n  - root: %s\n    database: %s\n", root, filepath.Join(tmp, "db-"+name))
+		if withSnapshots {
+			text += "    snapshot_dir: " + snapshots + "\n"
+		}
+		p := filepath.Join(tmp, name+".yaml")
+		if err := os.WriteFile(p, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return "--config=" + p
+	}
+	noSnapshots, withSnapshots := writeConfig("none", false), writeConfig("snapshots", true)
+	// expect runs idu and checks that its output contains all of want.
+	expect := func(want []string, args ...string) {
+		t.Helper()
+		out, err := runIDU(args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := containsAnyOf(out, want...); err != nil {
+			t.Error(err)
+		}
+	}
+	const fromDB = "Snapshot   : none, computed from the database"
+
+	// --snapshot fails immediately without snapshot_dir.
+	if out, err := runIDU(noSnapshots, "analyze", "--progress=false", "--snapshot"); err == nil || !strings.Contains(out, "snapshot_dir") {
+		t.Fatalf("expected an error: %v: %s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "db-none")); !os.IsNotExist(err) {
+		t.Errorf("database created: %v", err)
+	}
+	// Without snapshots, view uses the database directly.
+	expect(nil, noSnapshots, "analyze", "--progress=false")
+	expect([]string{fromDB}, noSnapshots, "stats", "view", "--info")
+
+	expect([]string{"snapshot: " + snapshots}, withSnapshots, "analyze", "--progress=false", "--snapshot")
+	target, err := os.Readlink(filepath.Join(snapshots, "latest"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest := filepath.Join(snapshots, target)
+	// The snapshot is more recent than the database and is used.
+	expect([]string{"Snapshot   : " + latest, "Prefix     : " + root}, withSnapshots, "stats", "view", "--info")
+	reports := filepath.Join(tmp, "reports")
+	expect(nil, withSnapshots, "reports", "generate", "--report-dir="+reports)
+	if _, err := os.Stat(filepath.Join(reports, "latest", "usage-summary.md")); err != nil {
+		t.Errorf("reports: %v", err)
+	}
+	// Once the database is updated the snapshot is stale.
+	expect(nil, withSnapshots, "analyze", "--progress=false")
+	expect([]string{fromDB}, withSnapshots, "stats", "view", "--info")
+	// A named snapshot is used regardless.
+	expect([]string{"Snapshot   : " + latest}, withSnapshots, "stats", "view", "--info", filepath.Base(latest))
+}
+
+// TestViewHotspotsAndHardlinks verifies that stats view --hardlinks and
+// --hotspots compute, and save, a full pass when the current stats lack
+// them and reuse it thereafter.
+func TestViewHotspotsAndHardlinks(t *testing.T) {
+	tmp, root := clitest.NewHardlinkTree(t)
+	snapshots := filepath.Join(tmp, "snapshots")
+	cfgFile := filepath.Join(tmp, "config.yaml")
+	text := fmt.Sprintf("filesystems:\n  - root: %s\n    database: %s\n    snapshot_dir: %s\n", root, filepath.Join(tmp, "db"), snapshots)
+	if err := os.WriteFile(cfgFile, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config := "--config=" + cfgFile
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := runIDU(append([]string{config}, args...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	run("analyze", "--progress=false", "--snapshot")
+	out := run("stats", "view", "--info", "--hardlinks")
+	for _, want := range []string{
+		"computing stats from the summaries: the hardlink rankings require a full pass",
+		"Top 10 prefixes by number of hardlinks",
+		filepath.Join(root, "ab"),
+		"No files with links that analyze has not seen were found",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("--hardlinks: missing %q:\n%s", want, out)
+		}
+	}
+	// The full pass was saved and includes the hotspots.
+	target, err := os.Readlink(filepath.Join(snapshots, "latest"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out = run("stats", "view", "--info", "--hotspots")
+	if !strings.Contains(out, "Snapshot   : "+filepath.Join(snapshots, target)) || strings.Contains(out, "computing stats") ||
+		!strings.Contains(out, "Distributed Subtree Hotspots") {
+		t.Errorf("--hotspots:\n%s", out)
+	}
 }

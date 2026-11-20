@@ -34,7 +34,7 @@ func TestFindFS(t *testing.T) {
 	})
 
 	lfs := localfs.New()
-	alz := analyze.New(testEnv, nil)
+	alz := analyze.New(testEnv)
 	if err := alz.Analyze(ctx, &analyze.Flags{}, []string{target}); err != nil {
 		t.Fatalf("analyzeFS: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestFindNoSiblingBleedAndPrefixFlag(t *testing.T) {
 	t.Cleanup(func() { testEnv.Config = origCfg })
 
 	lfs := localfs.New()
-	if err := analyze.New(testEnv, nil).Analyze(ctx, &analyze.Flags{}, []string{root}); err != nil {
+	if err := analyze.New(testEnv).Analyze(ctx, &analyze.Flags{}, []string{root}); err != nil {
 		t.Fatalf("analyzeFS: %v", err)
 	}
 

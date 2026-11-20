@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"cloudeng.io/cmd/idu/cli/internal/snapshot"
 	"cloudeng.io/cmd/idu/internal/cli"
 	"cloudeng.io/cmd/idu/report"
 	"cloudeng.io/cmd/idu/stats"
@@ -28,11 +29,11 @@ func writeTestStatsFile(t *testing.T, dir string, when time.Time) string {
 		stats.PerIDTotals{{ID: 99992, Files: 2, Prefix: 1, SubPrefixes: 1, Bytes: 1200, StorageBytes: 4096, PrefixBytes: 98765}},
 	)
 	sdb.Finalize()
-	sf := cli.StatsFile{
+	sf := snapshot.File{
 		Prefix: "/root",
 		Date:   when,
 		Stats:  sdb,
-		Source: cli.StatsFromSummaries,
+		Source: snapshot.FromSummariesSource,
 	}
 	var buf bytes.Buffer
 	if err := sf.Encode(&buf); err != nil {
@@ -57,7 +58,7 @@ func TestMarkdownPerIDPrefixBytes(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	mdPath := filepath.Join(reportDir, when.Format(cli.ReportDirLayout), "usage-summary.md")
+	mdPath := filepath.Join(reportDir, when.Local().Format(cli.ReportDirLayout), "usage-summary.md")
 	data, err := os.ReadFile(mdPath)
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +83,7 @@ func TestGenerateReportsPreservesErrors(t *testing.T) {
 	reportDir := filepath.Join(tmpDir, "reports")
 
 	// Pre-create prefixes.tsv as a directory so writing TSV fails while JSON succeeds.
-	blocker := filepath.Join(reportDir, when.Format(cli.ReportDirLayout), "prefixes.tsv")
+	blocker := filepath.Join(reportDir, when.Local().Format(cli.ReportDirLayout), "prefixes.tsv")
 	if err := os.MkdirAll(blocker, 0o750); err != nil {
 		t.Fatal(err)
 	}

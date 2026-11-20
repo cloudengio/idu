@@ -9,15 +9,14 @@ import (
 	"encoding/csv"
 	"strconv"
 
-	"cloudeng.io/cmd/idu/internal/cli"
-
+	"cloudeng.io/cmd/idu/cli/internal/snapshot"
 	"cloudeng.io/cmd/idu/report"
 )
 
 type tsvReports struct {
 }
 
-func (tr *tsvReports) generateReports(rf *GenerateFlags, filenames *reportFilenames, stats cli.StatsFile) error {
+func (tr *tsvReports) generateReports(rf *GenerateFlags, filenames *reportFilenames, stats snapshot.File) error {
 	return writeReportFiles(stats.Stats, filenames, tr.formatMerged, tr.formatUserGroupMerged, tr.formatDistributed, rf.TSV)
 }
 

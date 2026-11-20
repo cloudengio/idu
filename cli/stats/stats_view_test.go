@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"cloudeng.io/cmd/idu/internal/cli"
+	"cloudeng.io/cmd/idu/cli/internal/snapshot"
 	"cloudeng.io/cmd/idu/internal/cli/clitest"
 	"cloudeng.io/cmd/idu/internal/usernames"
 	"cloudeng.io/cmd/idu/report"
@@ -39,11 +39,11 @@ func TestViewUserAndGroup(t *testing.T) {
 	)
 	sdb.Finalize()
 
-	sf := cli.StatsFile{
+	sf := snapshot.File{
 		Prefix: "/root",
 		Date:   time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC),
 		Stats:  sdb,
-		Source: cli.StatsFromSummaries,
+		Source: snapshot.FromSummariesSource,
 	}
 	var buf bytes.Buffer
 	if err := sf.Encode(&buf); err != nil {

@@ -11,6 +11,7 @@ import (
 	"text/template"
 	"time"
 
+	"cloudeng.io/cmd/idu/cli/internal/snapshot"
 	"cloudeng.io/cmd/idu/internal/cli"
 
 	"cloudeng.io/cmd/idu/internal/usernames"
@@ -312,7 +313,7 @@ func (md *markdownReports) initTemplates() {
 	md.created = true
 }
 
-func (md *markdownReports) generateReports(rf *GenerateFlags, filenames *reportFilenames, stats cli.StatsFile) error {
+func (md *markdownReports) generateReports(rf *GenerateFlags, filenames *reportFilenames, stats snapshot.File) error {
 	md.initTemplates()
 
 	prefix := stats.Prefix

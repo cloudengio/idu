@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"cloudeng.io/cmd/idu/iduconfig"
+	"cloudeng.io/cmd/idu/internal/cli/clitest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -51,7 +52,7 @@ func runSuggest(ctx context.Context, t *testing.T, cfg iduconfig.T, sf *SuggestF
 
 func TestSuggestRecordAll(t *testing.T) {
 	ctx := context.Background()
-	tmpDir, root := newHardlinkTree(t)
+	tmpDir, root := clitest.NewHardlinkTree(t)
 	a, b := filepath.Join(root, "a"), filepath.Join(root, "b")
 
 	cfg := writeRecordAllConfig(t, tmpDir, root)
@@ -62,9 +63,9 @@ func TestSuggestRecordAll(t *testing.T) {
 
 	// a/hl is a new link to b/h, which is unchanged and hence has a stale
 	// link count and is counted twice.
-	linkUnchanged(t, root)
+	clitest.LinkUnchanged(t, root)
 	analyzeWithConfig(ctx, t, cfg, root)
-	verifyHardlinkTree(ctx, t, cfg, root, false, 5, 3, 3)
+	checkRootTotals(ctx, t, cfg, root, false, 5, 3)
 
 	out := runSuggest(ctx, t, cfg, &SuggestFlags{N: 20})
 	if !strings.Contains(out, a+": 1 file, 1 missing link, eg. hl") || strings.Contains(out, "hardlinks_record_all:") {
@@ -90,7 +91,7 @@ func TestSuggestRecordAll(t *testing.T) {
 	// its files and hence h is no longer counted twice.
 	cfg = writeRecordAllConfig(t, tmpDir, root, suggested.RecordAll...)
 	analyzeWithConfig(ctx, t, cfg, root)
-	verifyHardlinkTree(ctx, t, cfg, root, true, 4, 4, 3)
+	checkRootTotals(ctx, t, cfg, root, true, 4, 4)
 	if out := runSuggest(ctx, t, cfg, &SuggestFlags{N: 20, Locate: true}); !strings.Contains(out, "no files with missing links") {
 		t.Errorf("unexpected suggestions: %v", out)
 	}
@@ -98,7 +99,7 @@ func TestSuggestRecordAll(t *testing.T) {
 
 func TestSuggestOutsideLinks(t *testing.T) {
 	ctx := context.Background()
-	tmpDir, root := newHardlinkTree(t)
+	tmpDir, root := clitest.NewHardlinkTree(t)
 	// b/h has a link outside of the filesystem, which is not counted twice.
 	if err := os.Link(filepath.Join(root, "b", "h"), filepath.Join(tmpDir, "outside")); err != nil {
 		t.Fatal(err)
@@ -113,7 +114,7 @@ func TestSuggestOutsideLinks(t *testing.T) {
 	}
 
 	// Rescan does not record hardlinks.
-	rescan := writeHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupRescan)
+	rescan := clitest.WriteHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupRescan)
 	if out := runSuggest(ctx, t, rescan, &SuggestFlags{}); !strings.Contains(out, "only detected when") {
 		t.Errorf("unexpected suggestions: %v", out)
 	}
@@ -121,14 +122,14 @@ func TestSuggestOutsideLinks(t *testing.T) {
 
 func TestSuggestMultipleOrigins(t *testing.T) {
 	ctx := context.Background()
-	tmpDir, root := newHardlinkTree(t)
+	tmpDir, root := clitest.NewHardlinkTree(t)
 	cfg := writeRecordAllConfig(t, tmpDir, root)
 	analyzeWithConfig(ctx, t, cfg, root)
 
 	// Create two new hardlinks to unchanged b/h across separate incremental
 	// analyze runs (first in a, then in c) so ReadMissingLinks has entries
 	// for the same inode from both prefixes.
-	linkUnchanged(t, root)
+	clitest.LinkUnchanged(t, root)
 	analyzeWithConfig(ctx, t, cfg, root)
 	if err := os.MkdirAll(filepath.Join(root, "c"), 0o755); err != nil {
 		t.Fatal(err)

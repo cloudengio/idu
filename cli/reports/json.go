@@ -8,14 +8,13 @@ import (
 	"bytes"
 	"encoding/json"
 
-	"cloudeng.io/cmd/idu/internal/cli"
-
+	"cloudeng.io/cmd/idu/cli/internal/snapshot"
 	"cloudeng.io/cmd/idu/report"
 )
 
 type jsonReports struct{}
 
-func (jr *jsonReports) generateReports(rf *GenerateFlags, filenames *reportFilenames, stats cli.StatsFile) error {
+func (jr *jsonReports) generateReports(rf *GenerateFlags, filenames *reportFilenames, stats snapshot.File) error {
 	return writeReportFiles(stats.Stats, filenames, jr.formatMerged, jr.formatUserGroupMerged, jr.formatDistributed, rf.JSON)
 }
 

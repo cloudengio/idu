@@ -2,7 +2,7 @@
 // Use of this source code is governed by the Apache-2.0
 // license that can be found in the LICENSE file.
 
-package stats
+package snapshot
 
 import (
 	"context"
@@ -16,21 +16,21 @@ import (
 	"cloudeng.io/cmd/idu/summary"
 )
 
-// errStoredUnusable is returned by computeFromStored when the stored state
+// ErrStoredUnusable is returned by FromStored when the stored state
 // cannot be used and the stats must be computed from the summaries instead.
-var errStoredUnusable = errors.New("the stored top-N rankings cannot be used")
+var ErrStoredUnusable = errors.New("the stored top-N rankings cannot be used")
 
-// computeFromStored constructs stats for the entire filesystem, rooted at
+// FromStored constructs stats for the entire filesystem, rooted at
 // root, from the recursive totals and rankings maintained by analyze, also
 // returning the per-ID ranking limit maintained in the stored state. It
-// returns an error that wraps errStoredUnusable if they are missing, may be
+// returns an error that wraps ErrStoredUnusable if they are missing, may be
 // out of date, or do not contain the top n entries.
-func (st *Commands) computeFromStored(ctx context.Context, db idudb.Reader, cfg *iduconfig.Settings, root string, n int) (*report.AllStats, int, error) {
+func (c Computer) FromStored(ctx context.Context, db idudb.Reader, cfg *iduconfig.Settings, root string, n int) (*report.AllStats, int, error) {
 	if cfg.CountHardlinkAsFiles && idudb.CheckSummaryRecording(ctx, db, cfg.CalculatorOrDefault().String(), stats.RecordLinkedFiles) == nil {
 		// The stored recursive totals and rankings deduplicate hardlinks
 		// whenever the summaries recorded them, so they cannot be used
 		// when counting hardlinks as separate files.
-		return nil, 0, fmt.Errorf("%w: stored totals deduplicate hardlinks", errStoredUnusable)
+		return nil, 0, fmt.Errorf("%w: stored totals deduplicate hardlinks", ErrStoredUnusable)
 	}
 	sr := summary.New(db, cfg)
 	if err := sr.Check(ctx); err != nil {
@@ -41,7 +41,7 @@ func (st *Commands) computeFromStored(ctx context.Context, db idudb.Reader, cfg 
 		return nil, 0, storedUnusable(err)
 	}
 	if !ok {
-		return nil, 0, fmt.Errorf("%w: no recursive totals for %v", errStoredUnusable, root)
+		return nil, 0, fmt.Errorf("%w: no recursive totals for %v", ErrStoredUnusable, root)
 	}
 	sdb := report.NewAllStats(root, n)
 	// The distributed subtree statistics require a pass over all of the
@@ -68,26 +68,29 @@ func (st *Commands) computeFromStored(ctx context.Context, db idudb.Reader, cfg 
 	if perIDN == 0 {
 		perIDN = cfg.TopNPerIDOrDefault()
 	}
+	// The rankings maintained by analyze do not include the number of
+	// hardlinks.
+	sdb.ClearHardlinkRankings()
 	return sdb, perIDN, nil
 }
 
 func storedUnusable(err error) error {
 	for _, target := range []error{summary.ErrNoTopN, summary.ErrStaleTopN, idudb.ErrStaleSubtrees, idudb.ErrStaleSummaries} {
 		if errors.Is(err, target) {
-			return fmt.Errorf("%w: %w", errStoredUnusable, err)
+			return fmt.Errorf("%w: %w", ErrStoredUnusable, err)
 		}
 	}
 	return err
 }
 
-// exact returns an error wrapping errStoredUnusable unless top contains
+// exact returns an error wrapping ErrStoredUnusable unless top contains
 // the exact top n entries.
 func exact(what string, m stats.Metric, top summary.TopN, n int) error {
 	if n <= 0 || n > top.N {
-		return fmt.Errorf("%w: %v entries requested but only %v are maintained", errStoredUnusable, n, top.N)
+		return fmt.Errorf("%w: %v entries requested but only %v are maintained", ErrStoredUnusable, n, top.N)
 	}
 	if top.Certified < len(top.Entries) {
-		return fmt.Errorf("%w: the %v ranking by %v is not exact", errStoredUnusable, what, m)
+		return fmt.Errorf("%w: the %v ranking by %v is not exact", ErrStoredUnusable, what, m)
 	}
 	return nil
 }

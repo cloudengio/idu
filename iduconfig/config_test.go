@@ -25,7 +25,7 @@ filesystems:
   - name: tmp
     prefix: /tmp
     database: ./db-tmp
-    stats_dir: ${HOME}/stats-tmp
+    snapshot_dir: ${HOME}/snapshots-tmp
     exclusions:
       - something
     layout:
@@ -129,7 +129,7 @@ func TestDefaults(t *testing.T) {
 	if got, want := dp.ScanSize, 4; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
-	if got, want := dp.StatsDir, "stats"; got != want {
+	if got, want := dp.SnapshotDir, ""; got != want {
 		t.Errorf("got %v, want %v", got, want)
 	}
 
@@ -580,8 +580,8 @@ func TestExampleConfig(t *testing.T) {
 	if _, ok := cfg.ForPrefix("/Users/cnicolaou"); !ok {
 		t.Errorf("expected /Users/cnicolaou in example-config.yml")
 	}
-	if p, ok := settingsForName(cfg, "home"); !ok || p.StatsDir != "./stats/home" || p.CompactionInterval() != 7*24*time.Hour+12*time.Hour {
-		t.Errorf("expected name home with stats_dir ./stats/home and 7d12h compact interval in example-config.yml, got %+v, %v", p, ok)
+	if p, ok := settingsForName(cfg, "home"); !ok || p.SnapshotDir != "./snapshots/home" || p.CompactionInterval() != 7*24*time.Hour+12*time.Hour {
+		t.Errorf("expected name home with snapshot_dir ./snapshots/home and 7d12h compact interval in example-config.yml, got %+v, %v", p, ok)
 	}
 	if _, ok := cfg.ForPrefix("/labs/asbhatt/data"); !ok {
 		t.Errorf("expected /labs/asbhatt in example-config.yml")
@@ -599,7 +599,8 @@ func TestDocumentation(t *testing.T) {
 		"filesystem_config_files:",
 		"name:",
 		"prefix:",
-		"stats_dir:",
+		"snapshot_dir:",
+		"reports_dir:",
 		"compact_interval_days:",
 		"compact_interval:",
 		"topn:",
