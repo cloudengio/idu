@@ -61,6 +61,23 @@ type DB struct {
 	// state derived from it, such as the top-N rankings, may contain
 	// stale entries.
 	previousSummaryFailed atomic.Bool
+	// progress, if set, is notified of the phases of an analysis and of
+	// the maintenance that follows it, see startPhase.
+	progress ScanProgress
+}
+
+// startPhase reports, and logs, the start of a phase of an analysis, or
+// of the maintenance that follows it, and returns a function that logs its
+// completion and duration.
+func (sdb *DB) startPhase(ctx context.Context, name string) func() {
+	if sdb.progress != nil {
+		sdb.progress.Phase(name)
+	}
+	ctxlog.Info(ctx, "phase started", "phase", name)
+	start := time.Now()
+	return func() {
+		ctxlog.Info(ctx, "phase done", "phase", name, "duration", time.Since(start))
+	}
 }
 
 // New returns a DB that uses the supplied, writable, database backend. The
@@ -116,6 +133,7 @@ func (sdb *DB) markSummariesComplete(ctx context.Context) error {
 	}
 	// Ensure that all of the rewritten summaries are persisted before
 	// recording that they are complete.
+	defer sdb.startPhase(ctx, PhaseFlushSummaries)()
 	if err := sdb.db.Flush(ctx); err != nil {
 		return err
 	}
@@ -150,10 +168,12 @@ func (sdb *DB) logAndMaintain(ctx context.Context, start, stop time.Time, detail
 	if sdb.compactInterval != 0 && !sdb.lastWritten.IsZero() && time.Since(sdb.lastWritten) > sdb.compactInterval {
 		if c, ok := sdb.db.(compactor); ok {
 			ctxlog.Info(ctx, "compacting database", "interval", sdb.compactInterval, "last_written", sdb.lastWritten)
+			defer sdb.startPhase(ctx, PhaseCompact)()
 			return c.Compact(ctx)
 		}
 	}
 	if gc, ok := sdb.db.(valueLogGCRunner); ok {
+		defer sdb.startPhase(ctx, PhaseValueLogGC)()
 		return gc.RunValueLogGC(0.5)
 	}
 	return nil

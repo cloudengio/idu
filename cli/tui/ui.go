@@ -234,6 +234,31 @@ func (u *ui) showDialog(kind, message string, buttons ...dialogButton) {
 	u.app.SetFocus(modal)
 }
 
+// helpPage is the name of the page used to display help, see showHelp.
+const helpPage = "help"
+
+// showHelp displays text, which may contain color tags, in a scrollable
+// window in the centre of the screen until escape, enter, q or ? is
+// pressed. It must be called on the tui's goroutine.
+func (u *ui) showHelp(title, text string) {
+	focus := u.app.GetFocus()
+	tv := tview.NewTextView().SetDynamicColors(true).SetWrap(true).SetWordWrap(true).SetText(text)
+	tv.SetBorder(true).SetTitle(" " + title + " help [::d](escape to close)[::-] ")
+	tv.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+		if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyEnter || ev.Rune() == 'q' || ev.Rune() == '?' {
+			u.pages.RemovePage(helpPage)
+			u.app.SetFocus(focus)
+			return nil
+		}
+		return ev
+	})
+	// The window is centred and uses most of the screen.
+	grid := tview.NewGrid().SetColumns(0, -8, 0).SetRows(0, -8, 0).AddItem(tv, 1, 1, 1, 1, 0, 0, true)
+	u.pages.RemovePage(helpPage)
+	u.pages.AddPage(helpPage, grid, true, true)
+	u.app.SetFocus(tv)
+}
+
 // showError displays err in a dialog, it may be called from any
 // goroutine, including the tui's, see displayStatuses.
 func (u *ui) showError(format string, args ...any) {
@@ -524,7 +549,7 @@ func trimNewline(s string) string {
 }
 
 func (u *ui) input(ev *tcell.EventKey) *tcell.EventKey {
-	if u.waiting() || u.dialogOpen() || u.menu.IsOpen() || u.app.GetFocus() == u.menu {
+	if u.waiting() || u.dialogOpen() || u.pages.HasPage(helpPage) || u.menu.IsOpen() || u.app.GetFocus() == u.menu {
 		if ev.Key() == tcell.KeyCtrlC {
 			u.quit()
 			return nil

@@ -1,4 +1,5 @@
 # Package [cloudeng.io/cmd/idu/idudb](https://pkg.go.dev/cloudeng.io/cmd/idu/idudb?tab=doc)
+[![CircleCI](https://circleci.com/gh/cloudengio/go.gotools.svg?style=svg)](https://circleci.com/gh/cloudengio/go.gotools) [![Go Report Card](https://goreportcard.com/badge/cloudeng.io/cmd/idu/idudb)](https://goreportcard.com/report/cloudeng.io/cmd/idu/idudb)
 
 ```go
 import cloudeng.io/cmd/idu/idudb
@@ -17,6 +18,25 @@ Log messages are written to the logger, if any, in the context supplied to
 each method, see cloudeng.io/logging/ctxlog.
 
 ## Constants
+### PhaseDeleteErrors, PhaseScan, PhaseFlushSummaries, PhaseFlush, PhaseLinks, PhaseSubtrees, PhaseRefreshTopN, PhaseRebuildTopN, PhaseWriteTopN, PhaseMissingLinks, PhaseCompact, PhaseValueLogGC
+```go
+const (
+	PhaseDeleteErrors   = "deleting the errors recorded by the previous analysis"
+	PhaseScan           = "scanning the filesystem"
+	PhaseFlushSummaries = "flushing the rewritten summaries"
+	PhaseFlush          = "flushing the database"
+	PhaseLinks          = "updating the hardlink index"
+	PhaseSubtrees       = "updating the recursive totals"
+	PhaseRefreshTopN    = "recomputing the top-N rankings from all of the summaries"
+	PhaseRebuildTopN    = "rebuilding the recursive totals, hardlink index and top-N rankings from all of the summaries"
+	PhaseWriteTopN      = "writing the top-N rankings"
+	PhaseMissingLinks   = "finding files with links that have not been seen"
+	PhaseCompact        = "compacting the database"
+	PhaseValueLogGC     = "garbage collecting the database's value log"
+)
+```
+The phases of an analysis, others may be reported.
+
 ### DefaultSlowScanThreshold
 ```go
 const DefaultSlowScanThreshold = 10 * time.Second
@@ -716,6 +736,12 @@ type ScanProgress interface {
 	// see WithRestat, with the number of files re-stat'ed and the number
 	// of those that had changed.
 	Restated(files, changed int)
+	// Phase is called when the analysis starts a new phase, with a
+	// description of it, eg. once the filesystem has been scanned and the
+	// database is being updated, see the Phase* constants. Phases that
+	// operate on the database, rather than the filesystem, may take a long
+	// time without any other progress being reported.
+	Phase(name string)
 }
 ```
 ScanProgress is notified of the progress of an analysis. Its methods may be

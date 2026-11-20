@@ -48,7 +48,29 @@ type ScanProgress interface {
 	// see WithRestat, with the number of files re-stat'ed and the number
 	// of those that had changed.
 	Restated(files, changed int)
+	// Phase is called when the analysis starts a new phase, with a
+	// description of it, eg. once the filesystem has been scanned and the
+	// database is being updated, see the Phase* constants. Phases that
+	// operate on the database, rather than the filesystem, may take a long
+	// time without any other progress being reported.
+	Phase(name string)
 }
+
+// The phases of an analysis, others may be reported.
+const (
+	PhaseDeleteErrors   = "deleting the errors recorded by the previous analysis"
+	PhaseScan           = "scanning the filesystem"
+	PhaseFlushSummaries = "flushing the rewritten summaries"
+	PhaseFlush          = "flushing the database"
+	PhaseLinks          = "updating the hardlink index"
+	PhaseSubtrees       = "updating the recursive totals"
+	PhaseRefreshTopN    = "recomputing the top-N rankings from all of the summaries"
+	PhaseRebuildTopN    = "rebuilding the recursive totals, hardlink index and top-N rankings from all of the summaries"
+	PhaseWriteTopN      = "writing the top-N rankings"
+	PhaseMissingLinks   = "finding files with links that have not been seen"
+	PhaseCompact        = "compacting the database"
+	PhaseValueLogGC     = "garbage collecting the database's value log"
+)
 
 type nullProgress struct{}
 
@@ -62,6 +84,7 @@ func (nullProgress) ChildrenUnchanged()    {}
 func (nullProgress) SlowScan()             {}
 func (nullProgress) SyncScans(int64)       {}
 func (nullProgress) Restated(int, int)     {}
+func (nullProgress) Phase(string)          {}
 
 // Analyzer scans a filesystem and records the metadata for every prefix
 // (directory) and file in a DB. Subsequent analyses are incremental, in that
@@ -148,7 +171,13 @@ func sameRoot(goos, a, b string) bool {
 // Analyze returns when all filesystem and database operations have
 // completed, including when ctx is canceled.
 func (a *Analyzer) Analyze(ctx context.Context, target string) error {
-	if err := a.db.deleteErrors(ctx, target); err != nil {
+	// The phases of the analysis, and of any subsequent maintenance by
+	// LogAndClose, are reported to the analysis's progress.
+	a.db.progress = a.opts.progress
+	done := a.db.startPhase(ctx, PhaseDeleteErrors)
+	err := a.db.deleteErrors(ctx, target)
+	done()
+	if err != nil {
 		return fmt.Errorf("DeleteErrors: %v", err)
 	}
 	w := &walker{
@@ -189,7 +218,9 @@ func (a *Analyzer) Analyze(ctx context.Context, target string) error {
 	}
 
 	errs := errors.M{}
+	done = a.db.startPhase(ctx, PhaseScan)
 	errs.Append(w.fw.Walk(ctx, target))
+	done()
 	// Summaries are only known to be consistent with the current configuration
 	// once the entire prefix has been scanned without interruption.
 	if errs.Err() == nil && ctx.Err() == nil && sameRoot(runtime.GOOS, target, a.root) {
@@ -204,12 +235,14 @@ func (a *Analyzer) Analyze(ctx context.Context, target string) error {
 	}
 	// Persist all of the changes before reporting that they are done,
 	// regardless of any errors or cancelation.
+	done = a.db.startPhase(ctx, PhaseFlush)
 	if err := a.db.db.Flush(context.WithoutCancel(ctx)); err != nil {
 		errs.Append(err)
 		if scanErr == nil {
 			scanErr = err
 		}
 	}
+	done()
 	errs.Append(obs.ScanDone(ctx, scanErr))
 	return errs.Err()
 }

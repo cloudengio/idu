@@ -63,3 +63,11 @@ func TestProgressTracker_DisplayAndCounters(t *testing.T) {
 		})
 	}
 }
+
+func TestPhaseLine(t *testing.T) {
+	now := time.Date(2026, 11, 20, 14, 5, 6, 0, time.UTC)
+	got := phaseLine("updating the recursive totals", 12500*time.Millisecond, 90*time.Second, now)
+	if want := "updating the recursive totals for 12s, total 1m30s (14:05:06)"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}

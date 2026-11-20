@@ -64,6 +64,7 @@ func (nullProgress) ChildrenUnchanged()     {}
 func (nullProgress) SlowScan()              {}
 func (nullProgress) SyncScans(int64)        {}
 func (nullProgress) Restated(int, int)      {}
+func (nullProgress) Phase(string)           {}
 func (nullProgress) Stop()                  {}
 func (nullProgress) Summary() Summary       { return Summary{} }
 func (nullProgress) Report(context.Context) {}
