@@ -29,4 +29,11 @@ func TestDatabaseSize(t *testing.T) {
 	if _, err := idudb.DatabaseSize(filepath.Join(dir, "missing")); err == nil {
 		t.Error("expected an error for a missing directory")
 	}
+	// Symlinks inside the database directory must not be counted as regular file bytes.
+	if err := os.Symlink(filepath.Join(dir, "a.sst"), filepath.Join(dir, "link.sst")); err == nil {
+		got, err := idudb.DatabaseSize(dir)
+		if err != nil || got != 123 {
+			t.Errorf("with symlink: got %v, %v, want 123", got, err)
+		}
+	}
 }

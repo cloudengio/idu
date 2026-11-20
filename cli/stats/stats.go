@@ -350,10 +350,7 @@ func resolveStatsFilename(ctx context.Context, env *cli.Env, fsFlag, statsDirFla
 	if len(statsDirFlag) > 0 {
 		return filepath.Join(statsDirFlag, name), nil
 	}
-	if len(fsFlag) == 0 {
-		fsFlag = env.FS
-	}
-	pcfg, _, err := cli.LookupFSFor(env.Config, fsFlag, "")
+	pcfg, _, err := env.ForFS(fsFlag).LookupFS("")
 	if err != nil {
 		if loadErr := cli.ConfigLoadError(ctx); loadErr != nil {
 			return "", loadErr
@@ -391,11 +388,11 @@ func (st *Commands) View(ctx context.Context, values interface{}, args []string)
 	when := stats.Date
 
 	if len(af.User) != 0 {
-		return st.userOrGroup(af, stats, af.User, usernames.Manager.UIDForName)
+		return st.userOrGroup(af, stats, af.User, usernames.Manager.UIDForName, sdb.PerUser, usernames.Manager.NameForUID)
 	}
 
 	if len(af.Group) != 0 {
-		return st.userOrGroup(af, stats, af.Group, usernames.Manager.GIDForName)
+		return st.userOrGroup(af, stats, af.Group, usernames.Manager.GIDForName, sdb.PerGroup, usernames.Manager.NameForGID)
 	}
 
 	heapFormatter[string]{fmtSize: st.env.FmtSize}.formatTotals(sdb.Prefix, os.Stdout)
@@ -425,8 +422,7 @@ func (st *Commands) View(ctx context.Context, values interface{}, args []string)
 	return nil
 }
 
-func (st *Commands) userOrGroup(af *ViewFlags, stats cli.StatsFile, name string, mapper func(string) (int64, error)) error {
-	sdb := stats.Stats
+func (st *Commands) userOrGroup(af *ViewFlags, stats cli.StatsFile, name string, mapper func(string) (int64, error), perID report.PerIDStats, nameForID func(int64) string) error {
 	when := stats.Date
 
 	id, err := mapper(name)
@@ -435,7 +431,7 @@ func (st *Commands) userOrGroup(af *ViewFlags, stats cli.StatsFile, name string,
 	}
 
 	cli.Banner(os.Stdout, "=", "Usage by %v as of: %v\n", name, when)
-	st.formatPerIDStats(sdb.PerUser, os.Stdout, usernames.Manager.NameForUID, map[int64]bool{id: true}, af.DisplayN)
+	st.formatPerIDStats(perID, os.Stdout, nameForID, map[int64]bool{id: true}, af.DisplayN)
 	return nil
 }
 

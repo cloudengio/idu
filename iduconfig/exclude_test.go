@@ -82,6 +82,17 @@ func TestExcludeFuncDatabase(t *testing.T) {
 			t.Errorf("%v: not excluded", p)
 		}
 	}
+
+	// Same when the database directory does not exist yet beneath a symlinked parent.
+	futureLink := filepath.Join(link, "future-db")
+	futureResolved := filepath.Join(resolved, "future-db")
+	futureExclude := (&Settings{Database: futureLink}).ExcludeFunc()
+	for _, p := range []string{futureLink, futureResolved, filepath.Join(futureResolved, "000596.sst")} {
+		if !futureExclude(p) {
+			t.Errorf("nonexistent db beneath symlink: %v: not excluded", p)
+		}
+	}
+
 	if (&Settings{}).ExcludeFunc()(db) {
 		t.Error("no database is configured")
 	}

@@ -109,18 +109,26 @@ func (rc *Commands) generateReports(_ context.Context, rf *GenerateFlags) error 
 		return fmt.Errorf("no report requested, please specify one of --tsv, --json or --markdown")
 	}
 
-	var err error
+	var errs errors.M
 	var filenames *reportFilenames
-	if rf.TSV > 0 {
-		filenames, err = rc.reportsFor(rf, ".tsv")
+	for _, spec := range []struct {
+		n   int
+		ext string
+	}{
+		{rf.TSV, ".tsv"},
+		{rf.JSON, ".json"},
+		{rf.Markdown, ".md"},
+	} {
+		if spec.n > 0 {
+			fn, err := rc.reportsFor(rf, spec.ext)
+			if err != nil {
+				errs.Append(err)
+			} else {
+				filenames = fn
+			}
+		}
 	}
-	if rf.JSON > 0 {
-		filenames, err = rc.reportsFor(rf, ".json")
-	}
-	if rf.Markdown > 0 {
-		filenames, err = rc.reportsFor(rf, ".md")
-	}
-	if err != nil {
+	if err := errs.Err(); err != nil {
 		return err
 	}
 

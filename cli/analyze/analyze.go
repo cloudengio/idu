@@ -22,7 +22,6 @@ import (
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/internal/cli"
-	"cloudeng.io/cmdutil/cmdtypes"
 	"cloudeng.io/errors"
 	"cloudeng.io/file/filewalk"
 	"cloudeng.io/file/filewalk/asyncstat"
@@ -164,19 +163,19 @@ func (alz *Commands) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *Flags,
 	}
 	errs.Append(summarizeAndLog(ctx, db, pt, start))
 	dbClosed = true
-	reportDatabaseSize(ctx, cfg.Database)
+	reportDatabaseSize(ctx, env, cfg.Database)
 	return cli.SquashCanceled(errs.Err())
 }
 
 // reportDatabaseSize reports the size of the database, which is excluded from
 // the analysis itself, once it has been closed.
-func reportDatabaseSize(ctx context.Context, dir string) {
+func reportDatabaseSize(ctx context.Context, env *cli.Env, dir string) {
 	size, err := idudb.DatabaseSize(dir)
 	if err != nil {
 		ctxlog.Error(ctx, "failed to determine the database size", "database", dir, "error", err)
 		return
 	}
-	fmt.Printf("database: %v: %v\n", dir, cmdtypes.ByteSize(size))
+	fmt.Printf("database: %v: %v\n", dir, strings.TrimSpace(env.FmtSize(size)))
 	ctxlog.Info(ctx, "database size", "database", dir, "bytes", size)
 }
 

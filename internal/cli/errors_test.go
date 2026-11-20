@@ -56,4 +56,13 @@ func TestSquashCanceled(t *testing.T) {
 	if got := SquashCanceled(other); got != other {
 		t.Errorf("got %v, want %v", got, other)
 	}
+
+	wrapped := fmt.Errorf("wrapped: %w", top)
+	squashedWrapped := SquashCanceled(wrapped)
+	if got := strings.Count(squashedWrapped.Error(), "context canceled"); got != 1 {
+		t.Errorf("wrapped: got %v instances of context canceled: %v", got, squashedWrapped)
+	}
+	if !errors.Is(squashedWrapped, other) {
+		t.Errorf("wrapped: errors.Is(other) is false")
+	}
 }

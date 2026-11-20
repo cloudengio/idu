@@ -5,6 +5,8 @@
 package iduconfig
 
 import (
+	"errors"
+	"io/fs"
 	"path/filepath"
 	"runtime"
 )
@@ -22,6 +24,27 @@ func pseudoFilesystems(goos string) []string {
 	return nil
 }
 
+// evalSymlinksExisting resolves symbolic links for p, or for its nearest
+// existing ancestor when p itself does not yet exist on disk.
+func evalSymlinksExisting(p string) (string, bool) {
+	resolved, err := filepath.EvalSymlinks(p)
+	if err == nil {
+		return resolved, true
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return "", false
+	}
+	parent := filepath.Dir(p)
+	if parent == p {
+		return "", false
+	}
+	resolvedParent, ok := evalSymlinksExisting(parent)
+	if !ok {
+		return "", false
+	}
+	return filepath.Join(resolvedParent, filepath.Base(p)), true
+}
+
 // databaseDirs returns db and, if different, db with symbolic links resolved,
 // as an absolute path.
 func databaseDirs(db string) []string {
@@ -33,7 +56,7 @@ func databaseDirs(db string) []string {
 		abs = db
 	}
 	dirs := []string{cleanPath(abs)}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil && cleanPath(resolved) != dirs[0] {
+	if resolved, ok := evalSymlinksExisting(abs); ok && cleanPath(resolved) != dirs[0] {
 		dirs = append(dirs, cleanPath(resolved))
 	}
 	return dirs

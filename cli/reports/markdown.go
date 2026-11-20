@@ -232,7 +232,7 @@ const mdPerUsersGroupsTemplate = `
 ## {{.UserOrGroup}} {{fmtID $id}}: top {{.TopN}} prefixes by prefix bytes
 | Prefix Bytes | Prefix |
 | ---: | :--- |
-{{range .Prefixes}}| {{fmtBytes .K}} | {{.V}} |
+{{range .PrefixBytes}}| {{fmtBytes .K}} | {{.V}} |
 {{end}}
 
 {{end}}

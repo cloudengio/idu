@@ -6,6 +6,7 @@ package cli
 
 import (
 	"context"
+	stderrors "errors"
 
 	"cloudeng.io/errors"
 )
@@ -21,7 +22,8 @@ func SquashCanceled(err error) error {
 	if err == nil {
 		return nil
 	}
-	if _, ok := err.(*errors.M); !ok {
+	var m *errors.M
+	if !stderrors.As(err, &m) {
 		return err
 	}
 	flat := &errors.M{}
@@ -33,12 +35,16 @@ func SquashCanceled(err error) error {
 }
 
 func flatten(dst *errors.M, err error) {
-	m, ok := err.(*errors.M)
-	if !ok {
-		dst.Append(err)
+	if u, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, e := range u.Unwrap() {
+			flatten(dst, e)
+		}
 		return
 	}
-	for _, e := range m.Unwrap() {
-		flatten(dst, e)
+	var m *errors.M
+	if stderrors.As(err, &m) {
+		flatten(dst, m)
+		return
 	}
+	dst.Append(err)
 }
