@@ -132,7 +132,46 @@ func CheckSummaryRecording(ctx context.Context, db Reader, calcID string, rec st
 			return nil
 		}
 	}
-	return ErrStaleSummaries
+	return fmt.Errorf("%w: they %v, but %v are required", ErrStaleSummaries,
+		describeSpec(metaBuf.String()), describeRequirement(calcID, rec))
+}
+
+// describeSpec describes the summaries recorded by spec, as stored in the
+// database's metadata.
+func describeSpec(spec string) string {
+	switch spec {
+	case "":
+		return "have not been computed"
+	case invalidSummariesSpec:
+		return "are incomplete since a previous analysis did not finish writing them"
+	}
+	calc, rest, _ := strings.Cut(spec, ";")
+	parts := strings.Split(rest, ";")
+	version, recording := "", "no hardlink information"
+	for _, p := range parts {
+		switch {
+		case strings.HasPrefix(p, "v"):
+			version = p
+		case p == strings.TrimPrefix(hardlinksSpecSuffix, ";"):
+			recording = "the files that may be hardlinks"
+		case p == strings.TrimPrefix(allFilesSpecSuffix, ";"):
+			recording = "every file"
+		case strings.HasPrefix(p, strings.TrimPrefix(recordAllSpecSep, ";")):
+			recording += ", and every file for the prefixes in hardlinks_record_all"
+		}
+	}
+	return fmt.Sprintf("were computed with the %q calculator, format %v, recording %v", calc, version, recording)
+}
+
+// describeRequirement describes the summaries required by
+// CheckSummaryRecording.
+func describeRequirement(calcID string, rec stats.HardlinkRecording) string {
+	recording := map[stats.HardlinkRecording]string{
+		stats.RecordNoFiles:     "any hardlink information",
+		stats.RecordLinkedFiles: "at least the files that may be hardlinks",
+		stats.RecordAllFiles:    "every file",
+	}[rec]
+	return fmt.Sprintf("summaries computed with the %q calculator, format %v, recording %v", calcID, strings.TrimPrefix(summaryFormatSuffix, ";"), recording)
 }
 
 // CheckSummaryKeys returns ErrStaleSummaries if a summary could not be
@@ -143,7 +182,7 @@ func CheckSummaryKeys(ctx context.Context, db Reader) error {
 		return err
 	}
 	if metaBuf.String() == invalidSummariesSpec {
-		return ErrStaleSummaries
+		return fmt.Errorf("%w: they %v", ErrStaleSummaries, describeSpec(invalidSummariesSpec))
 	}
 	return nil
 }

@@ -124,6 +124,14 @@ Option configures the Commands created by New.
 ### Functions
 
 ```go
+func WithOutput(w io.Writer) Option
+```
+WithOutput sets the writer for the messages, other than progress,
+that are displayed during an analysis, eg. its configuration, it defaults to
+os.Stdout.
+
+
+```go
 func WithProgress(newProgress NewProgress) Option
 ```
 WithProgress sets the function used to create the Progress for each

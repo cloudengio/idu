@@ -1,4 +1,5 @@
 # Package [cloudeng.io/cmd/idu/summary](https://pkg.go.dev/cloudeng.io/cmd/idu/summary?tab=doc)
+[![CircleCI](https://circleci.com/gh/cloudengio/go.gotools.svg?style=svg)](https://circleci.com/gh/cloudengio/go.gotools) [![Go Report Card](https://goreportcard.com/badge/cloudeng.io/cmd/idu/summary)](https://goreportcard.com/report/cloudeng.io/cmd/idu/summary)
 
 ```go
 import cloudeng.io/cmd/idu/summary
@@ -179,6 +180,18 @@ func (r *Reader) Check(ctx context.Context) error
 Check returns idudb.ErrStaleSummaries unless the database contains a
 complete set of summaries computed with the configuration the Reader was
 created with.
+
+
+```go
+func (r *Reader) CheckCompatible(ctx context.Context) error
+```
+CheckCompatible returns an error, which wraps idudb.ErrStaleSummaries,
+if the summaries are incomplete or were computed with a different calculator
+or format, ie. if they cannot be used at all. Unlike Check it does not
+require that they record the information needed to deduplicate hardlinks as
+configured, which is only needed for exact totals when there are hardlinks;
+summaries that pass CheckCompatible but not Check may count hardlinks more
+than once.
 
 
 ```go

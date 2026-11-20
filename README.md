@@ -223,6 +223,11 @@ rankings are not part of the state maintained by analyze and hence require a
 full pass over the database, which is saved as a snapshot, unless the current
 snapshot already includes them.
 
+`idu tui` provides an interactive, terminal based, view of a filesystem: its
+prefixes as a tree, together with the summary of, and the top-N rankings
+beneath, the highlighted prefix, and a menu for running analyze. See
+[tui-design.md](tui-design.md).
+
 Per-user or per-group statistics can be viewed as follows, subset by the same
 flags:
 

@@ -19,6 +19,7 @@
 //	          analyze - analyze the file system to build a database of directory and file metadata.
 //	             logs - list the log of past operations stored in the database.
 //	           errors - list the errors stored in the database
+//	              tui - an interactive, terminal based, view of the filesystem specified by --fs that displays its prefixes as a tree together with the summary of, and the top-N rankings beneath, the highlighted prefix, and can run analyze, see tui-design.md. The optional prefix is highlighted initially.
 //	             find - find prefixes/files in the database that match the supplied expression.
 //	            stats - compute and display statistics from the database.
 //	          reports - generate and manage reports.

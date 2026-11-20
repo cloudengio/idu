@@ -33,7 +33,7 @@ func (c Computer) FromStored(ctx context.Context, db idudb.Reader, cfg *iduconfi
 		return nil, 0, fmt.Errorf("%w: stored totals deduplicate hardlinks", ErrStoredUnusable)
 	}
 	sr := summary.New(db, cfg)
-	if err := sr.Check(ctx); err != nil {
+	if err := c.check(ctx, sr); err != nil {
 		return nil, 0, storedUnusable(err)
 	}
 	total, ok, err := sr.Subtree(ctx, root)

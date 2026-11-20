@@ -22,6 +22,7 @@ import (
 	"cloudeng.io/cmd/idu/cli/find"
 	"cloudeng.io/cmd/idu/cli/reports"
 	"cloudeng.io/cmd/idu/cli/stats"
+	"cloudeng.io/cmd/idu/cli/tui"
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/internal/cli"
 	"cloudeng.io/cmdutil"
@@ -60,6 +61,11 @@ commands:
 
   - name: errors
     summary: list the errors stored in the database
+    arguments:
+      - '[<prefix>]'
+
+  - name: tui
+    summary: an interactive, terminal based, view of the filesystem specified by --fs that displays its prefixes as a tree together with the summary of, and the top-N rankings beneath, the highlighted prefix, and can run analyze, see tui-design.md. The optional prefix is highlighted initially.
     arguments:
       - '[<prefix>]'
 
@@ -157,6 +163,18 @@ func requireConfig(runner subcmd.Runner) subcmd.Runner {
 // squashErrors returns a runner that squashes the, potentially thousands
 // of, context.Canceled and context.DeadlineExceeded errors returned by
 // runner when it is interrupted, see cli.SquashCanceled.
+// logsToFile returns true if log output is written to a file, rather than
+// the terminal, as specified by the --log-* flags or the configuration.
+func logsToFile() bool {
+	toFile := func(file, temp string) bool {
+		return temp != "" || (file != "" && file != "-")
+	}
+	if toFile(globalFlags.File, globalFlags.TempFile) {
+		return true
+	}
+	return toFile(env.Config.Logging.File, env.Config.Logging.TempFile)
+}
+
 func squashErrors(runner subcmd.Runner) subcmd.Runner {
 	return func(ctx context.Context, flagValues any, args []string) error {
 		return cli.SquashCanceled(runner(ctx, flagValues, args))
@@ -186,6 +204,9 @@ func newCommandSet() *subcmd.CommandSetYAML {
 	rpts := reports.New(env)
 	cmdSet.Set("reports", "generate").MustRunner(squashErrors(rpts.Generate), &reports.GenerateFlags{})
 	cmdSet.Set("reports", "locate").MustRunner(squashErrors(rpts.Locate), &reports.LocateFlags{})
+
+	ui := tui.New(env, tui.WithLogToFile(logsToFile))
+	cmdSet.Set("tui").MustRunner(squashErrors(requireConfig(ui.TUI)), &tui.Flags{})
 
 	fnd := find.New(env)
 	cmdSet.Set("find").MustRunner(squashErrors(requireConfig(fnd.Find)), &find.Flags{})
