@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 
-	"cloudeng.io/cmdutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -156,14 +155,6 @@ const deprecatedRootKey = "prefix"
 type filesystemYAML struct {
 	Root     `yaml:",inline"`
 	KeyRange `yaml:",inline"`
-}
-
-// docT mirrors T for the purposes of documentation since the Filesystem
-// interface used in T cannot be described.
-type docT struct {
-	ConfigFiles Files                 `yaml:"filesystem_config_files" doc:"other configuration files to search for and merge"`
-	Filesystems []filesystemYAML      `yaml:"filesystems" doc:"the filesystem configurations to be analyzed, each of which specifies either a root for a hierarchical filesystem or a start_prefix and/or stop_prefix for a range of keys in a key oriented store"`
-	Logging     cmdutil.LoggingConfig `yaml:"logging" doc:"logging configuration, it may be overridden by the --log-* command line flags"`
 }
 
 // decodeFilesystem decodes a single filesystem entry as either a *Root or

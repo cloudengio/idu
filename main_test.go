@@ -308,16 +308,17 @@ func TestConfigShowAndCommandsOnLoadError(t *testing.T) {
 
 	env := append(os.Environ(), "HOME="+home, "APPDATA="+filepath.Join(home, ".config"), "IDU_CONFIG=", "IDU_ENV=")
 
+	// config show has no pre-hooks and hence displays the files that were
+	// read even though they could not be loaded.
 	out, err := runIDUEnv(env, "config", "show")
-	if err == nil {
-		t.Fatalf("expected config show to fail on invalid config, got output:\n%s", out)
+	if err != nil {
+		t.Fatalf("config show: %v: %s", err, out)
 	}
 	if err := containsAnyOf(out,
 		"# Configuration file: "+mainFile,
 		"# Configuration file: "+fsA,
 		"# Configuration file: "+fsBad,
 		"# Environment variables file: "+envFile,
-		"failed to load configuration",
 	); err != nil {
 		t.Fatalf("config show output mismatch: %v", err)
 	}
@@ -335,12 +336,20 @@ func TestConfigShowAndCommandsOnLoadError(t *testing.T) {
 		t.Fatalf("expected config describe to succeed even with broken config: %v", err)
 	}
 
-	// Explicit missing --config reports none and mentions the missing path.
+	// An explicit, missing, --config is an error, that names the file, for
+	// commands that require the configuration, but not for config show.
 	out, err = runIDUEnv(env, "--config=does-not-exist.yaml", "config", "show")
+	if err != nil {
+		t.Fatalf("config show: %v: %s", err, out)
+	}
+	if err := containsAnyOf(out, "# Configuration file: none"); err != nil {
+		t.Fatalf("missing --config output mismatch: %v", err)
+	}
+	out, err = runIDUEnv(env, "--config=does-not-exist.yaml", "analyze", "a")
 	if err == nil {
 		t.Fatalf("expected error for missing --config, got output:\n%s", out)
 	}
-	if err := containsAnyOf(out, "# Configuration file: none", "does-not-exist.yaml"); err != nil {
+	if err := containsAnyOf(out, "does-not-exist.yaml"); err != nil {
 		t.Fatalf("missing --config output mismatch: %v", err)
 	}
 }

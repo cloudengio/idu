@@ -368,7 +368,7 @@ var tYAMLFields = structYAMLFields(T{})
 
 type T struct {
 	ConfigFiles Files                 `yaml:"filesystem_config_files,omitempty" doc:"other configuration files to search for and merge"`
-	Filesystems Filesystems           `yaml:"filesystems" doc:"the filesystem configurations to be analyzed"`
+	Filesystems Filesystems           `yaml:"filesystems" doc:"the filesystem configurations to be analyzed, see Filesystem entries below"`
 	Logging     cmdutil.LoggingConfig `yaml:"logging,omitempty" doc:"logging configuration, it may be overridden by the --log-* command line flags"`
 }
 
@@ -616,23 +616,6 @@ func ReadConfig(filenames ...string) (T, error) {
 		return T{}, wrapFilesError(filenames, err)
 	}
 	return cfg, nil
-}
-
-// PrintLocated writes comments naming the YAML and environment variable files
-// in loc to w in the same format used by cmdconfig.ConfigCommands.Show.
-func PrintLocated(w io.Writer, loc *cmdconfig.Located) {
-	if loc == nil {
-		return
-	}
-	if len(loc.YAML) == 0 {
-		fmt.Fprintln(w, "# Configuration file: none")
-	}
-	for _, f := range loc.YAML {
-		fmt.Fprintf(w, "# Configuration file: %s\n", f)
-	}
-	for _, f := range loc.Env {
-		fmt.Fprintf(w, "# Environment variables file: %s\n", f)
-	}
 }
 
 func formatLocatedFiles(loc *cmdconfig.Located) string {
@@ -1079,16 +1062,27 @@ func DescribeHardlinkDedup(w io.Writer) error {
 	return nil
 }
 
-// Documentation will return a description of the format of the
-// yaml configuration file.
-func Documentation() string {
-	out := &strings.Builder{}
-	desc, err := structdoc.Describe(&docT{}, "doc", "YAML configuration file options\n")
+// DescribeFilesystems writes the documentation for the entries in the
+// filesystems list to w. It is needed since the entries are represented by
+// the Filesystem interface, which cannot be described via reflection.
+func DescribeFilesystems(w io.Writer) error {
+	desc, err := structdoc.Describe(&filesystemYAML{}, "doc", "")
 	if err != nil {
-		panic(err)
+		return err
 	}
-	out.WriteString(structdoc.FormatFields(0, 2, desc.Fields))
-	_ = DescribeLayouts(out)
-	_ = DescribeHardlinkDedup(out)
-	return out.String()
+	_, err = fmt.Fprint(w, "\nFilesystem entries (filesystems):\n\n"+
+		"Each entry specifies either a root for a hierarchical filesystem or a\n"+
+		"start_prefix and/or stop_prefix for a range of keys in a key oriented\n"+
+		"store, along with the following settings.\n\n"+
+		structdoc.FormatFields(0, 2, desc.Fields))
+	return err
+}
+
+// ConfigCommands returns the implementation of the config show and config
+// describe commands for the configuration, see cmdconfig.ConfigExtension.
+func ConfigCommands() cmdconfig.ConfigCommands[T] {
+	return cmdconfig.ConfigCommands[T]{
+		Summary:    "YAML configuration file options\n",
+		Describers: []func(io.Writer) error{DescribeFilesystems, DescribeLayouts, DescribeHardlinkDedup},
+	}
 }
