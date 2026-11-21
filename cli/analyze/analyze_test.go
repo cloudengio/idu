@@ -593,6 +593,13 @@ func (f *interruptFS) XAttr(ctx context.Context, path string, info file.Info) (f
 
 func TestAnalyzeInterruptDoesNotCloseDBEarly(t *testing.T) {
 	tmpDir := t.TempDir()
+	// localfs.scanner can leave a directory *os.File open until GC when
+	// canceled mid-scan; run GC before t.TempDir() cleanup on Windows.
+	t.Cleanup(func() {
+		runtime.GC()
+		runtime.Gosched()
+		runtime.GC()
+	})
 	root := filepath.Join(tmpDir, "root")
 	for i := range 12 {
 		sub := filepath.Join(root, fmt.Sprintf("d%02d", i))

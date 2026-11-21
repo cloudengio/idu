@@ -8,6 +8,8 @@ cloudeng.io/errors v0.0.14-0.20260312171538-61fcde6ce278 h1:zvkZ9WBpBjerUAhl+SLC
 cloudeng.io/errors v0.0.14-0.20260312171538-61fcde6ce278/go.mod h1:6TivTMjXopNNZ0eNsac9MfYij1WC6R0gJcsSIxcunIA=
 cloudeng.io/file v0.0.0-20261114215353-ffbc45206c1d h1:6lef/N0O30w1WW13VEDlXaVIazCYQYtWGNtHlKM6kD4=
 cloudeng.io/file v0.0.0-20261114215353-ffbc45206c1d/go.mod h1:/F2iA969qz006paYJo+7QnMpD+jKHVuHLg+PuC7zkGM=
+cloudeng.io/file v0.0.0-20261121043920-1504cdcec3c7 h1:VysSmVYRBtG0gmCtll9fwwcOemqvnQeUJs/vb/WC0DI=
+cloudeng.io/file v0.0.0-20261121043920-1504cdcec3c7/go.mod h1:/F2iA969qz006paYJo+7QnMpD+jKHVuHLg+PuC7zkGM=
 cloudeng.io/logging v0.0.0-20261112230521-bb2e0354f2e1 h1:ohz/EjPupJlKhS1F9/vVR16UprRzrXpIcv1qc9OhEqI=
 cloudeng.io/logging v0.0.0-20261112230521-bb2e0354f2e1/go.mod h1:jMLEVhrVlzxya9df5e1q14kPxxOMnBxEejhV8QpMMKU=
 cloudeng.io/os v0.0.0-20261115225738-cfd1499040d9 h1:yKpsO678vvobNs/EKL9u8HG/l009ucwNkOTyfatuO4A=
