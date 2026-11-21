@@ -338,8 +338,8 @@ func bytesConfig(t *testing.T, tmpDir, root string) iduconfig.T {
 func TestIncompatibleSummaries(t *testing.T) {
 	h := startWith(t, func(tmpDir, root string) iduconfig.T { return bytesConfig(t, tmpDir, root) })
 	// The error is displayed in a dialog that offers to analyze; the path
-	// precedes "cannot be used:" and may wrap before "be used" on Windows.
-	h.waitFor("Error", "cannot", "be used", "calculator", "Analyze", "Quit")
+	// precedes "cannot be used:" and may wrap before "be" or "used" on Windows.
+	h.waitFor("Error", "cannot", "used", "calculator", "Analyze", "Quit")
 	h.eventually("the dialog", func() bool { return h.u.dialogOpen() })
 	// Keys other than those for the dialog are ignored.
 	h.rune('m')
