@@ -9,10 +9,10 @@ import (
 	"testing"
 
 	"cloudeng.io/cmd/idu/cli/analyze"
-	"cloudeng.io/cmd/idu/cli/internal/snapshot"
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/internal/cli"
+	"cloudeng.io/cmd/idu/snapshot"
 	"cloudeng.io/file/localfs"
 )
 

@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"cloudeng.io/cmd/idu/cli/internal/snapshot"
 	"cloudeng.io/cmd/idu/internal/cli"
 	"cloudeng.io/cmd/idu/report"
+	"cloudeng.io/cmd/idu/snapshot"
 	"cloudeng.io/cmd/idu/stats"
 )
 

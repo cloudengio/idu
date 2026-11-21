@@ -8,8 +8,8 @@ import (
 	"bytes"
 	"encoding/json"
 
-	"cloudeng.io/cmd/idu/cli/internal/snapshot"
 	"cloudeng.io/cmd/idu/report"
+	"cloudeng.io/cmd/idu/snapshot"
 )
 
 type jsonReports struct{}

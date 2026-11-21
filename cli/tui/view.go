@@ -14,8 +14,8 @@ import (
 	"cloudeng.io/cmd/idu/cli/tui/internal/model"
 	"cloudeng.io/cmd/idu/cli/tui/internal/widgets"
 	"cloudeng.io/cmd/idu/internal/cli"
-	"cloudeng.io/cmd/idu/internal/usernames"
 	"cloudeng.io/cmd/idu/stats"
+	"cloudeng.io/cmd/idu/usernames"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )

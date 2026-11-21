@@ -1,4 +1,5 @@
 # Package [cloudeng.io/cmd/idu/internal](https://pkg.go.dev/cloudeng.io/cmd/idu/internal?tab=doc)
+[![CircleCI](https://circleci.com/gh/cloudengio/go.gotools.svg?style=svg)](https://circleci.com/gh/cloudengio/go.gotools) [![Go Report Card](https://goreportcard.com/badge/cloudeng.io/cmd/idu/internal)](https://goreportcard.com/report/cloudeng.io/cmd/idu/internal)
 
 ```go
 import cloudeng.io/cmd/idu/internal

@@ -16,12 +16,12 @@ import (
 	"path/filepath"
 	"time"
 
-	"cloudeng.io/cmd/idu/cli/internal/snapshot"
-	"cloudeng.io/cmd/idu/cli/internal/statedir"
 	"cloudeng.io/cmd/idu/internal/cli"
+	"cloudeng.io/cmd/idu/internal/statedir"
+	"cloudeng.io/cmd/idu/snapshot"
 
-	"cloudeng.io/cmd/idu/internal/usernames"
 	"cloudeng.io/cmd/idu/report"
+	"cloudeng.io/cmd/idu/usernames"
 	"cloudeng.io/errors"
 )
 
@@ -85,7 +85,7 @@ func (rc *Commands) generateCurrent(ctx context.Context, rf *GenerateFlags) erro
 		return err
 	}
 	n := max(rf.TSV, rf.JSON, rf.Markdown)
-	sf, path, err := snapshot.Computer{}.Current(ctx, env, f, f.Config().SnapshotDir, n)
+	sf, path, err := snapshot.Computer{}.Current(ctx, f, f.Config().SnapshotDir, n, env.OpenOptions()...)
 	if err != nil {
 		return err
 	}

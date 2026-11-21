@@ -8,8 +8,8 @@ import (
 	"bytes"
 	"time"
 
-	"cloudeng.io/cmd/idu/cli/internal/statedir"
 	"cloudeng.io/cmd/idu/internal/cli"
+	"cloudeng.io/cmd/idu/internal/statedir"
 	"cloudeng.io/cmd/idu/stats"
 )
 

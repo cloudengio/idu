@@ -9,8 +9,8 @@ import (
 	"encoding/csv"
 	"strconv"
 
-	"cloudeng.io/cmd/idu/cli/internal/snapshot"
 	"cloudeng.io/cmd/idu/report"
+	"cloudeng.io/cmd/idu/snapshot"
 )
 
 type tsvReports struct {

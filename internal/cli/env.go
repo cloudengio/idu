@@ -18,7 +18,7 @@ import (
 
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
-	"cloudeng.io/cmd/idu/idudb/backends/badgerdb"
+	"cloudeng.io/cmd/idu/idudb/defaultdb"
 	"cloudeng.io/cmdutil"
 	"cloudeng.io/file/diskusage"
 )
@@ -46,7 +46,7 @@ type Env struct {
 // progress to os.Stdout and displays sizes in decimal units.
 func NewEnv() *Env {
 	return &Env{
-		DatabaseFactory: idudb.NewBackendFactory(badgerdb.NewBackend),
+		DatabaseFactory: defaultdb.BackendFactory(),
 		OpenProgress:    os.Stdout,
 		BytesPrinter:    DecimalBytes,
 	}
