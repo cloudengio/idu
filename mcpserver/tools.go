@@ -9,17 +9,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 	"time"
 
-	"cloudeng.io/algo/container/heap"
-	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/internal"
+	"cloudeng.io/cmd/idu/query"
 	"cloudeng.io/cmd/idu/report"
-	"cloudeng.io/cmd/idu/snapshot"
 	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/cmd/idu/summary"
 	"cloudeng.io/cmd/idu/usernames"
@@ -89,10 +86,16 @@ func (s *Server) addTools() {
 		Name: "top_n",
 		Description: "The top n entries beneath a prefix, ordered by a metric (" + metrics + "), largest first. " +
 			"by is one of: subtree, the prefixes ranked by their recursive totals, ie. where the space is used; " +
-			"prefix, the prefixes ranked by their own files only; user or group, the users or groups ranked by their usage. " +
-			"For by=prefix, user may be set to rank the prefixes by the usage of that user's files, and similarly for group; this is only supported for the entire filesystem.",
+			"prefix, the prefixes ranked by their own files only; user or group, the users or groups ranked by their usage; hotspot, prefixes whose subtrees accumulate substantial usage spread across many descendants. " +
+			"Only subtree is supported beneath a prefix other than the root, the others are only available for the entire filesystem. " +
+			"For by=prefix, user may be set to rank the prefixes by the usage of that user's files, and similarly for group.",
 		Annotations: readOnly,
 	}, s.topN)
+	mcp.AddTool(s.srv, &mcp.Tool{
+		Name:        "query",
+		Description: queryDescription,
+		Annotations: readOnly,
+	}, s.query)
 	mcp.AddTool(s.srv, &mcp.Tool{
 		Name:        "errors",
 		Description: "The errors, eg. permission denied, recorded by the most recent analyses for a prefix and everything beneath it, in path order.",
@@ -162,34 +165,36 @@ type Usage struct {
 	Note      string  `json:"note,omitempty"`
 }
 
+// run runs q, with Within set to prefix, against the filesystem fs.
+func (s *Server) run(ctx context.Context, fs, prefix string, q query.Query) (query.Result, string, error) {
+	f, path, err := s.lookup(fs, prefix)
+	if err != nil {
+		return query.Result{}, "", err
+	}
+	q.Within = path
+	var res query.Result
+	err = s.withDB(ctx, f, func(db idudb.Reader, _ *summary.Reader) error {
+		var err error
+		res, err = query.New(f, db).Run(ctx, q)
+		return err
+	})
+	return res, path, err
+}
+
 func (s *Server) usage(ctx context.Context, _ *mcp.CallToolRequest, args FSArgs) (*mcp.CallToolResult, Usage, error) {
-	f, path, err := s.lookup(args.FS, args.Prefix)
+	res, path, err := s.run(ctx, args.FS, args.Prefix, query.Query{Scope: query.Self})
 	if err != nil {
 		return nil, Usage{}, err
 	}
-	out := Usage{Path: path}
-	err = s.withDB(ctx, f, func(_ idudb.Reader, sr *summary.Reader) error {
-		ps, ok, err := sr.Get(ctx, path)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return fmt.Errorf("%v: no such prefix in the database", path)
-		}
-		out.Direct = newTotals(ps.Direct)
-		t, ok, err := sr.Subtree(ctx, path)
-		switch {
-		case errors.Is(err, idudb.ErrStaleSubtrees):
-			out.Note = err.Error()
-		case err != nil:
-			return err
-		case ok:
-			rt := newTotals(t)
-			out.Recursive = &rt
-		}
-		return nil
-	})
-	return nil, out, err
+	row := res.Rows[0]
+	out := Usage{Path: path, Direct: newTotals(*row.Direct)}
+	if row.Total != nil {
+		rt := newTotals(*row.Total)
+		out.Recursive = &rt
+	} else {
+		out.Note = idudb.ErrStaleSubtrees.Error()
+	}
+	return nil, out, nil
 }
 
 // ChildrenArgs are the arguments to children.
@@ -236,66 +241,41 @@ func limit(n int) int {
 }
 
 func (s *Server) children(ctx context.Context, _ *mcp.CallToolRequest, args ChildrenArgs) (*mcp.CallToolResult, Children, error) {
-	f, path, err := s.lookup(args.FS, args.Prefix)
-	if err != nil {
-		return nil, Children{}, err
-	}
 	metric, err := parseMetric(args.Metric)
 	if err != nil {
 		return nil, Children{}, err
 	}
-	out := Children{Path: path, Metric: metric.String()}
-	err = s.withDB(ctx, f, func(_ idudb.Reader, sr *summary.Reader) error {
-		entries, _, err := sr.Children(ctx, path)
-		if err != nil {
-			return err
+	// All of the children are requested so that their number is known.
+	q := query.Query{Scope: query.Children, OrderBy: new(query.Total(metric)), Limit: query.MaxLimit}
+	res, path, err := s.run(ctx, args.FS, args.Prefix, q)
+	note := ""
+	if errors.Is(err, idudb.ErrStaleSubtrees) {
+		note = "the children are ordered by their own files only: " + err.Error()
+		q.OrderBy = new(query.Direct(metric))
+		res, path, err = s.run(ctx, args.FS, args.Prefix, q)
+	}
+	if err != nil {
+		return nil, Children{}, err
+	}
+	out := Children{Path: path, Metric: metric.String(), Total: len(res.Rows), Note: note}
+	rows := res.Rows[:min(len(res.Rows), limit(args.N))]
+	out.Children = make([]Child, 0, len(rows))
+	for _, r := range rows {
+		c := Child{Path: r.Path, Direct: newTotals(*r.Direct)}
+		if r.Total != nil {
+			rt := newTotals(*r.Total)
+			c.Recursive = &rt
 		}
-		paths := make([]string, len(entries))
-		for i, e := range entries {
-			paths[i] = e.Path
-		}
-		totals, found, err := sr.Subtrees(ctx, paths)
-		if errors.Is(err, idudb.ErrStaleSubtrees) {
-			out.Note = "the children are ordered by their own files only: " + err.Error()
-			totals, found = make([]stats.Totals, len(entries)), make([]bool, len(entries))
-		} else if err != nil {
-			return err
-		}
-		order := make([]int, len(entries))
-		values := make([]int64, len(entries))
-		for i, e := range entries {
-			order[i] = i
-			if found[i] {
-				values[i] = metric.Value(totals[i])
-			} else {
-				values[i] = metric.Value(e.Summary.Direct)
-			}
-		}
-		slices.SortStableFunc(order, func(a, b int) int {
-			return cmp.Or(cmp.Compare(values[b], values[a]), cmp.Compare(entries[a].Path, entries[b].Path))
-		})
-		out.Total = len(order)
-		keep := min(len(order), limit(args.N))
-		out.Children = make([]Child, 0, keep)
-		for _, i := range order[:keep] {
-			e := entries[i]
-			c := Child{Path: e.Path, Direct: newTotals(e.Summary.Direct)}
-			if found[i] {
-				rt := newTotals(totals[i])
-				c.Recursive = &rt
-			}
-			out.Children = append(out.Children, c)
-		}
-		return nil
-	})
-	return nil, out, err
+		out.Children = append(out.Children, c)
+	}
+	return nil, out, nil
 }
 
 // TopNArgs are the arguments to top_n.
 type TopNArgs struct {
 	FSArgs
 	Metric string `json:"metric,omitempty" jsonschema:"the metric to rank by, storage_bytes by default"`
-	By     string `json:"by,omitempty" jsonschema:"what to rank: subtree (the default), prefix, user or group"`
+	By     string `json:"by,omitempty" jsonschema:"what to rank: subtree (the default), prefix, user, group or hotspot"`
 	User   string `json:"user,omitempty" jsonschema:"for by=prefix, rank the prefixes by the usage of this user's files, a name or numeric id"`
 	Group  string `json:"group,omitempty" jsonschema:"for by=prefix, rank the prefixes by the usage of this group's files, a name or numeric id"`
 	N      int    `json:"n,omitempty" jsonschema:"the number of entries to return, 20 by default"`
@@ -320,191 +300,169 @@ type TopN struct {
 	Source  string  `json:"source" jsonschema:"how the ranking was obtained"`
 }
 
-const (
-	sourceStored   = "the rankings maintained by analyze"
-	sourceComputed = "computed by a pass over all of the summaries beneath the prefix"
-)
+// ids returns the uid and gid for the user and group names, either of
+// which may be empty.
+func ids(user, group string) (uid, gid *int64, err error) {
+	if user != "" {
+		id, err := usernames.Manager.UIDForName(user)
+		if err != nil {
+			return nil, nil, fmt.Errorf("unknown user: %q", user)
+		}
+		uid = &id
+	}
+	if group != "" {
+		id, err := usernames.Manager.GIDForName(group)
+		if err != nil {
+			return nil, nil, fmt.Errorf("unknown group: %q", group)
+		}
+		gid = &id
+	}
+	return uid, gid, nil
+}
 
 func (s *Server) topN(ctx context.Context, _ *mcp.CallToolRequest, args TopNArgs) (*mcp.CallToolResult, TopN, error) {
-	f, path, err := s.lookup(args.FS, args.Prefix)
-	if err != nil {
-		return nil, TopN{}, err
-	}
 	metric, err := parseMetric(args.Metric)
 	if err != nil {
 		return nil, TopN{}, err
 	}
 	by := cmp.Or(args.By, "subtree")
-	n := limit(args.N)
-	out := TopN{Path: path, Metric: metric.String(), By: by, Exact: true, Source: sourceStored}
-	isRoot := snapshot.IsFilesystemRoot(f.Config(), f.Location(), path)
-	if args.User != "" && args.Group != "" {
-		return nil, TopN{}, fmt.Errorf("user and group cannot both be set")
-	}
-	if (args.User != "" || args.Group != "") && (by != "prefix" || !isRoot) {
-		return nil, TopN{}, fmt.Errorf("user and group may only be set for by=prefix for the entire filesystem")
-	}
-	err = s.withDB(ctx, f, func(db idudb.Reader, sr *summary.Reader) error {
-		switch by {
-		case "subtree":
-			return s.topSubtrees(ctx, db, sr, f, path, metric, n, &out)
-		case "prefix":
-			if isRoot {
-				return s.topPrefixes(ctx, db, sr, f, path, metric, args, n, &out)
-			}
-		case "user", "group":
-			if isRoot {
-				return s.topIDs(ctx, db, sr, f, path, metric, n, &out)
-			}
-		default:
-			return fmt.Errorf("unknown value for by: %q, it must be one of subtree, prefix, user or group", by)
-		}
-		return s.computed(ctx, db, f, path, metric, n, &out)
-	})
-	return nil, out, err
-}
-
-func (s *Server) topSubtrees(ctx context.Context, db idudb.Reader, sr *summary.Reader, f iduconfig.Filesystem, path string, metric stats.Metric, n int, out *TopN) error {
-	ranked, err := sr.TopSubtreesWithin(ctx, path, metric, n)
-	if errors.Is(err, idudb.ErrStaleSubtrees) {
-		return s.computed(ctx, db, f, path, metric, n, out)
-	}
-	if err != nil {
-		return err
-	}
-	out.Entries = make([]Entry, 0, len(ranked))
-	for _, r := range ranked {
-		out.Entries = append(out.Entries, Entry{Path: r.Path, Value: r.Value})
-	}
-	return nil
-}
-
-func (s *Server) topPrefixes(ctx context.Context, db idudb.Reader, sr *summary.Reader, f iduconfig.Filesystem, path string, metric stats.Metric, args TopNArgs, n int, out *TopN) error {
-	var top summary.TopN
-	var err error
-	switch {
-	case args.User != "":
-		uid, uerr := usernames.Manager.UIDForName(args.User)
-		if uerr != nil {
-			return fmt.Errorf("unknown user: %q", args.User)
-		}
-		top, err = sr.TopPrefixesForUser(ctx, uid, metric, n)
-	case args.Group != "":
-		gid, gerr := usernames.Manager.GIDForName(args.Group)
-		if gerr != nil {
-			return fmt.Errorf("unknown group: %q", args.Group)
-		}
-		top, err = sr.TopPrefixesForGroup(ctx, gid, metric, n)
-	default:
-		top, err = sr.TopPrefixes(ctx, metric, n)
-	}
-	if (errors.Is(err, summary.ErrNoTopN) || errors.Is(err, summary.ErrStaleTopN)) && args.User == "" && args.Group == "" {
-		return s.computed(ctx, db, f, path, metric, n, out)
-	}
-	if err != nil {
-		return err
-	}
-	keep := min(len(top.Entries), n)
-	out.Entries = make([]Entry, 0, keep)
-	for _, r := range top.Entries[:keep] {
-		out.Entries = append(out.Entries, Entry{Path: r.Path, Value: r.Value})
-	}
-	out.Exact = top.Certified >= len(out.Entries)
-	return nil
-}
-
-func (s *Server) topIDs(ctx context.Context, db idudb.Reader, sr *summary.Reader, f iduconfig.Filesystem, path string, metric stats.Metric, n int, out *TopN) error {
-	rank := sr.TopUsers
-	if out.By == "group" {
-		rank = sr.TopGroups
-	}
-	ranked, err := rank(ctx, metric, n)
-	if errors.Is(err, summary.ErrNoTopN) || errors.Is(err, summary.ErrStaleTopN) {
-		return s.computed(ctx, db, f, path, metric, n, out)
-	}
-	if err != nil {
-		return err
-	}
-	out.Entries = make([]Entry, 0, len(ranked))
-	for _, r := range ranked {
-		out.Entries = append(out.Entries, s.idEntry(out.By, r.ID, r.Value))
-	}
-	return nil
-}
-
-func (s *Server) idEntry(by string, id, value int64) Entry {
-	e := Entry{ID: &id, Value: value}
-	if by == "group" {
-		e.Group = usernames.Manager.NameForGID(id)
-	} else {
-		e.User = usernames.Manager.NameForUID(id)
-	}
-	return e
-}
-
-// computed ranks the entries beneath path by a pass over its summaries,
-// whose cost is proportional to the size of the subtree rooted at path.
-func (s *Server) computed(ctx context.Context, db idudb.Reader, f iduconfig.Filesystem, path string, metric stats.Metric, n int, out *TopN) error {
-	sdb, err := snapshot.Computer{}.FromSummaries(ctx, db, f.Config(), path, n)
-	if err != nil {
-		return err
-	}
-	out.Source, out.Exact = sourceComputed, true
-	switch out.By {
+	q := query.Query{Scope: query.Subtree, OrderBy: new(query.Total(metric)), Limit: limit(args.N)}
+	switch by {
 	case "subtree":
-		appendPaths(out, heapFor(sdb.Subtree, metric), n)
 	case "prefix":
-		appendPaths(out, heapFor(sdb.Prefix, metric), n)
+		q.OrderBy = new(query.Direct(metric))
 	case "user":
-		appendIDs(s, out, heapFor(sdb.ByUser, metric), n)
+		q.Table = query.Users
 	case "group":
-		appendIDs(s, out, heapFor(sdb.ByGroup, metric), n)
+		q.Table = query.Groups
+	case "hotspot":
+		q.Table = query.Hotspots
+	default:
+		return nil, TopN{}, fmt.Errorf("unknown value for by: %q, it must be one of subtree, prefix, user, group or hotspot", by)
 	}
-	return nil
+	if q.UID, q.GID, err = ids(args.User, args.Group); err != nil {
+		return nil, TopN{}, err
+	}
+	res, path, err := s.run(ctx, args.FS, args.Prefix, q)
+	if err != nil {
+		return nil, TopN{}, err
+	}
+	out := TopN{Path: path, Metric: metric.String(), By: by, Exact: res.Exact, Source: res.Source, Entries: make([]Entry, 0, len(res.Rows))}
+	for _, r := range res.Rows {
+		e := Entry{Path: r.Path, ID: r.ID, Value: r.Value}
+		s.setName(q.Table, r.ID, &e.User, &e.Group)
+		out.Entries = append(out.Entries, e)
+	}
+	return nil, out, nil
 }
 
-func appendPaths(out *TopN, h *heap.MinMax[int64, string], n int) {
-	if h == nil {
-		return
-	}
-	values, paths := report.PopN(h, n)
-	out.Entries = make([]Entry, 0, len(values))
-	for i := range values {
-		out.Entries = append(out.Entries, Entry{Path: paths[i], Value: values[i]})
-	}
-}
-
-func appendIDs(s *Server, out *TopN, h *heap.MinMax[int64, int64], n int) {
-	if h == nil {
-		return
-	}
-	values, ids := report.PopN(h, n)
-	out.Entries = make([]Entry, 0, len(values))
-	for i := range values {
-		out.Entries = append(out.Entries, s.idEntry(out.By, ids[i], values[i]))
+// setName sets user or group to the name of id, if any, according to table.
+func (s *Server) setName(table query.Table, id *int64, user, group *string) {
+	switch {
+	case id == nil:
+	case table == query.Groups:
+		*group = usernames.Manager.NameForGID(*id)
+	default:
+		*user = usernames.Manager.NameForUID(*id)
 	}
 }
 
-// heapFor returns the heap in h for metric.
-func heapFor[T comparable](h *report.Heaps[T], metric stats.Metric) *heap.MinMax[int64, T] {
-	if h == nil {
-		return nil
+// queryDescription describes the query tool, see the query package.
+var queryDescription = "Query the rows of the row model for a filesystem: prefixes (directories), users, groups and hotspots, each with its direct totals, for its own files, and recursive totals, for everything beneath it. " +
+	"Rows are ordered by a column, largest first, one of: " + strings.Join(query.Columns(), ", ") + ". " +
+	"Queries are answered by looking up the totals, rankings and snapshots maintained by analyze, so their cost is proportional to the rows returned; " +
+	"a query that would require a pass over the database fails with an error that explains what is supported instead. The supported queries are: " +
+	"table=prefixes with scope=self, the prefix itself; scope=children, its children, ordered by any column; " +
+	"scope=subtree ordered by a total_ column, the prefixes beneath any prefix with the largest totals, ie. where the space is used; " +
+	"scope=subtree ordered by a direct_ column, the prefixes with the largest totals for their own files, for the entire filesystem only, optionally for a single user or group. " +
+	"table=users or groups with scope=self, the users or groups of the prefix's own files; scope=subtree, the users or groups with the largest totals, for the entire filesystem only. " +
+	"table=hotspots with scope=subtree, for the entire filesystem only: prefixes whose subtrees accumulate substantial usage spread across many descendants, where neither a single directory nor a single child dominates, ordered by their distributed bytes, storage bytes or files (use a total_bytes, total_storage_bytes or total_files column); " +
+	"they are only available from a snapshot that includes them, written by idu stats compute --hotspots after the most recent analysis, and each row includes the hotspot's subtree, direct and largest leaf totals and its amplification. " +
+	"Filters and grouping by levels other than the children of the prefix are not supported."
+
+// QueryArgs are the arguments to query.
+type QueryArgs struct {
+	FSArgs
+	Table   string `json:"table,omitempty" jsonschema:"prefixes (the default), users, groups or hotspots"`
+	Scope   string `json:"scope,omitempty" jsonschema:"self, children or subtree (the default), relative to the prefix"`
+	OrderBy string `json:"order_by,omitempty" jsonschema:"the column to order the rows by, largest first, total_storage_bytes by default, or direct_storage_bytes for the users or groups of a prefix"`
+	User    string `json:"user,omitempty" jsonschema:"rank prefixes by the usage of this user's files, a name or numeric id"`
+	Group   string `json:"group,omitempty" jsonschema:"rank prefixes by the usage of this group's files, a name or numeric id"`
+	Level   int    `json:"level,omitempty" jsonschema:"group by the prefixes at this depth below the root, only the depth of the prefix's children is supported"`
+	Filter  string `json:"filter,omitempty" jsonschema:"a filter expression, not supported"`
+	N       int    `json:"n,omitempty" jsonschema:"the maximum number of rows to return, 20 by default"`
+}
+
+// QueryRow is a row returned by query.
+type QueryRow struct {
+	Path    string                   `json:"path,omitempty"`
+	Parent  string                   `json:"parent,omitempty"`
+	Name    string                   `json:"name,omitempty"`
+	Depth   int                      `json:"depth"`
+	ID      *int64                   `json:"id,omitempty" jsonschema:"the numeric id of the user or group"`
+	User    string                   `json:"user,omitempty"`
+	Group   string                   `json:"group,omitempty"`
+	Direct  *Totals                  `json:"direct,omitempty" jsonschema:"the totals for the prefix's, user's or group's own files, if known"`
+	Total   *Totals                  `json:"total,omitempty" jsonschema:"the recursive totals, if known"`
+	Hotspot *report.DistributedStats `json:"hotspot,omitempty"`
+	Value   int64                    `json:"value" jsonschema:"the value of the column that the rows are ordered by"`
+}
+
+// QueryResult is the result of query.
+type QueryResult struct {
+	Path    string     `json:"path"`
+	Table   string     `json:"table"`
+	Scope   string     `json:"scope"`
+	OrderBy string     `json:"order_by"`
+	Rows    []QueryRow `json:"rows"`
+	Exact   bool       `json:"exact" jsonschema:"true if the rows are known to be exactly the top rows"`
+	Source  string     `json:"source" jsonschema:"where the rows came from"`
+}
+
+func (s *Server) query(ctx context.Context, _ *mcp.CallToolRequest, args QueryArgs) (*mcp.CallToolResult, QueryResult, error) {
+	q := query.Query{
+		Table:  query.Table(args.Table),
+		Scope:  query.Scope(args.Scope),
+		Level:  args.Level,
+		Filter: args.Filter,
+		Limit:  limit(args.N),
 	}
-	switch metric {
-	case stats.MetricBytes:
-		return h.Bytes
-	case stats.MetricStorageBytes:
-		return h.StorageBytes
-	case stats.MetricFiles:
-		return h.Files
-	case stats.MetricPrefixes:
-		return h.Prefixes
-	case stats.MetricPrefixBytes:
-		return h.PrefixBytes
-	case stats.MetricSparseBytes:
-		return h.SparseBytes
+	if args.OrderBy != "" {
+		c, err := query.ParseColumn(args.OrderBy)
+		if err != nil {
+			return nil, QueryResult{}, err
+		}
+		q.OrderBy = &c
 	}
-	return nil
+	var err error
+	if q.UID, q.GID, err = ids(args.User, args.Group); err != nil {
+		return nil, QueryResult{}, err
+	}
+	res, path, err := s.run(ctx, args.FS, args.Prefix, q)
+	if err != nil {
+		return nil, QueryResult{}, err
+	}
+	out := QueryResult{
+		Path:    path,
+		Table:   string(cmp.Or(q.Table, query.Prefixes)),
+		Scope:   string(cmp.Or(q.Scope, query.Subtree)),
+		OrderBy: res.OrderBy,
+		Rows:    make([]QueryRow, 0, len(res.Rows)),
+		Exact:   res.Exact,
+		Source:  res.Source,
+	}
+	for _, r := range res.Rows {
+		qr := QueryRow{Path: r.Path, Parent: r.Parent, Name: r.Name, Depth: r.Depth, ID: r.ID, Hotspot: r.Hotspot, Value: r.Value}
+		s.setName(q.Table, r.ID, &qr.User, &qr.Group)
+		if r.Direct != nil {
+			qr.Direct = new(newTotals(*r.Direct))
+		}
+		if r.Total != nil {
+			qr.Total = new(newTotals(*r.Total))
+		}
+		out.Rows = append(out.Rows, qr)
+	}
+	return nil, out, nil
 }
 
 // ErrorsArgs are the arguments to errors.
