@@ -131,9 +131,11 @@ func TestSuggestMultipleOrigins(t *testing.T) {
 	// for the same inode from both prefixes.
 	clitest.LinkUnchanged(t, root)
 	analyzeWithConfig(ctx, t, cfg, root)
-	if err := os.MkdirAll(filepath.Join(root, "c"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	clitest.EnsureDirModTimeChanged(t, root, func() {
+		if err := os.MkdirAll(filepath.Join(root, "c"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	})
 	if err := os.Link(filepath.Join(root, "b", "h"), filepath.Join(root, "c", "hl2")); err != nil {
 		t.Fatal(err)
 	}
