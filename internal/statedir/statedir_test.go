@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"cloudeng.io/cmd/idu/cli/internal/statedir"
+	"cloudeng.io/cmd/idu/internal/statedir"
 )
 
 const layout = "2006-01-02_15-04-05.000"

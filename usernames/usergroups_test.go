@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"testing"
 
-	"cloudeng.io/cmd/idu/internal/usernames"
+	"cloudeng.io/cmd/idu/usernames"
 )
 
 func TestIDManager_CurrentUser(t *testing.T) {

@@ -11,11 +11,11 @@ import (
 	"text/template"
 	"time"
 
-	"cloudeng.io/cmd/idu/cli/internal/snapshot"
 	"cloudeng.io/cmd/idu/internal/cli"
+	"cloudeng.io/cmd/idu/snapshot"
 
-	"cloudeng.io/cmd/idu/internal/usernames"
 	"cloudeng.io/cmd/idu/report"
+	"cloudeng.io/cmd/idu/usernames"
 	"golang.org/x/exp/maps"
 )
 

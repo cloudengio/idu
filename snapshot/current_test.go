@@ -71,7 +71,7 @@ func TestCurrent(t *testing.T) {
 
 	current := func(dir string, n int, wantSource, wantPath string) string {
 		t.Helper()
-		sf, path, err := c.Current(ctx, testEnv, f, dir, n)
+		sf, path, err := c.Current(ctx, f, dir, n, testEnv.OpenOptions()...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -106,7 +106,7 @@ func TestCurrent(t *testing.T) {
 	}
 
 	// Take always writes a snapshot, from the stored state if usable.
-	taken, err := c.Take(ctx, testEnv, f, dir)
+	taken, err := c.Take(ctx, f, dir, testEnv.OpenOptions()...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestFreshFor(t *testing.T) {
 // that it has neither hotspots nor hardlink rankings, returning its path.
 func checkStoredSnapshot(ctx context.Context, t *testing.T, f iduconfig.Filesystem, dir string) string {
 	t.Helper()
-	taken, err := Computer{}.Take(ctx, testEnv, f, dir)
+	taken, err := Computer{}.Take(ctx, f, dir, testEnv.OpenOptions()...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestCurrentRequirements(t *testing.T) {
 
 	// Both require a full pass, which is saved and then reused.
 	c := Computer{Hotspots: true, Hardlinks: true}
-	sf, path, err := c.Current(ctx, testEnv, f, dir, 10)
+	sf, path, err := c.Current(ctx, f, dir, 10, testEnv.OpenOptions()...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestCurrentRequirements(t *testing.T) {
 		t.Errorf("got %v hardlinks, ranking of %v", sf.Stats.Prefix.TotalHardlinks, sf.Stats.Prefix.Hardlinks.Len())
 	}
 	for _, c := range []Computer{{Hotspots: true}, {Hardlinks: true}, {}} {
-		if _, reused, err := c.Current(ctx, testEnv, f, dir, 10); err != nil || reused != path {
+		if _, reused, err := c.Current(ctx, f, dir, 10, testEnv.OpenOptions()...); err != nil || reused != path {
 			t.Errorf("%+v: got %v, %v, want %v", c, reused, err, path)
 		}
 	}

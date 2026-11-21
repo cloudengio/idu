@@ -1,8 +1,8 @@
-# Package [cloudeng.io/cmd/idu/cli/internal/statedir](https://pkg.go.dev/cloudeng.io/cmd/idu/cli/internal/statedir?tab=doc)
-[![CircleCI](https://circleci.com/gh/cloudengio/go.gotools.svg?style=svg)](https://circleci.com/gh/cloudengio/go.gotools) [![Go Report Card](https://goreportcard.com/badge/cloudeng.io/cmd/idu/cli/internal/statedir)](https://goreportcard.com/report/cloudeng.io/cmd/idu/cli/internal/statedir)
+# Package [cloudeng.io/cmd/idu/internal/statedir](https://pkg.go.dev/cloudeng.io/cmd/idu/internal/statedir?tab=doc)
+[![CircleCI](https://circleci.com/gh/cloudengio/go.gotools.svg?style=svg)](https://circleci.com/gh/cloudengio/go.gotools) [![Go Report Card](https://goreportcard.com/badge/cloudeng.io/cmd/idu/internal/statedir)](https://goreportcard.com/report/cloudeng.io/cmd/idu/internal/statedir)
 
 ```go
-import cloudeng.io/cmd/idu/cli/internal/statedir
+import cloudeng.io/cmd/idu/internal/statedir
 ```
 
 Package statedir manages directories of timestamped entries, files or

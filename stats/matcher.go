@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"cloudeng.io/cmd/idu/internal/hardlinks"
-	"cloudeng.io/cmd/idu/internal/usernames"
+	"cloudeng.io/cmd/idu/usernames"
 	"cloudeng.io/cmdutil/boolexpr"
 	"cloudeng.io/file"
 	"cloudeng.io/file/filewalk"

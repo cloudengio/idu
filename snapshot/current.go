@@ -12,7 +12,6 @@ import (
 
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
-	"cloudeng.io/cmd/idu/internal/cli"
 	"cloudeng.io/cmd/idu/stats"
 	"cloudeng.io/file/filewalk"
 	"cloudeng.io/file/localfs"
@@ -45,10 +44,12 @@ func NewMatcher(ctx context.Context, fwfs filewalk.FS, cfg *iduconfig.Settings, 
 //     set, with at least DefaultN entries.
 //
 // It returns the path of the snapshot used or saved, which is empty for
-// stats constructed in memory or not saved.
-func (c Computer) Current(ctx context.Context, env *cli.Env, f iduconfig.Filesystem, dir string, n int) (File, string, error) {
+// stats constructed in memory or not saved. The database is opened, for
+// reading only, using opts, which must include idudb.WithBackendFactory,
+// see defaultdb.OpenOptions.
+func (c Computer) Current(ctx context.Context, f iduconfig.Filesystem, dir string, n int, opts ...idudb.OpenOption) (File, string, error) {
 	cfg := f.Config()
-	db, err := env.OpenReadOnlyDB(ctx, cfg)
+	db, err := idudb.Open(ctx, cfg, opts...)
 	if err != nil {
 		return File{}, "", fmt.Errorf("failed to open database for %v in %v: %w", iduconfig.Label(f), cfg.Database, err)
 	}
@@ -94,10 +95,10 @@ func (c Computer) CurrentFrom(ctx context.Context, db idudb.Reader, f iduconfig.
 // saves them as a new snapshot in dir, returning its path. The stats are
 // constructed from the rankings and recursive totals maintained by
 // analyze, with topn entries, if they are usable, and by a full pass over
-// the summaries otherwise.
-func (c Computer) Take(ctx context.Context, env *cli.Env, f iduconfig.Filesystem, dir string) (string, error) {
+// the summaries otherwise. The database is opened as for Current.
+func (c Computer) Take(ctx context.Context, f iduconfig.Filesystem, dir string, opts ...idudb.OpenOption) (string, error) {
 	cfg := f.Config()
-	db, err := env.OpenReadOnlyDB(ctx, cfg)
+	db, err := idudb.Open(ctx, cfg, opts...)
 	if err != nil {
 		return "", fmt.Errorf("failed to open database for %v in %v: %w", iduconfig.Label(f), cfg.Database, err)
 	}

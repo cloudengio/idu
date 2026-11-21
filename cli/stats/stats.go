@@ -18,12 +18,12 @@ import (
 	"time"
 
 	"cloudeng.io/algo/container/heap"
-	"cloudeng.io/cmd/idu/cli/internal/snapshot"
 	"cloudeng.io/cmd/idu/iduconfig"
 	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/internal/cli"
-	"cloudeng.io/cmd/idu/internal/usernames"
 	"cloudeng.io/cmd/idu/report"
+	"cloudeng.io/cmd/idu/snapshot"
+	"cloudeng.io/cmd/idu/usernames"
 	"cloudeng.io/cmdutil/flags"
 	"cloudeng.io/file/filewalk"
 	"cloudeng.io/file/localfs"
@@ -262,7 +262,7 @@ func (st *Commands) loadSnapshot(ctx context.Context, af *ViewFlags, args []stri
 		return snapshot.File{}, "", err
 	}
 	c := snapshot.Computer{Progress: af.Progress, Hotspots: af.Hotspots, Hardlinks: af.Hardlinks}
-	return c.Current(ctx, env, f, dir, af.DisplayN)
+	return c.Current(ctx, f, dir, af.DisplayN, env.OpenOptions()...)
 }
 
 // View implements the stats view command, values must be a *ViewFlags.
@@ -541,5 +541,5 @@ func (st *Commands) Snapshot(ctx context.Context, f iduconfig.Filesystem) (strin
 	if dir == "" {
 		return "", fmt.Errorf("snapshot_dir is not set for %v", iduconfig.Label(f))
 	}
-	return snapshot.Computer{}.Take(ctx, st.env, f, dir)
+	return snapshot.Computer{}.Take(ctx, f, dir, st.env.OpenOptions()...)
 }

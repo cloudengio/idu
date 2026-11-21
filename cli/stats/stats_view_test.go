@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"cloudeng.io/cmd/idu/cli/internal/snapshot"
 	"cloudeng.io/cmd/idu/internal/cli/clitest"
-	"cloudeng.io/cmd/idu/internal/usernames"
 	"cloudeng.io/cmd/idu/report"
+	"cloudeng.io/cmd/idu/snapshot"
 	"cloudeng.io/cmd/idu/stats"
+	"cloudeng.io/cmd/idu/usernames"
 )
 
 func TestViewUserAndGroup(t *testing.T) {

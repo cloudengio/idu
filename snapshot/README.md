@@ -1,10 +1,33 @@
-# Package [cloudeng.io/cmd/idu/cli/internal/snapshot](https://pkg.go.dev/cloudeng.io/cmd/idu/cli/internal/snapshot?tab=doc)
-[![CircleCI](https://circleci.com/gh/cloudengio/go.gotools.svg?style=svg)](https://circleci.com/gh/cloudengio/go.gotools) [![Go Report Card](https://goreportcard.com/badge/cloudeng.io/cmd/idu/cli/internal/snapshot)](https://goreportcard.com/report/cloudeng.io/cmd/idu/cli/internal/snapshot)
+# Package [cloudeng.io/cmd/idu/snapshot](https://pkg.go.dev/cloudeng.io/cmd/idu/snapshot?tab=doc)
+[![CircleCI](https://circleci.com/gh/cloudengio/go.gotools.svg?style=svg)](https://circleci.com/gh/cloudengio/go.gotools) [![Go Report Card](https://goreportcard.com/badge/cloudeng.io/cmd/idu/snapshot)](https://goreportcard.com/report/cloudeng.io/cmd/idu/snapshot)
 
 ```go
-import cloudeng.io/cmd/idu/cli/internal/snapshot
+import cloudeng.io/cmd/idu/snapshot
 ```
 
+Package snapshot provides the statistics, ie. the totals and top-N
+rankings described by report.AllStats, for a filesystem analyzed by idu,
+and the snapshots in which they are stored. It is used by idu's stats,
+reports and tui commands and may be used by other commands to implement
+their own displays or reports of the same statistics.
+
+A snapshot, see File, is written by analyze --snapshot and stats compute to
+a filesystem's snapshot_dir, see Store, in which each snapshot is named by
+the time it was created and a link, named latest, refers to the most recent.
+
+Computer.Current returns the current statistics for a filesystem:
+the most recent snapshot that is newer than the last update to its database,
+otherwise statistics constructed from the totals and rankings maintained by
+analyze, otherwise statistics computed by a full pass over the summaries,
+which are saved as a new snapshot. For example:
+
+    cfg, _, err := iduconfig.Load(ctx, &cmdconfig.FilesFlag{})
+    f := cfg.Filesystems[0]
+    sf, path, err := snapshot.Computer{}.Current(ctx, f,
+    	f.Config().SnapshotDir, 100, defaultdb.OpenOptions()...)
+    keys, prefixes := report.PopN(sf.Stats.Subtree.Bytes, 10)
+
+Note that the heaps in report.AllStats are consumed as they are read.
 
 ## Constants
 ### FromSummariesSource, FromStoredSource
@@ -110,7 +133,7 @@ configured to do so.
 
 
 ```go
-func (c Computer) Current(ctx context.Context, env *cli.Env, f iduconfig.Filesystem, dir string, n int) (File, string, error)
+func (c Computer) Current(ctx context.Context, f iduconfig.Filesystem, dir string, n int, opts ...idudb.OpenOption) (File, string, error)
 ```
 Current returns stats, with at least the top n entries, for the entire
 filesystem f. They are, in order of preference:
@@ -123,8 +146,10 @@ filesystem f. They are, in order of preference:
     are expensive to compute, are saved as a new snapshot in dir, if set,
     with at least DefaultN entries.
 
-It returns the path of the snapshot used or saved, which is empty for stats
-constructed in memory or not saved.
+It returns the path of the snapshot used or saved, which is empty for
+stats constructed in memory or not saved. The database is opened,
+for reading only, using opts, which must include idudb.WithBackendFactory,
+see defaultdb.OpenOptions.
 
 
 ```go
@@ -167,13 +192,13 @@ Satisfies returns true if sf includes everything required by c.
 
 
 ```go
-func (c Computer) Take(ctx context.Context, env *cli.Env, f iduconfig.Filesystem, dir string) (string, error)
+func (c Computer) Take(ctx context.Context, f iduconfig.Filesystem, dir string, opts ...idudb.OpenOption) (string, error)
 ```
 Take computes stats for the entire filesystem f from its database and
 saves them as a new snapshot in dir, returning its path. The stats are
 constructed from the rankings and recursive totals maintained by analyze,
 with topn entries, if they are usable, and by a full pass over the summaries
-otherwise.
+otherwise. The database is opened as for Current.
 
 
 

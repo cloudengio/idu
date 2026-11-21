@@ -92,6 +92,14 @@ func FmtKiBytes(size int64) string
 ```
 FmtKiBytes formats size in KiB.
 
+### Func LogsToFileFor
+```go
+func LogsToFileFor(ctx context.Context, global cmdutil.LoggingConfig, perFS *cmdutil.LoggingConfig) bool
+```
+LogsToFileFor reports whether the effective logger in ctx for a filesystem
+with optional perFS logging configuration writes to a file rather than the
+terminal.
+
 ### Func LookupFSFor
 ```go
 func LookupFSFor(all iduconfig.T, fsName, prefix string) (iduconfig.Filesystem, string, error)
@@ -269,6 +277,13 @@ every logging configuration.
 func (ls *Loggers) Close() error
 ```
 Close closes all of the loggers created by NewLogger.
+
+
+```go
+func (ls *Loggers) LogsToFile(cfg cmdutil.LoggingConfig) bool
+```
+LogsToFile reports whether a logger configured with cfg and overridden by
+ls's flags writes to a file rather than the terminal.
 
 
 ```go
