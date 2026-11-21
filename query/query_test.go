@@ -89,12 +89,13 @@ func TestPrefixes(t *testing.T) {
 		t.Errorf("unexpected a: %+v", r)
 	}
 
-	checkChildren(t, e, a)
+	checkChildren(t, e, a, filepath.Join(root, "b"))
 }
 
 // checkChildren checks the children of the root, which are ordered by any
-// column, of which a is the largest by bytes.
-func checkChildren(t *testing.T, e *query.Engine, a string) {
+// column; a or b (which includes b/c when directories report 4 KiB+ sizes)
+// is the largest by bytes.
+func checkChildren(t *testing.T, e *query.Engine, a, b string) {
 	t.Helper()
 	// Children, and level 1, ordered by any column.
 	for _, q := range []query.Query{
@@ -102,7 +103,7 @@ func checkChildren(t *testing.T, e *query.Engine, a string) {
 		{Level: 1, OrderBy: new(query.Total(stats.MetricBytes))},
 	} {
 		res := run(t, e, q)
-		if len(res.Rows) != 4 || res.Rows[0].Path != a || res.Source != query.SourceChildren || res.OrderBy != "total_bytes" {
+		if len(res.Rows) != 4 || (res.Rows[0].Path != a && res.Rows[0].Path != b) || res.Source != query.SourceChildren || res.OrderBy != "total_bytes" {
 			t.Errorf("unexpected children: %+v", res)
 		}
 		for i := 1; i < len(res.Rows); i++ {
