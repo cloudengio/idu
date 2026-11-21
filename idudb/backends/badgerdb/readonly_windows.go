@@ -9,6 +9,10 @@ package badgerdb
 import "github.com/dgraph-io/badger/v4"
 
 func osOptions(opts badger.Options) badger.Options {
-	opts.ReadOnly = false // Read-only mode is not supported on Windows.
+	if opts.ReadOnly {
+		// Badger's Windows directory lock rejects ReadOnly; applock already
+		// coordinates readers and writers.
+		opts.BypassLockGuard = true
+	}
 	return opts
 }
