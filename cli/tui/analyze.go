@@ -415,6 +415,7 @@ func (u *ui) startAnalyze(force bool) {
 		SlowScans: idudb.DefaultSlowScanThreshold,
 	}
 	p := newTUIProgress(u, kind)
+	u.bg.Add(1)
 	go u.runAnalysis(ctx, cancel, done, old, p, flags)
 }
 
@@ -422,6 +423,7 @@ func (u *ui) startAnalyze(force bool) {
 func (u *ui) runAnalysis(ctx context.Context, cancel context.CancelFunc, done chan struct{}, old *sourceHandle, p *tuiProgress, flags *analyze.Flags) {
 	defer close(done)
 	old.close(u.ctx)
+	u.bg.Done()
 	a := u.analyze
 	start := time.Now()
 	err := u.cfg.analyze(ctx, p, a.output, flags)
@@ -433,7 +435,7 @@ func (u *ui) runAnalysis(ctx context.Context, cancel context.CancelFunc, done ch
 	u.mu.Lock()
 	u.analyzing = false
 	u.mu.Unlock()
-	if u.isQuitting() {
+	if u.isQuitting() || u.ctx.Err() != nil {
 		// The database is not reopened since the tui is exiting.
 		return
 	}
@@ -445,7 +447,12 @@ func (u *ui) runAnalysis(ctx context.Context, cancel context.CancelFunc, done ch
 	} else {
 		u.setStatus("analyze completed in %v", time.Since(start).Truncate(time.Second))
 	}
-	if openErr := u.openSourceWithWarning(analyzeErrMsg == ""); openErr != nil {
+	if !u.acquireBG() {
+		return
+	}
+	openErr := u.openSourceWithWarning(analyzeErrMsg == "")
+	u.bg.Done()
+	if openErr != nil {
 		u.queueUpdateDraw(func() {
 			if analyzeErrMsg != "" {
 				u.showDialog(errorDialog, analyzeErrMsg)

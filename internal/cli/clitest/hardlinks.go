@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"cloudeng.io/cmd/idu/iduconfig"
 )
@@ -65,13 +66,37 @@ func NewHardlinkTree(t *testing.T) (tmpDir, root string) {
 	return tmpDir, root
 }
 
+// EnsureDirModTimeChanged runs fn and advances dir's modification time if
+// the filesystem timestamp did not advance (e.g. due to coarse clock ticks).
+func EnsureDirModTimeChanged(t *testing.T, dir string, fn func()) {
+	t.Helper()
+	before, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn()
+	after, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().After(before.ModTime()) {
+		next := before.ModTime().Add(time.Second)
+		if err := os.Chtimes(dir, next, next); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // LinkUnchanged creates a hardlink in a, which is therefore rescanned, to
 // b/h, a file in b, which is not rescanned since it is unchanged, and which
 // had a link count of 1 when last scanned. a/hl precedes b/h and is
 // counted, b/h is now a hardlink.
 func LinkUnchanged(t *testing.T, root string) {
 	t.Helper()
-	if err := os.Link(filepath.Join(root, "b", "h"), filepath.Join(root, "a", "hl")); err != nil {
-		t.Fatal(err)
-	}
+	aDir := filepath.Join(root, "a")
+	EnsureDirModTimeChanged(t, aDir, func() {
+		if err := os.Link(filepath.Join(root, "b", "h"), filepath.Join(aDir, "hl")); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
