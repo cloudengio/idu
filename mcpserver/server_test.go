@@ -159,8 +159,14 @@ func checkChildren(t *testing.T, cs *mcp.ClientSession, root string) {
 	t.Helper()
 	var children mcpserver.Children
 	mustCall(t, cs, "children", map[string]any{"metric": "bytes", "n": 3}, &children)
+	// b (which includes b/c) may be larger than a when directories
+	// themselves report 4 KiB+ sizes (e.g. on Linux).
+	first := ""
+	if len(children.Children) > 0 {
+		first = children.Children[0].Path
+	}
 	if children.Total != 4 || len(children.Children) != 3 || children.Metric != "bytes" ||
-		children.Children[0].Path != filepath.Join(root, "a") {
+		(first != filepath.Join(root, "a") && first != filepath.Join(root, "b")) {
 		t.Errorf("unexpected children: %+v", children)
 	}
 	for i := 1; i < len(children.Children); i++ {
