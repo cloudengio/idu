@@ -157,32 +157,121 @@ func TestUsersAndGroups(t *testing.T) {
 	}
 }
 
+func checkUnsupported(t *testing.T, e *query.Engine, q query.Query, want string) {
+	t.Helper()
+	_, err := e.Run(context.Background(), q)
+	var ue *query.UnsupportedError
+	if !errors.Is(err, query.ErrUnsupported) || !errors.As(err, &ue) || !strings.Contains(err.Error(), want) {
+		t.Errorf("%+v: got %v, want an unsupported query error containing %q", q, err, want)
+	}
+}
+
 func TestUnsupported(t *testing.T) {
 	f, _, _ := setup(t)
-	ctx := context.Background()
-	db := open(t, f)
+	e := query.New(f, open(t, f))
 	uid := int64(1)
 	for _, tc := range []struct {
 		q    query.Query
-		opts []query.Option
 		want string
 	}{
-		{query.Query{Filter: "user=me"}, nil, "filter expressions"},
-		{query.Query{Level: 2}, nil, "grouping by level 2"},
-		{query.Query{Within: "b", OrderBy: new(query.Direct(stats.MetricBytes))}, nil, "only maintained for the entire filesystem"},
-		{query.Query{UID: &uid}, nil, "a user or group may only be specified"},
-		{query.Query{Table: query.Users, Within: "a"}, nil, "only maintained for the entire filesystem"},
-		{query.Query{Table: query.Users, Scope: query.Self, OrderBy: new(query.Total(stats.MetricBytes))}, nil, "recursive totals for users and groups"},
-		{query.Query{Table: query.Groups, Scope: query.Children}, nil, "scope children is not supported"},
-		{query.Query{Table: query.Hotspots}, []query.Option{query.WithSnapshotDir("")}, "no snapshot directory is configured"},
-		{query.Query{Table: query.Hotspots}, nil, "idu stats compute --hotspots"},
-		{query.Query{Table: query.Hotspots, Scope: query.Self}, nil, "only available for the entire filesystem"},
+		{query.Query{Filter: "user=me", Scope: query.Self}, "filter expressions are only supported for rankings"},
+		{query.Query{UID: &uid}, "a user or group may only be specified"},
+		{query.Query{UID: &uid, Scope: query.Children}, "a user or group may only be specified"},
+		{query.Query{Table: query.Users, OrderBy: new(query.Direct(stats.MetricBytes))}, "order by a total_ column"},
+		{query.Query{Table: query.Groups, Scope: query.Children}, "scope children is not supported"},
+		{query.Query{Table: query.Users, Level: 2}, "only prefixes"},
+		{query.Query{Scope: query.Children, Level: 2}, "only prefixes"},
+		{query.Query{Table: query.Hotspots, Scope: query.Self}, "use scope subtree"},
 	} {
-		_, err := query.New(f, db, tc.opts...).Run(ctx, tc.q)
-		var ue *query.UnsupportedError
-		if !errors.Is(err, query.ErrUnsupported) || !errors.As(err, &ue) || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("%+v: got %v, want an unsupported query error containing %q", tc.q, err, tc.want)
-		}
+		checkUnsupported(t, e, tc.q, tc.want)
+	}
+}
+
+// TestLookupsOnly checks that the queries that require a pass are not
+// supported by an Engine restricted to lookups.
+func TestLookupsOnly(t *testing.T) {
+	f, _, _ := setup(t)
+	db := open(t, f)
+	e := query.New(f, db, query.WithLookupsOnly())
+	uid := int64(os.Getuid())
+	for _, tc := range []struct {
+		q    query.Query
+		want string
+	}{
+		{query.Query{Filter: "file-larger=600"}, "filter expressions require a pass"},
+		{query.Query{Level: 2}, "grouping by level 2 requires a pass"},
+		{query.Query{Within: "b", OrderBy: new(query.Direct(stats.MetricBytes))}, "only maintained for the entire filesystem"},
+		{query.Query{Within: "b", UID: &uid, OrderBy: new(query.Direct(stats.MetricBytes))}, "for a user or group are only maintained for the entire filesystem"},
+		{query.Query{Table: query.Users, Within: "a"}, "only maintained for the entire filesystem"},
+		{query.Query{Table: query.Users, Scope: query.Self, OrderBy: new(query.Total(stats.MetricBytes))}, "only maintained for the entire filesystem"},
+		{query.Query{Table: query.Hotspots}, "idu stats compute --hotspots"},
+		{query.Query{Table: query.Hotspots, Within: "a"}, "hotspots require a pass"},
+	} {
+		checkUnsupported(t, e, tc.q, tc.want)
+	}
+	checkUnsupported(t, query.New(f, db, query.WithLookupsOnly(), query.WithSnapshotDir("")), query.Query{Table: query.Hotspots}, "hotspots require a pass")
+}
+
+// TestPasses checks the queries that are answered by a pass over the
+// summaries, or file metadata, beneath a prefix.
+func TestPasses(t *testing.T) {
+	f, root, _ := setup(t)
+	e := query.New(f, open(t, f))
+	a, b := filepath.Join(root, "a"), filepath.Join(root, "b")
+	uid := int64(os.Getuid())
+	isPass := func(res query.Result) bool { return strings.HasPrefix(res.Source, query.SourcePassOf) }
+
+	res := run(t, e, query.Query{Within: "b", OrderBy: new(query.Direct(stats.MetricBytes))})
+	if !isPass(res) || len(res.Rows) != 2 || !strings.HasPrefix(res.Rows[0].Path, b) || res.Rows[0].Value != res.Rows[0].Direct.Bytes {
+		t.Errorf("unexpected ranking: %+v", res)
+	}
+	res = run(t, e, query.Query{Within: "a", UID: &uid, OrderBy: new(query.Direct(stats.MetricFiles))})
+	if got := paths(res.Rows); !isPass(res) || len(got) != 1 || got[0] != a || res.Rows[0].Value != 2 {
+		t.Errorf("unexpected ranking: %+v", res)
+	}
+	checkLevelAndFilter(t, e, root)
+}
+
+// checkLevelAndFilter checks grouping by level and filters, which are
+// answered by a pass.
+func checkLevelAndFilter(t *testing.T, e *query.Engine, root string) {
+	t.Helper()
+	a, b := filepath.Join(root, "a"), filepath.Join(root, "b")
+	isPass := func(res query.Result) bool { return strings.HasPrefix(res.Source, query.SourcePassOf) }
+	// b/c is the only prefix at level 2.
+	res := run(t, e, query.Query{Level: 2})
+	if got := paths(res.Rows); !isPass(res) || len(got) != 1 || got[0] != filepath.Join(b, "c") || res.Rows[0].Depth != 2 {
+		t.Errorf("unexpected level: %+v", res)
+	}
+	// Only a/f1 is larger than 600 bytes, the prefixes themselves must
+	// match for their files to be counted.
+	res = run(t, e, query.Query{Filter: "type=d || file-larger=600", OrderBy: new(query.Direct(stats.MetricFiles))})
+	if got := paths(res.Rows); !isPass(res) || !strings.Contains(res.Source, "type=d || file-larger=600") || len(got) == 0 || got[0] != a || res.Rows[0].Value != 1 || res.Rows[0].Direct != nil {
+		t.Errorf("unexpected filtered ranking: %+v", res)
+	}
+}
+
+// TestPassIDsAndHotspots checks the rankings of users, groups and
+// hotspots that are answered by a pass.
+func TestPassIDsAndHotspots(t *testing.T) {
+	f, _, _ := setup(t)
+	e := query.New(f, open(t, f))
+	uid := int64(os.Getuid())
+	isPass := func(res query.Result) bool { return strings.HasPrefix(res.Source, query.SourcePassOf) }
+	res := run(t, e, query.Query{Table: query.Users, Within: "a", OrderBy: new(query.Total(stats.MetricFiles))})
+	if !isPass(res) || len(res.Rows) != 1 || *res.Rows[0].ID != uid || res.Rows[0].Value != 2 {
+		t.Errorf("unexpected users: %+v", res)
+	}
+	// b/c contains a link to a file in a, which is counted when b is
+	// considered in isolation.
+	res = run(t, e, query.Query{Table: query.Groups, Scope: query.Self, Within: "b", OrderBy: new(query.Total(stats.MetricFiles))})
+	if !isPass(res) || len(res.Rows) != 1 || res.Rows[0].Value != 2 {
+		t.Errorf("unexpected groups: %+v", res)
+	}
+	// Hotspots beneath any prefix.
+	res = run(t, e, query.Query{Table: query.Hotspots, Within: "a"})
+	if !isPass(res) || res.OrderBy != "distributed_storage_bytes" {
+		t.Errorf("unexpected hotspots: %+v", res)
 	}
 }
 

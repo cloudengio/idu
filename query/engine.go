@@ -32,6 +32,10 @@ const (
 	SourceRankings   = "the rankings maintained by analyze"
 	SourceIDTotals   = "the per-user and per-group totals maintained by analyze"
 	SourceSnapshotOf = "the snapshot "
+	// SourcePassOf prefixes the descriptions of the rows computed by a
+	// pass over the summaries, or, for a filter, the metadata of the files
+	// beneath a prefix.
+	SourcePassOf = "a pass over "
 )
 
 // Engine answers queries for a single filesystem.
@@ -42,6 +46,7 @@ type Engine struct {
 	sr          *summary.Reader
 	root, sep   string
 	snapshotDir string
+	lookupsOnly bool
 }
 
 // Option configures an Engine.
@@ -53,6 +58,16 @@ type Option func(*Engine)
 func WithSnapshotDir(dir string) Option {
 	return func(e *Engine) {
 		e.snapshotDir = dir
+	}
+}
+
+// WithLookupsOnly restricts the Engine to the queries that can be
+// answered by looking up the data maintained by analyze, the others fail
+// with an error that wraps ErrUnsupported rather than performing a pass
+// over the summaries, or file metadata, beneath the prefix being queried.
+func WithLookupsOnly() Option {
+	return func(e *Engine) {
+		e.lookupsOnly = true
 	}
 }
 
@@ -122,31 +137,37 @@ func normalizeLimit(limit int) (int, error) {
 	return min(limit, MaxLimit), nil
 }
 
-// checkGrouping rejects filters and levels other than that of the
-// children of p.within, which it converts to the Children scope.
+// checkGrouping validates filters and levels: a filter is only supported
+// for rankings, and a level must be below p.within, the level of its
+// children is converted to the Children scope.
 func (e *Engine) checkGrouping(p *plan) error {
-	if p.Filter != "" {
-		return unsupported("filter expressions require a pass over all of the prefixes beneath %v, use idu find or idu stats view with an expression instead", p.within)
+	if p.Filter != "" && (p.Scope != Subtree || p.Level != 0) {
+		return unsupported("filter expressions are only supported for rankings, ie. scope %v without a level", Subtree)
 	}
 	if p.Level == 0 {
 		return nil
 	}
 	children := e.depth(p.within) + 1
-	if p.Level != children || p.Scope == Self {
-		return unsupported("grouping by level %v requires a pass over all of the prefixes beneath %v, only the level of its children, %v, is supported", p.Level, p.within, children)
+	switch {
+	case p.Table != Prefixes || p.Scope == Self || (p.Scope == Children && p.Level != children):
+		return unsupported("only prefixes, with scope %v, may be grouped by level", Subtree)
+	case p.Level < children:
+		return fmt.Errorf("level %v is not below %v, whose children are at level %v", p.Level, p.within, children)
+	case p.Level == children:
+		p.Scope = Children
 	}
-	p.Scope = Children
 	return nil
 }
 
-// checkIDs rejects a user or group for anything other than the rankings
-// of prefixes that are maintained per user and group.
+// checkIDs rejects a user or group for anything other than a ranking of
+// prefixes by a direct column, since prefixes are only ranked per user and
+// group by the usage of their own files.
 func checkIDs(p plan) error {
 	if p.UID == nil && p.GID == nil {
 		return nil
 	}
-	if p.Table != Prefixes || p.Scope != Subtree || p.orderBy.Recursive || !p.isRoot {
-		return unsupported("a user or group may only be specified for a ranking of the prefixes, by a direct column, for the entire filesystem, since only those rankings are maintained per user and group")
+	if p.Table != Prefixes || p.Scope != Subtree || p.Level != 0 || p.orderBy.Recursive {
+		return unsupported("a user or group may only be specified for a ranking of the prefixes, scope %v, by a direct_ column, since the recursive totals are not computed per user and group", Subtree)
 	}
 	if p.UID != nil && p.GID != nil {
 		return unsupported("only one of a user or a group may be specified")
@@ -154,8 +175,11 @@ func checkIDs(p plan) error {
 	return nil
 }
 
-// Run runs q. It returns an error that wraps ErrUnsupported if q cannot be
-// answered by looking up the data maintained by analyze.
+// Run runs q. Queries are answered by looking up the data maintained by
+// analyze whenever possible and otherwise, unless WithLookupsOnly is
+// specified, by a pass over the summaries, or the file metadata, beneath
+// q.Within. It returns an error that wraps ErrUnsupported for queries that
+// cannot be answered.
 func (e *Engine) Run(ctx context.Context, q Query) (Result, error) {
 	p, err := e.normalize(q)
 	if err != nil {
@@ -179,8 +203,10 @@ func (e *Engine) Run(ctx context.Context, q Query) (Result, error) {
 }
 
 func (e *Engine) prefixes(ctx context.Context, p plan, res *Result) error {
-	switch p.Scope {
-	case Self:
+	switch {
+	case p.Level != 0 && p.Scope != Children:
+		return e.level(ctx, p, res)
+	case p.Scope == Self:
 		res.Source = SourcePrefix
 		row, err := e.prefixRow(ctx, p.within)
 		if err != nil {
@@ -189,31 +215,35 @@ func (e *Engine) prefixes(ctx context.Context, p plan, res *Result) error {
 		row.Value = value(p.orderBy, row)
 		res.Rows = []Row{row}
 		return nil
-	case Children:
+	case p.Scope == Children:
 		res.Source = SourceChildren
 		return e.children(ctx, p, res)
-	case Subtree:
-		if p.orderBy.Recursive {
-			res.Source = SourceBestFirst
-			ranked, err := e.sr.TopSubtreesWithin(ctx, p.within, p.orderBy.Metric, p.limit)
-			if err != nil {
-				return err
-			}
-			paths := make([]string, len(ranked))
-			for i, r := range ranked {
-				paths[i] = r.Path
-			}
-			return e.fill(ctx, p, paths, res)
+	case p.Scope != Subtree:
+		return fmt.Errorf("unknown scope %q, it must be one of %v, %v or %v", p.Scope, Self, Children, Subtree)
+	case p.Filter != "" || (!p.orderBy.Recursive && !p.isRoot):
+		return e.passRanking(ctx, p, res)
+	case p.orderBy.Recursive:
+		res.Source = SourceBestFirst
+		ranked, err := e.sr.TopSubtreesWithin(ctx, p.within, p.orderBy.Metric, p.limit)
+		if errors.Is(err, idudb.ErrStaleSubtrees) {
+			return e.passRanking(ctx, p, res)
 		}
-		return e.directRanking(ctx, p, res)
+		if err != nil {
+			return err
+		}
+		paths := make([]string, len(ranked))
+		for i, r := range ranked {
+			paths[i] = r.Path
+		}
+		return e.fill(ctx, p, paths, res)
 	}
-	return fmt.Errorf("unknown scope %q, it must be one of %v, %v or %v", p.Scope, Self, Children, Subtree)
+	return e.directRanking(ctx, p, res)
 }
 
+// directRanking ranks the prefixes of the entire filesystem by a direct
+// column, using the rankings maintained by analyze, a fresh snapshot or a
+// pass over all of the summaries, in that order of preference.
 func (e *Engine) directRanking(ctx context.Context, p plan, res *Result) error {
-	if !p.isRoot {
-		return unsupported("rankings of prefixes by their own files are only maintained for the entire filesystem, use scope %v, or order by a total_ column, for %v", Children, p.within)
-	}
 	res.Source = SourceRankings
 	var top summary.TopN
 	var err error
@@ -225,11 +255,17 @@ func (e *Engine) directRanking(ctx context.Context, p plan, res *Result) error {
 	default:
 		top, err = e.sr.TopPrefixes(ctx, p.orderBy.Metric, p.limit)
 	}
-	if isStaleTopN(err) && p.UID == nil && p.GID == nil {
-		return e.fromSnapshot(ctx, p, res, err, func(sf snapshot.File) []string {
-			_, paths := popN(heapFor(sf.Stats.Prefix, p.orderBy.Metric), p.limit)
-			return paths
-		})
+	if isStaleTopN(err) && (p.UID != nil || p.GID != nil) {
+		return e.passRanking(ctx, p, res)
+	}
+	if isStaleTopN(err) {
+		sf, path, ok, serr := e.freshSnapshot(ctx)
+		if serr != nil || !ok {
+			return e.passRanking(ctx, p, res)
+		}
+		values, paths := popN(heapFor(sf.Stats.Prefix, p.orderBy.Metric), p.limit)
+		res.Source = SourceSnapshotOf + path
+		return e.fillValues(ctx, p, paths, values, res)
 	}
 	if err != nil {
 		return err
@@ -239,33 +275,17 @@ func (e *Engine) directRanking(ctx context.Context, p plan, res *Result) error {
 	for i, r := range entries {
 		paths[i] = r.Path
 	}
+	values := make([]int64, len(entries))
+	for i, r := range entries {
+		// For a user or group, the values are those of their files only.
+		values[i] = r.Value
+	}
 	res.Exact = top.Certified >= len(entries)
-	if err := e.fill(ctx, p, paths, res); err != nil {
-		return err
-	}
-	if p.UID != nil || p.GID != nil {
-		// The values are those of the user's or group's files.
-		for i := range res.Rows {
-			res.Rows[i].Value = entries[i].Value
-		}
-	}
-	return nil
+	return e.fillValues(ctx, p, paths, values, res)
 }
 
 func isStaleTopN(err error) bool {
 	return errors.Is(err, summary.ErrNoTopN) || errors.Is(err, summary.ErrStaleTopN)
-}
-
-// fromSnapshot answers a query using the most recent snapshot that is
-// newer than the last analysis, if there is one, and otherwise returns
-// err, the reason that the data maintained by analyze cannot be used.
-func (e *Engine) fromSnapshot(ctx context.Context, p plan, res *Result, err error, paths func(snapshot.File) []string) error {
-	sf, path, ok, serr := e.freshSnapshot(ctx)
-	if serr != nil || !ok {
-		return err
-	}
-	res.Source, res.Exact = SourceSnapshotOf+path, true
-	return e.fill(ctx, p, paths(sf), res)
 }
 
 func (e *Engine) children(ctx context.Context, p plan, res *Result) error {
@@ -306,45 +326,50 @@ func sortRows(rows []Row) {
 }
 
 func (e *Engine) ids(ctx context.Context, p plan, res *Result) error {
-	switch p.Scope {
-	case Self:
-		if p.orderBy.Recursive {
-			return unsupported("the recursive totals for users and groups are only maintained for the entire filesystem, use scope %v for the root, or order by a direct_ column", Subtree)
-		}
-		res.Source = SourcePrefix
-		ps, ok, err := e.sr.Get(ctx, p.within)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return fmt.Errorf("%v: no such prefix in the database", p.within)
-		}
-		perID := ps.PerUser
-		if p.Table == Groups {
-			perID = ps.PerGroup
-		}
-		for _, t := range perID {
-			row := Row{ID: new(t.ID), Direct: &t}
-			row.Value = p.orderBy.Metric.Value(t)
-			res.Rows = append(res.Rows, row)
-		}
-		slices.SortStableFunc(res.Rows, func(a, b Row) int {
-			return cmp.Or(cmp.Compare(b.Value, a.Value), cmp.Compare(*a.ID, *b.ID))
-		})
-		res.Rows = res.Rows[:min(len(res.Rows), p.limit)]
-		return nil
-	case Subtree:
-		if !p.isRoot {
-			return unsupported("the totals for users and groups are only maintained for the entire filesystem, not for %v, use scope %v for its own files", p.within, Self)
-		}
-		if !p.orderBy.Recursive {
-			return unsupported("the users and groups of the entire filesystem are ranked by their total usage, order by a total_ column, or use scope %v for the files of the root itself", Self)
-		}
+	switch {
+	case p.Scope != Self && p.Scope != Subtree:
+		return unsupported("scope %v is not supported for %v, use %v or %v", p.Scope, p.Table, Self, Subtree)
+	case p.Scope == Subtree && !p.orderBy.Recursive:
+		return unsupported("users and groups are ranked by their usage beneath the prefix, order by a total_ column, or use scope %v for the prefix's own files", Self)
+	case p.Scope == Self && !p.orderBy.Recursive && p.Filter == "":
+		return e.ownIDs(ctx, p, res)
+	case p.Scope == Subtree && p.isRoot && p.Filter == "":
 		return e.idRanking(ctx, p, res)
 	}
-	return unsupported("scope %v is not supported for %v, use %v or %v", p.Scope, p.Table, Self, Subtree)
+	// The usage, by user or group, of everything beneath the prefix.
+	return e.passIDs(ctx, p, res)
 }
 
+// ownIDs returns the users or groups of the files of p.within itself.
+func (e *Engine) ownIDs(ctx context.Context, p plan, res *Result) error {
+	res.Source = SourcePrefix
+	ps, ok, err := e.sr.Get(ctx, p.within)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("%v: no such prefix in the database", p.within)
+	}
+	perID := ps.PerUser
+	if p.Table == Groups {
+		perID = ps.PerGroup
+	}
+	res.Rows = make([]Row, 0, len(perID))
+	for _, t := range perID {
+		row := Row{ID: new(t.ID), Direct: &t}
+		row.Value = p.orderBy.Metric.Value(t)
+		res.Rows = append(res.Rows, row)
+	}
+	slices.SortStableFunc(res.Rows, func(a, b Row) int {
+		return cmp.Or(cmp.Compare(b.Value, a.Value), cmp.Compare(*a.ID, *b.ID))
+	})
+	res.Rows = res.Rows[:min(len(res.Rows), p.limit)]
+	return nil
+}
+
+// idRanking ranks the users or groups of the entire filesystem, using the
+// totals maintained by analyze, a fresh snapshot or a pass over all of the
+// summaries, in that order of preference.
 func (e *Engine) idRanking(ctx context.Context, p plan, res *Result) error {
 	rank := e.sr.TopUsers
 	if p.Table == Groups {
@@ -355,22 +380,16 @@ func (e *Engine) idRanking(ctx context.Context, p plan, res *Result) error {
 	if isStaleTopN(err) {
 		sf, path, ok, serr := e.freshSnapshot(ctx)
 		if serr != nil || !ok {
-			return err
+			return e.passIDs(ctx, p, res)
 		}
-		h := sf.Stats.ByUser
-		if p.Table == Groups {
-			h = sf.Stats.ByGroup
-		}
-		values, ids := popN(heapFor(h, p.orderBy.Metric), p.limit)
 		res.Source = SourceSnapshotOf + path
-		for i := range values {
-			res.Rows = append(res.Rows, Row{ID: new(ids[i]), Value: values[i]})
-		}
+		appendIDRows(res, idHeaps(sf.Stats, p.Table), p)
 		return nil
 	}
 	if err != nil {
 		return err
 	}
+	res.Rows = make([]Row, 0, len(ranked))
 	for _, r := range ranked {
 		res.Rows = append(res.Rows, Row{ID: new(r.ID), Total: &r.Totals, Value: r.Value})
 	}
@@ -378,34 +397,50 @@ func (e *Engine) idRanking(ctx context.Context, p plan, res *Result) error {
 }
 
 func (e *Engine) hotspots(ctx context.Context, p plan, res *Result) error {
-	if p.Scope != Subtree || !p.isRoot {
-		return unsupported("hotspots are only available for the entire filesystem, use scope %v for its root", Subtree)
+	if p.Scope != Subtree {
+		return unsupported("hotspots are found beneath a prefix, use scope %v", Subtree)
 	}
-	var get func(*report.DistributedHeaps) *heap.MinMax[int64, report.DistributedStats]
 	switch p.orderBy.Metric {
-	case stats.MetricBytes:
-		get = func(h *report.DistributedHeaps) *heap.MinMax[int64, report.DistributedStats] { return h.Bytes }
-	case stats.MetricStorageBytes:
-		get = func(h *report.DistributedHeaps) *heap.MinMax[int64, report.DistributedStats] { return h.StorageBytes }
-	case stats.MetricFiles:
-		get = func(h *report.DistributedHeaps) *heap.MinMax[int64, report.DistributedStats] { return h.Files }
+	case stats.MetricBytes, stats.MetricStorageBytes, stats.MetricFiles:
 	default:
 		return unsupported("hotspots are only ranked by bytes, storage-bytes or files")
 	}
 	res.OrderBy = "distributed_" + strings.ReplaceAll(p.orderBy.Metric.String(), "-", "_")
-	sf, path, ok, err := e.freshSnapshot(ctx)
+	if p.isRoot && p.Filter == "" {
+		sf, path, ok, err := e.freshSnapshot(ctx)
+		if err != nil {
+			return err
+		}
+		if ok && sf.Stats.Distributed != nil {
+			res.Source = SourceSnapshotOf + path
+			e.appendHotspots(res, sf.Stats.Distributed, p)
+			return nil
+		}
+	}
+	sdb, source, err := e.pass(ctx, p, "hotspots require a pass over all of the summaries beneath the prefix, they are also included in the snapshots written by idu stats compute --hotspots")
 	if err != nil {
 		return err
 	}
-	if !ok || sf.Stats.Distributed == nil {
-		where := "no snapshot directory is configured"
-		if e.snapshotDir != "" {
-			where = "there is no snapshot that includes them, newer than the last analysis, in " + e.snapshotDir
-		}
-		return unsupported("hotspots require a pass over all of the summaries and %v, use idu stats compute --hotspots to write one", where)
+	res.Source = source
+	if sdb.Distributed != nil {
+		e.appendHotspots(res, sdb.Distributed, p)
 	}
-	res.Source = SourceSnapshotOf + path
-	for _, ds := range report.TopDistributed(get(sf.Stats.Distributed), p.limit) {
+	return nil
+}
+
+func (e *Engine) appendHotspots(res *Result, h *report.DistributedHeaps, p plan) {
+	var dh *heap.MinMax[int64, report.DistributedStats]
+	switch p.orderBy.Metric {
+	case stats.MetricBytes:
+		dh = h.Bytes
+	case stats.MetricStorageBytes:
+		dh = h.StorageBytes
+	case stats.MetricFiles:
+		dh = h.Files
+	}
+	top := report.TopDistributed(dh, p.limit)
+	res.Rows = make([]Row, 0, len(top))
+	for _, ds := range top {
 		row := e.newRow(ds.Prefix)
 		row.Hotspot = &ds
 		switch p.orderBy.Metric {
@@ -418,7 +453,6 @@ func (e *Engine) hotspots(ctx context.Context, p plan, res *Result) error {
 		}
 		res.Rows = append(res.Rows, row)
 	}
-	return nil
 }
 
 // freshSnapshot returns the most recent snapshot of the entire filesystem
@@ -447,6 +481,8 @@ func (e *Engine) newRow(path string) Row {
 			row.Parent, row.Name = trimmed[:i], trimmed[i+len(e.sep):]
 			if row.Parent == "" {
 				row.Parent = e.sep
+			} else if strings.HasSuffix(row.Parent, ":") {
+				row.Parent += e.sep
 			}
 		}
 	}

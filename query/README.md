@@ -13,39 +13,43 @@ which have direct totals, for their own files, and recursive totals, for
 everything beneath them, and hotspots, prefixes whose subtrees accumulate
 substantial usage spread across many descendants.
 
-Queries are answered only by looking up the data that analyze maintains,
-rather than by a pass over all of the prefixes beneath the one being
-queried or by an export of every row: the summaries and recursive totals of
-individual prefixes, the top-N rankings and per-user and per-group totals
-maintained by analyze, and the most recent snapshot. A query that would
-require a pass, or an export, returns an error that wraps ErrUnsupported
-and says why. The cost of every supported query is therefore proportional
-to the number of rows it returns, or the number of children of a prefix,
-rather than to the size of the filesystem.
+The rows are not stored, or exported, as such: queries are answered
+by looking up the data that analyze maintains whenever possible, ie.
+the summaries and recursive totals of individual prefixes, the top-N
+rankings and per-user and per-group totals, and the most recent snapshot,
+so that their cost is proportional to the number of rows returned, or the
+number of children of a prefix. Otherwise, they are answered by a pass over
+the summaries beneath the prefix being queried, or, for a filter expression,
+over the metadata of its files, whose cost is proportional to the size of
+the subtree; WithLookupsOnly restricts an Engine to lookups, in which case
+such queries fail with an error that wraps ErrUnsupported and says why.
+Result.Source says how the rows were obtained.
 
-The supported queries are:
+The queries answered by lookups are:
 
   - Prefixes, Self: the row for a single prefix.
-  - Prefixes, Children: the immediate children of a prefix, ordered by any
-    direct or recursive column.
+  - Prefixes, Children, or Level equal to the depth of the children:
+    the immediate children of a prefix, ordered by any column.
   - Prefixes, Subtree, ordered by a recursive column: the prefixes beneath
     any prefix with the largest recursive totals, ie. where the space is
-    used, which is always exact.
+    used, by a best-first search that is always exact.
   - Prefixes, Subtree, ordered by a direct column: the prefixes with the
-    largest totals for their own files, for the entire filesystem only,
-    optionally for the files of a single user or group.
-  - Users or Groups, Self: the users or groups of the files in a single
-    prefix, not those beneath it.
+    largest totals for their own files, for the entire filesystem.
+  - Users or Groups, Self, ordered by a direct column: the users or groups
+    of the files in a single prefix.
   - Users or Groups, Subtree: the users or groups with the largest totals,
-    for the entire filesystem only.
+    for the entire filesystem.
   - Hotspots, Subtree: the hotspots for the entire filesystem, from a
     snapshot that includes them, see idu stats compute --hotspots.
 
-Filter expressions, grouping by levels of the hierarchy other than a
-prefix's children, and rows for individual files are not supported.
+Those that require a pass are: rankings of prefixes by a direct column,
+or for a single user or group, and of users, groups and hotspots, beneath a
+prefix other than the root; grouping by a level below that of the children;
+and any query with a filter, which is only supported for rankings, ie.
+scope Subtree. Rows for individual files are not supported.
 
 ## Constants
-### SourcePrefix, SourceChildren, SourceBestFirst, SourceRankings, SourceIDTotals, SourceSnapshotOf
+### SourcePrefix, SourceChildren, SourceBestFirst, SourceRankings, SourceIDTotals, SourceSnapshotOf, SourcePassOf
 ```go
 const (
 	SourcePrefix     = "the summary and recursive totals of the prefix"
@@ -54,6 +58,10 @@ const (
 	SourceRankings   = "the rankings maintained by analyze"
 	SourceIDTotals   = "the per-user and per-group totals maintained by analyze"
 	SourceSnapshotOf = "the snapshot "
+	// SourcePassOf prefixes the descriptions of the rows computed by a
+	// pass over the summaries, or, for a filter, the metadata of the files
+	// beneath a prefix.
+	SourcePassOf = "a pass over "
 )
 ```
 The sources of the rows in a Result.
@@ -159,8 +167,11 @@ reading, is db.
 ```go
 func (e *Engine) Run(ctx context.Context, q Query) (Result, error)
 ```
-Run runs q. It returns an error that wraps ErrUnsupported if q cannot be
-answered by looking up the data maintained by analyze.
+Run runs q. Queries are answered by looking up the data maintained
+by analyze whenever possible and otherwise, unless WithLookupsOnly is
+specified, by a pass over the summaries, or the file metadata, beneath
+q.Within. It returns an error that wraps ErrUnsupported for queries that
+cannot be answered.
 
 
 
@@ -172,6 +183,15 @@ type Option func(*Engine)
 Option configures an Engine.
 
 ### Functions
+
+```go
+func WithLookupsOnly() Option
+```
+WithLookupsOnly restricts the Engine to the queries that can be answered
+by looking up the data maintained by analyze, the others fail with an error
+that wraps ErrUnsupported rather than performing a pass over the summaries,
+or file metadata, beneath the prefix being queried.
+
 
 ```go
 func WithSnapshotDir(dir string) Option

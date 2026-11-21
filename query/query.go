@@ -10,36 +10,42 @@
 // totals, for everything beneath them, and hotspots, prefixes whose
 // subtrees accumulate substantial usage spread across many descendants.
 //
-// Queries are answered only by looking up the data that analyze maintains,
-// rather than by a pass over all of the prefixes beneath the one being
-// queried or by an export of every row: the summaries and recursive totals
-// of individual prefixes, the top-N rankings and per-user and per-group
-// totals maintained by analyze, and the most recent snapshot. A query that
-// would require a pass, or an export, returns an error that wraps
-// ErrUnsupported and says why. The cost of every supported query is
-// therefore proportional to the number of rows it returns, or the number
-// of children of a prefix, rather than to the size of the filesystem.
+// The rows are not stored, or exported, as such: queries are answered by
+// looking up the data that analyze maintains whenever possible, ie. the
+// summaries and recursive totals of individual prefixes, the top-N
+// rankings and per-user and per-group totals, and the most recent
+// snapshot, so that their cost is proportional to the number of rows
+// returned, or the number of children of a prefix. Otherwise, they are
+// answered by a pass over the summaries beneath the prefix being queried,
+// or, for a filter expression, over the metadata of its files, whose cost
+// is proportional to the size of the subtree; WithLookupsOnly restricts an
+// Engine to lookups, in which case such queries fail with an error that
+// wraps ErrUnsupported and says why. Result.Source says how the rows were
+// obtained.
 //
-// The supported queries are:
+// The queries answered by lookups are:
 //
 //   - Prefixes, Self: the row for a single prefix.
-//   - Prefixes, Children: the immediate children of a prefix, ordered by
-//     any direct or recursive column.
+//   - Prefixes, Children, or Level equal to the depth of the children: the
+//     immediate children of a prefix, ordered by any column.
 //   - Prefixes, Subtree, ordered by a recursive column: the prefixes
 //     beneath any prefix with the largest recursive totals, ie. where the
-//     space is used, which is always exact.
+//     space is used, by a best-first search that is always exact.
 //   - Prefixes, Subtree, ordered by a direct column: the prefixes with the
-//     largest totals for their own files, for the entire filesystem only,
-//     optionally for the files of a single user or group.
-//   - Users or Groups, Self: the users or groups of the files in a single
-//     prefix, not those beneath it.
+//     largest totals for their own files, for the entire filesystem.
+//   - Users or Groups, Self, ordered by a direct column: the users or
+//     groups of the files in a single prefix.
 //   - Users or Groups, Subtree: the users or groups with the largest
-//     totals, for the entire filesystem only.
+//     totals, for the entire filesystem.
 //   - Hotspots, Subtree: the hotspots for the entire filesystem, from a
 //     snapshot that includes them, see idu stats compute --hotspots.
 //
-// Filter expressions, grouping by levels of the hierarchy other than a
-// prefix's children, and rows for individual files are not supported.
+// Those that require a pass are: rankings of prefixes by a direct column,
+// or for a single user or group, and of users, groups and hotspots,
+// beneath a prefix other than the root; grouping by a level below that of
+// the children; and any query with a filter, which is only supported for
+// rankings, ie. scope Subtree. Rows for individual files are not
+// supported.
 package query
 
 import (
@@ -152,11 +158,12 @@ type Query struct {
 	// Limit is the maximum number of rows to return, DefaultLimit if zero.
 	Limit int
 	// Filter is an expression, as accepted by idu find and stats, that
-	// rows must match. Filters are not supported.
+	// files must match; it is only supported for rankings, ie. Scope
+	// Subtree without Level.
 	Filter string
 	// Level groups the rows by the prefixes at the specified depth below
-	// the root. Only the depth of Within's children is supported, which is
-	// equivalent to Scope Children.
+	// the root. Only depths below Within are supported; the depth of
+	// Within's children is equivalent to Scope Children.
 	Level int
 }
 

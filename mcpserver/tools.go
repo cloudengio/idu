@@ -87,7 +87,7 @@ func (s *Server) addTools() {
 		Description: "The top n entries beneath a prefix, ordered by a metric (" + metrics + "), largest first. " +
 			"by is one of: subtree, the prefixes ranked by their recursive totals, ie. where the space is used; " +
 			"prefix, the prefixes ranked by their own files only; user or group, the users or groups ranked by their usage; hotspot, prefixes whose subtrees accumulate substantial usage spread across many descendants. " +
-			"Only subtree is supported beneath a prefix other than the root, the others are only available for the entire filesystem. " +
+			"Rankings by subtree, and the others for the entire filesystem, use the rankings maintained by analyze; the others beneath any other prefix require a pass over the summaries beneath it. " +
 			"For by=prefix, user may be set to rank the prefixes by the usage of that user's files, and similarly for group.",
 		Annotations: readOnly,
 	}, s.topN)
@@ -370,15 +370,14 @@ func (s *Server) setName(table query.Table, id *int64, user, group *string) {
 // queryDescription describes the query tool, see the query package.
 var queryDescription = "Query the rows of the row model for a filesystem: prefixes (directories), users, groups and hotspots, each with its direct totals, for its own files, and recursive totals, for everything beneath it. " +
 	"Rows are ordered by a column, largest first, one of: " + strings.Join(query.Columns(), ", ") + ". " +
-	"Queries are answered by looking up the totals, rankings and snapshots maintained by analyze, so their cost is proportional to the rows returned; " +
-	"a query that would require a pass over the database fails with an error that explains what is supported instead. The supported queries are: " +
-	"table=prefixes with scope=self, the prefix itself; scope=children, its children, ordered by any column; " +
-	"scope=subtree ordered by a total_ column, the prefixes beneath any prefix with the largest totals, ie. where the space is used; " +
-	"scope=subtree ordered by a direct_ column, the prefixes with the largest totals for their own files, for the entire filesystem only, optionally for a single user or group. " +
-	"table=users or groups with scope=self, the users or groups of the prefix's own files; scope=subtree, the users or groups with the largest totals, for the entire filesystem only. " +
-	"table=hotspots with scope=subtree, for the entire filesystem only: prefixes whose subtrees accumulate substantial usage spread across many descendants, where neither a single directory nor a single child dominates, ordered by their distributed bytes, storage bytes or files (use a total_bytes, total_storage_bytes or total_files column); " +
-	"they are only available from a snapshot that includes them, written by idu stats compute --hotspots after the most recent analysis, and each row includes the hotspot's subtree, direct and largest leaf totals and its amplification. " +
-	"Filters and grouping by levels other than the children of the prefix are not supported."
+	"Queries are answered by looking up the totals, rankings and snapshots maintained by analyze when possible, so that their cost is proportional to the rows returned, and otherwise by a pass over the summaries beneath the prefix, whose cost is proportional to the size of the subtree; source says which. " +
+	"table=prefixes: scope=self, the prefix itself; scope=children (or level set to the depth of its children), its children, ordered by any column; " +
+	"scope=subtree, the prefixes beneath the prefix with the largest value of the column: a total_ column for where the space is used, a direct_ column for the prefixes' own files, optionally for a single user or group; " +
+	"level set to a depth below the children, the prefixes at that depth. " +
+	"table=users or groups: scope=self with a direct_ column, the users or groups of the prefix's own files; scope=subtree with a total_ column, their usage beneath the prefix. " +
+	"table=hotspots, scope=subtree: prefixes whose subtrees accumulate substantial usage spread across many descendants, where neither a single directory nor a single child dominates, ordered by their distributed bytes, storage bytes or files (use a total_bytes, total_storage_bytes or total_files column); each row includes the hotspot's subtree, direct and largest leaf totals and its amplification. " +
+	"filter is an expression, as described by idu expression-syntax, eg. user=<name>, file-larger=<size>, name=<glob>, newer=<time>, combined with && || !; it requires a pass over the metadata of the files beneath the prefix, is only supported for scope=subtree, and since directories must match for their files to be counted, use eg. type=d || file-larger=1GB. " +
+	"Rows for individual files are not supported."
 
 // QueryArgs are the arguments to query.
 type QueryArgs struct {
