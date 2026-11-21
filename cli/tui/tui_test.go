@@ -113,8 +113,27 @@ func startHarness(t *testing.T, analyzeWith func(tmpDir, root string) iduconfig.
 		case <-time.After(10 * time.Second):
 			t.Errorf("the tui did not exit")
 		}
+		cleanupDB(t, f.Config().Database)
 	})
 	return h
+}
+
+// cleanupDB retries removing the database directory on Windows beyond
+// testing.T.TempDir's 2s timeout in case Windows Defender or search indexing
+// transiently holds newly closed Badger files.
+func cleanupDB(t *testing.T, dir string) {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		return
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		err := os.RemoveAll(dir)
+		if err == nil || os.IsNotExist(err) || time.Now().After(deadline) {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // text returns the contents of the screen. The screen is read on the tui's
@@ -735,6 +754,7 @@ func TestBracketPathsEscaped(t *testing.T) {
 		case <-time.After(10 * time.Second):
 			t.Errorf("the tui did not exit")
 		}
+		cleanupDB(t, f.Config().Database)
 	})
 	h.waitFor("dir[red]sub", "Top-N beneath "+root+" ")
 }
