@@ -203,6 +203,57 @@ WithVersion sets the version reported by the server.
 
 
 
+### Type QueryArgs
+```go
+type QueryArgs struct {
+	FSArgs
+	Table   string `json:"table,omitempty" jsonschema:"prefixes (the default), users, groups or hotspots"`
+	Scope   string `json:"scope,omitempty" jsonschema:"self, children or subtree (the default), relative to the prefix"`
+	OrderBy string `json:"order_by,omitempty" jsonschema:"the column to order the rows by, largest first, total_storage_bytes by default, or direct_storage_bytes for the users or groups of a prefix"`
+	User    string `json:"user,omitempty" jsonschema:"rank prefixes by the usage of this user's files, a name or numeric id"`
+	Group   string `json:"group,omitempty" jsonschema:"rank prefixes by the usage of this group's files, a name or numeric id"`
+	Level   int    `json:"level,omitempty" jsonschema:"group by the prefixes at this depth below the root, only the depth of the prefix's children is supported"`
+	Filter  string `json:"filter,omitempty" jsonschema:"a filter expression, not supported"`
+	N       int    `json:"n,omitempty" jsonschema:"the maximum number of rows to return, 20 by default"`
+}
+```
+QueryArgs are the arguments to query.
+
+
+### Type QueryResult
+```go
+type QueryResult struct {
+	Path    string     `json:"path"`
+	Table   string     `json:"table"`
+	Scope   string     `json:"scope"`
+	OrderBy string     `json:"order_by"`
+	Rows    []QueryRow `json:"rows"`
+	Exact   bool       `json:"exact" jsonschema:"true if the rows are known to be exactly the top rows"`
+	Source  string     `json:"source" jsonschema:"where the rows came from"`
+}
+```
+QueryResult is the result of query.
+
+
+### Type QueryRow
+```go
+type QueryRow struct {
+	Path    string                   `json:"path,omitempty"`
+	Parent  string                   `json:"parent,omitempty"`
+	Name    string                   `json:"name,omitempty"`
+	Depth   int                      `json:"depth"`
+	ID      *int64                   `json:"id,omitempty" jsonschema:"the numeric id of the user or group"`
+	User    string                   `json:"user,omitempty"`
+	Group   string                   `json:"group,omitempty"`
+	Direct  *Totals                  `json:"direct,omitempty" jsonschema:"the totals for the prefix's, user's or group's own files, if known"`
+	Total   *Totals                  `json:"total,omitempty" jsonschema:"the recursive totals, if known"`
+	Hotspot *report.DistributedStats `json:"hotspot,omitempty"`
+	Value   int64                    `json:"value" jsonschema:"the value of the column that the rows are ordered by"`
+}
+```
+QueryRow is a row returned by query.
+
+
 ### Type Server
 ```go
 type Server struct {
@@ -257,7 +308,7 @@ TopN is the result of top_n.
 type TopNArgs struct {
 	FSArgs
 	Metric string `json:"metric,omitempty" jsonschema:"the metric to rank by, storage_bytes by default"`
-	By     string `json:"by,omitempty" jsonschema:"what to rank: subtree (the default), prefix, user or group"`
+	By     string `json:"by,omitempty" jsonschema:"what to rank: subtree (the default), prefix, user, group or hotspot"`
 	User   string `json:"user,omitempty" jsonschema:"for by=prefix, rank the prefixes by the usage of this user's files, a name or numeric id"`
 	Group  string `json:"group,omitempty" jsonschema:"for by=prefix, rank the prefixes by the usage of this group's files, a name or numeric id"`
 	N      int    `json:"n,omitempty" jsonschema:"the number of entries to return, 20 by default"`

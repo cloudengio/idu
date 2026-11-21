@@ -63,7 +63,7 @@ commands:
       - '[<prefix>]'
 
   - name: mcp
-    summary: run a Model Context Protocol (MCP) server, on stdin/stdout, that provides read-only tools for AI agents to query the databases of the configured filesystems, eg. claude mcp add idu -- idu mcp. The tools report the configured filesystems, the usage of a prefix and its children, the top-N subtrees, prefixes, users and groups by any metric, and the errors recorded by analyze. A tool call may select a filesystem by name or root; otherwise an absolute prefix selects the filesystem with the longest root that contains it, and failing that the default is used, which is the filesystem named by --fs, the only one configured, or the local filesystem, ie. the one whose root is /.
+    summary: run a Model Context Protocol (MCP) server, on stdin/stdout, that provides read-only tools for AI agents to query the databases of the configured filesystems, eg. claude mcp add idu -- idu mcp. The tools report the configured filesystems, the usage of a prefix and its children, the top-N subtrees, prefixes, users, groups and hotspots by any metric, and the errors recorded by analyze, and query the row model, see the query package. A tool call may select a filesystem by name or root; otherwise an absolute prefix selects the filesystem with the longest root that contains it, and failing that the default is used, which is the filesystem named by --fs, the only one configured, or the local filesystem, ie. the one whose root is /.
 
   - name: find
     summary: find prefixes/files in the database that match the supplied expression.

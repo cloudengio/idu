@@ -23,6 +23,8 @@ import (
 	"cloudeng.io/cmd/idu/internal/cli"
 	"cloudeng.io/cmd/idu/internal/cli/clitest"
 	"cloudeng.io/cmd/idu/mcpserver"
+	"cloudeng.io/cmd/idu/query"
+	"cloudeng.io/cmd/idu/snapshot"
 	"cloudeng.io/cmd/idu/usernames"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -132,7 +134,7 @@ func checkToolList(t *testing.T, cs *mcp.ClientSession) {
 		tools = append(tools, tool.Name)
 	}
 	slices.Sort(tools)
-	if want := []string{"children", "errors", "list_filesystems", "top_n", "usage"}; !slices.Equal(tools, want) {
+	if want := []string{"children", "errors", "list_filesystems", "query", "top_n", "usage"}; !slices.Equal(tools, want) {
 		t.Errorf("got %v, want %v", tools, want)
 	}
 }
@@ -179,9 +181,11 @@ func checkChildren(t *testing.T, cs *mcp.ClientSession, root string) {
 func testTopN(t *testing.T, cs *mcp.ClientSession, root string, aBytes int64) {
 	t.Helper()
 	const (
-		stored   = "the rankings maintained by analyze"
-		computed = "computed by a pass over all of the summaries beneath the prefix"
+		stored    = query.SourceRankings
+		bestFirst = query.SourceBestFirst
+		idTotals  = query.SourceIDTotals
 	)
+	passB := query.SourcePassOf + "the summaries beneath " + filepath.Join(root, "b")
 	user := usernames.Manager.NameForUID(int64(os.Getuid()))
 	a, b := filepath.Join(root, "a"), filepath.Join(root, "b")
 	for _, tc := range []struct {
@@ -192,16 +196,18 @@ func testTopN(t *testing.T, cs *mcp.ClientSession, root string, aBytes int64) {
 		// not set is not checked.
 		first mcpserver.Entry
 	}{
-		{map[string]any{"n": 2}, 2, stored, mcpserver.Entry{Path: root}},
+		{map[string]any{"n": 2}, 2, bestFirst, mcpserver.Entry{Path: root}},
 		{map[string]any{"by": "prefix", "metric": "bytes", "n": 1}, 1, stored, mcpserver.Entry{Path: a, Value: aBytes}},
 		{map[string]any{"by": "prefix", "metric": "bytes", "user": user, "n": 1}, 1, stored, mcpserver.Entry{Path: a}},
-		{map[string]any{"by": "user"}, 1, stored, mcpserver.Entry{User: user}},
+		{map[string]any{"by": "user"}, 1, idTotals, mcpserver.Entry{User: user}},
+		{map[string]any{"by": "group"}, 1, idTotals, mcpserver.Entry{}},
 		// Rankings of prefixes, users and groups beneath a prefix other
-		// than the root are computed from the summaries.
-		{map[string]any{"by": "group", "prefix": "b"}, 1, computed, mcpserver.Entry{}},
+		// than the root require a pass over the summaries beneath it.
+		{map[string]any{"by": "group", "prefix": "b"}, 1, passB, mcpserver.Entry{}},
+		{map[string]any{"by": "prefix", "prefix": "b", "n": 1}, 1, passB, mcpserver.Entry{Path: filepath.Join(b, "c")}},
 		// b/c contains only a link to a file counted in a, and hence no
 		// files.
-		{map[string]any{"prefix": "b", "metric": "files"}, 1, stored, mcpserver.Entry{Path: b, Value: 1}},
+		{map[string]any{"prefix": "b", "metric": "files"}, 1, bestFirst, mcpserver.Entry{Path: b, Value: 1}},
 	} {
 		var top mcpserver.TopN
 		mustCall(t, cs, "top_n", tc.args, &top)
@@ -232,9 +238,13 @@ func TestToolErrors(t *testing.T) {
 		{"usage", map[string]any{"prefix": "/elsewhere"}, "not within any of the configured filesystems"},
 		{"usage", map[string]any{"prefix": "missing"}, "no such prefix"},
 		{"children", map[string]any{"metric": "size"}, "storage-bytes"},
-		{"top_n", map[string]any{"by": "owner"}, "subtree, prefix, user or group"},
-		{"top_n", map[string]any{"by": "prefix", "prefix": "a", "user": "x"}, "only be set for by=prefix for the entire filesystem"},
-		{"top_n", map[string]any{"by": "prefix", "user": "x", "group": "y"}, "user and group cannot both be set"},
+		{"top_n", map[string]any{"by": "owner"}, "subtree, prefix, user, group or hotspot"},
+		{"query", map[string]any{"filter": "type=d", "scope": "children"}, "unsupported query: filter expressions are only supported for rankings"},
+		{"query", map[string]any{"order_by": "size"}, "total_storage_bytes"},
+		{"query", map[string]any{"table": "files"}, "unknown table"},
+		{"top_n", map[string]any{"by": "subtree", "user": "1"}, "a user or group may only be specified for a ranking of the prefixes, scope subtree, by a direct_ column"},
+		{"top_n", map[string]any{"by": "prefix", "user": "1", "group": "1"}, "only one of a user or a group may be specified"},
+		{"top_n", map[string]any{"by": "prefix", "user": "no-such-user-xyz"}, "unknown user"},
 	} {
 		var out map[string]any
 		if msg := call(t, cs, tc.tool, tc.args, &out); !strings.Contains(msg, tc.want) {
@@ -331,6 +341,7 @@ func Example() {
 	// children
 	// errors
 	// list_filesystems
+	// query
 	// top_n
 	// usage
 }
@@ -409,5 +420,58 @@ func TestSelectFilesystem(t *testing.T) {
 	cs = connect(t, multi(false))
 	if msg := call(t, cs, "usage", map[string]any{}, &usage); !strings.Contains(msg, "none of them is the local filesystem") {
 		t.Errorf("unexpected error: %q", msg)
+	}
+}
+
+// TestQuery checks the query tool, including the hotspots, which are only
+// available from a snapshot that includes them.
+func TestQuery(t *testing.T) {
+	cfg, root := analyzed(t, nil)
+	dir := filepath.Join(t.TempDir(), "snapshots")
+	cfg.Filesystems[0].Config().SnapshotDir = dir
+	cs := connect(t, cfg)
+
+	var res mcpserver.QueryResult
+	mustCall(t, cs, "query", map[string]any{"scope": "children", "order_by": "total_files", "n": 2}, &res)
+	if res.Table != "prefixes" || res.Scope != "children" || res.OrderBy != "total_files" || len(res.Rows) != 2 ||
+		res.Rows[0].Parent != root || res.Rows[0].Depth != 1 || res.Rows[0].Total == nil || res.Rows[0].Direct == nil {
+		t.Errorf("unexpected result: %+v", res)
+	}
+	res = mcpserver.QueryResult{}
+	mustCall(t, cs, "query", map[string]any{"table": "users", "scope": "self", "prefix": "a"}, &res)
+	if len(res.Rows) != 1 || res.Rows[0].User == "" || res.Rows[0].ID == nil || res.Rows[0].Direct.Files != 2 || res.OrderBy != "direct_storage_bytes" {
+		t.Errorf("unexpected result: %+v", res)
+	}
+
+	checkHotspots(t, cfg, cs, dir)
+}
+
+// checkHotspots checks that the hotspots are computed by a pass over the
+// summaries unless there is a snapshot that includes them.
+func checkHotspots(t *testing.T, cfg iduconfig.T, cs *mcp.ClientSession, dir string) {
+	t.Helper()
+	ctx := context.Background()
+	var pass mcpserver.QueryResult
+	mustCall(t, cs, "query", map[string]any{"table": "hotspots"}, &pass)
+	if !strings.HasPrefix(pass.Source, query.SourcePassOf) {
+		t.Errorf("unexpected result: %+v", pass)
+	}
+	if _, _, err := (snapshot.Computer{Hotspots: true}).Current(ctx, cfg.Filesystems[0], dir, 10, defaultdb.OpenOptions()...); err != nil {
+		t.Fatal(err)
+	}
+	var res mcpserver.QueryResult
+	mustCall(t, cs, "query", map[string]any{"table": "hotspots", "order_by": "total_bytes"}, &res)
+	if res.Table != "hotspots" || res.OrderBy != "distributed_bytes" || !strings.HasPrefix(res.Source, query.SourceSnapshotOf) {
+		t.Errorf("unexpected result: %+v", res)
+	}
+	for _, r := range res.Rows {
+		if r.Hotspot == nil || r.Value != r.Hotspot.DistributedBytes {
+			t.Errorf("unexpected hotspot: %+v", r)
+		}
+	}
+	var top mcpserver.TopN
+	mustCall(t, cs, "top_n", map[string]any{"by": "hotspot", "metric": "files"}, &top)
+	if top.By != "hotspot" || !strings.HasPrefix(top.Source, query.SourceSnapshotOf) {
+		t.Errorf("unexpected top_n: %+v", top)
 	}
 }
