@@ -592,7 +592,13 @@ func TestExampleConfig(t *testing.T) {
 }
 
 func TestDocumentation(t *testing.T) {
-	got := iduconfig.Documentation()
+	var buf bytes.Buffer
+	cc := iduconfig.ConfigCommands()
+	cc.Output = &buf
+	if err := cc.Describe(context.Background(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
 	for _, expected := range []string{
 		"raid0",
 		"filesystems:",
@@ -609,6 +615,9 @@ func TestDocumentation(t *testing.T) {
 		"when building",
 		"stripe_size:",
 		"hardlink_dedup:",
+		"start_prefix:",
+		"stop_prefix:",
+		"Filesystem entries",
 		"Hardlink deduplication strategies",
 		"summaries:",
 		"rescan:",
@@ -662,27 +671,14 @@ func TestLoadAndReadConfigErrorsShowFilesRead(t *testing.T) {
 
 	ctx := context.Background()
 	var ff cmdconfig.FilesFlag
-	_, loc, err := iduconfig.Load(ctx, &ff)
+	_, _, err := iduconfig.Load(ctx, &ff)
 	assertErrorContainsAll(t, err, mainFile, fsA, fsBad, envFile)
-
-	var buf bytes.Buffer
-	iduconfig.PrintLocated(&buf, loc)
-	for _, want := range []string{
-		"# Configuration file: " + mainFile,
-		"# Configuration file: " + fsA,
-		"# Configuration file: " + fsBad,
-		"# Environment variables file: " + envFile,
-	} {
-		if !strings.Contains(buf.String(), want) {
-			t.Errorf("PrintLocated output %q missing %q", buf.String(), want)
-		}
-	}
 
 	// Duplicate name validation error across two files also lists all read files.
 	if err := os.WriteFile(fsBad, []byte("filesystems:\n  - name: a\n    prefix: /b\n    database: /db/b\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, loc, err = iduconfig.Load(ctx, &ff)
+	_, loc, err := iduconfig.Load(ctx, &ff)
 	if loc == nil {
 		t.Fatalf("expected non-nil Located on validation error")
 	}
@@ -691,14 +687,6 @@ func TestLoadAndReadConfigErrorsShowFilesRead(t *testing.T) {
 	// ReadConfig lists all supplied files on error.
 	_, err = iduconfig.ReadConfig(fsA, fsBad)
 	assertErrorContainsAll(t, err, fsA, fsBad)
-}
-
-func TestPrintLocatedNone(t *testing.T) {
-	var buf bytes.Buffer
-	iduconfig.PrintLocated(&buf, &cmdconfig.Located{})
-	if !strings.Contains(buf.String(), "# Configuration file: none") {
-		t.Errorf("expected '# Configuration file: none', got %q", buf.String())
-	}
 }
 
 func TestCompactIntervals(t *testing.T) {

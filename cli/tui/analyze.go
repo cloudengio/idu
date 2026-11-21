@@ -103,6 +103,73 @@ const (
 	minBarScale = 10
 )
 
+// bar describes a bar displayed by one of the bar charts.
+type bar struct {
+	name string
+	// color is the name of the bar's color, as used in tview's color tags.
+	color string
+	// desc explains what the bar counts, see analyzeHelp.
+	desc string
+}
+
+// outstandingBars are the operations that are currently in progress.
+var outstandingBars = []bar{
+	{barPrefixes, "green", "prefixes (directories) whose scan has started but not yet finished"},
+	{barStats, "fuchsia", "stat operations on files and prefixes that have been issued but have not yet completed"},
+}
+
+// eventBars are the totals of the events that have occurred so far.
+var eventBars = []bar{
+	{barUnchanged, "green", "prefixes found to be unchanged since the previous analysis, and hence not rescanned"},
+	{barDeleted, "yellow", "prefixes that no longer exist and have been deleted from the database"},
+	{barRestated, "aqua", "files in unchanged prefixes that were re-stat'ed since they match the restat configuration"},
+	{barSyncScans, "silver", "prefixes scanned synchronously, ie. on the walker's own goroutine rather than concurrently, typically because all of the concurrent scans were in use"},
+	{barSlow, "orange", "prefixes whose scan took longer than --slow-scan-duration"},
+	{barErrors, "red", "errors, eg. permission denied, recorded in the database, see View > Errors"},
+}
+
+// newBarChart returns a bar chart for bars, titled with title and a key
+// to the bars' colors.
+func newBarChart(title string, bars []bar) *tvxwidgets.BarChart {
+	c := tvxwidgets.NewBarChart()
+	c.SetBorder(true)
+	keys := make([]string, len(bars))
+	for i, b := range bars {
+		c.AddBar(b.name, 0, tcell.GetColor(b.color))
+		keys[i] = fmt.Sprintf("[%s]■[-] %s", b.color, b.name)
+	}
+	c.SetTitle(fmt.Sprintf(" %s: %s ", title, strings.Join(keys, " ")))
+	return c
+}
+
+// analyzeHelp explains the analyze screen, see showHelp.
+func analyzeHelp() string {
+	var b strings.Builder
+	b.WriteString(`The [::b]summary[::-] at the top shows whether the analysis is running, its current phase, and the prefixes, files and stat operations completed so far, alongside the totals found by the previous analysis. Once the filesystem has been scanned the counters stop changing while the database is updated; the phase, highlighted in yellow, says what it is doing and for how long.
+
+The [::b]gauge[::-] shows the prefixes scanned relative to the number found by the previous analysis, ie. an estimate of how far through the scan the analysis is.
+
+The [::b]sparklines[::-] show the number of prefixes, files and stat operations completed per second, sampled twice a second, over the last two minutes, and the gauges beneath them the current rate relative to the highest seen.
+
+The [::b]Outstanding[::-] bar chart shows the operations currently in progress:
+`)
+	describe := func(bars []bar) {
+		for _, br := range bars {
+			fmt.Fprintf(&b, "  [%s]■[-] %-11s %s\n", br.color, br.name, br.desc)
+		}
+	}
+	describe(outstandingBars)
+	b.WriteString("\nThe [::b]Totals[::-] bar chart shows the number of each event so far:\n")
+	describe(eventBars)
+	fmt.Fprintf(&b, `
+The bar charts are scaled to their largest bar, or %v if that is smaller, and each bar is labeled with its value.
+
+The [::b]Heap in use[::-] sparkline shows the memory used by the Go heap, and its title the peak resident set size of the process; the summary includes the total memory obtained from the operating system, the number of goroutines and of garbage collections.
+
+The [::b]Output[::-] pane shows the messages written by analyze.`, minBarScale)
+	return b.String()
+}
+
 func newAnalyzeScreen(u *ui) *analyzeScreen {
 	a := &analyzeScreen{u: u}
 	a.info = tview.NewTextView().SetDynamicColors(true)
@@ -112,20 +179,8 @@ func newAnalyzeScreen(u *ui) *analyzeScreen {
 	a.prefixes = newRate("Prefixes", tcell.ColorGreen)
 	a.files = newRate("Files", tcell.ColorAqua)
 	a.stats = newRate("Stats", tcell.ColorFuchsia)
-	a.outstanding = tvxwidgets.NewBarChart()
-	a.outstanding.SetBorder(true)
-	a.outstanding.SetTitle(" Outstanding operations ")
-	a.outstanding.AddBar(barPrefixes, 0, tcell.ColorGreen)
-	a.outstanding.AddBar(barStats, 0, tcell.ColorFuchsia)
-	a.outstanding.AddBar(barSyncScans, 0, tcell.ColorYellow)
-	a.events = tvxwidgets.NewBarChart()
-	a.events.SetBorder(true)
-	a.events.SetTitle(" Events ")
-	a.events.AddBar(barUnchanged, 0, tcell.ColorGreen)
-	a.events.AddBar(barDeleted, 0, tcell.ColorYellow)
-	a.events.AddBar(barRestated, 0, tcell.ColorAqua)
-	a.events.AddBar(barSlow, 0, tcell.ColorOrange)
-	a.events.AddBar(barErrors, 0, tcell.ColorRed)
+	a.outstanding = newBarChart("Outstanding", outstandingBars)
+	a.events = newBarChart("Totals", eventBars)
 	a.heap = tvxwidgets.NewSparkline()
 	a.heap.SetBorder(true).SetTitle(" Heap in use ")
 	a.heap.SetLineColor(tcell.ColorBlue)
@@ -141,11 +196,12 @@ func newAnalyzeScreen(u *ui) *analyzeScreen {
 	rates := tview.NewFlex().
 		AddItem(a.prefixes.layout, 0, 1, false).
 		AddItem(a.files.layout, 0, 1, false).
-		AddItem(a.stats.layout, 0, 1, false)
+		AddItem(a.stats.layout, 0, 1, false).
+		AddItem(a.heap, 0, 1, false)
+	// The bar charts' titles include the keys to the colors of their bars.
 	charts := tview.NewFlex().
 		AddItem(a.outstanding, 0, 1, false).
-		AddItem(a.events, 0, 2, false).
-		AddItem(a.heap, 0, 1, false)
+		AddItem(a.events, 0, 2, false)
 	a.layout = tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(a.info, 10, 0, false).
 		AddItem(a.progress, 3, 0, false).
@@ -165,6 +221,10 @@ func (a *analyzeScreen) input(ev *tcell.EventKey) *tcell.EventKey {
 		}
 		return nil
 	case tcell.KeyRune:
+		if ev.Rune() == '?' {
+			a.u.showHelp("Analyze", analyzeHelp())
+			return nil
+		}
 		if a.u.isAnalyzing() {
 			return ev
 		}
@@ -206,6 +266,10 @@ type sample struct {
 	// history of the heap in use.
 	memory      progress.Memory
 	heapHistory []float64
+	// phase is the current phase of the analysis, and phaseFor how long it
+	// has been running.
+	phase    string
+	phaseFor time.Duration
 }
 
 // render displays s. It must be called on the tui's goroutine.
@@ -226,14 +290,14 @@ func (a *analyzeScreen) render(s sample, kind string) {
 	a.heap.SetData(s.heapHistory)
 	a.heap.SetDataTitle(fmt.Sprintf("%v, peak RSS %v", gib(float64(s.memory.HeapBytes)), rssText(s.memory)))
 	setBars(a.outstanding, map[string]int64{
-		barPrefixes:  s.PrefixesStarted - s.PrefixesFinished,
-		barStats:     s.statsStarted - s.FSStats,
-		barSyncScans: s.SynchronousScans,
+		barPrefixes: s.PrefixesStarted - s.PrefixesFinished,
+		barStats:    s.statsStarted - s.FSStats,
 	})
 	setBars(a.events, map[string]int64{
 		barUnchanged: s.ParentUnchanged,
 		barDeleted:   s.PrefixesDeleted,
 		barRestated:  s.FilesRestated,
+		barSyncScans: s.SynchronousScans,
 		barSlow:      s.SlowScans,
 		barErrors:    s.Errors,
 	})
@@ -259,11 +323,12 @@ func formatMemory(m progress.Memory) string {
 
 func formatSample(s sample, prev previousTotals, kind string) string {
 	var b strings.Builder
-	state, hints := "[green::b]running[-::-]", "escape: cancel"
+	state, hints := "[green::b]running[-::-]", "escape: cancel  ?: help"
 	if s.done {
-		state, hints = "[::b]completed[::-]", "escape: return to the view  a: analyze again  f: analyze --force"
+		state, hints = "[::b]completed[::-]", "escape: return to the view  a: analyze again  f: analyze --force  ?: help"
 	}
-	fmt.Fprintf(&b, "%v %v for %v  [::d]%v[::-]\n\n", state, kind, s.elapsed.Truncate(time.Second), hints)
+	fmt.Fprintf(&b, "%v %v for %v  [::d]%v[::-]\n", state, kind, s.elapsed.Truncate(time.Second), hints)
+	fmt.Fprintf(&b, "%v\n", formatPhase(s))
 	previous := func(v int64) string {
 		if !prev.known {
 			return "unknown"
@@ -282,6 +347,19 @@ func formatSample(s sample, prev previousTotals, kind string) string {
 	fmt.Fprintf(&b, "[::d]previous analysis: %v; errors %v, deleted %v, unchanged %v, restated %v (%v changed)[::-]",
 		when, count(s.Errors), count(s.PrefixesDeleted), count(s.ParentUnchanged), count(s.FilesRestated), count(s.FilesRestatedChanged))
 	return b.String()
+}
+
+// formatPhase describes the current phase of a running analysis; the
+// phases that follow the scan update the database, rather than any of the
+// counters, and may take a long time.
+func formatPhase(s sample) string {
+	switch {
+	case s.done || s.phase == "":
+		return ""
+	case s.phase == idudb.PhaseScan:
+		return fmt.Sprintf("%-10s %v", "phase", s.phase)
+	}
+	return fmt.Sprintf("[yellow::b]%-10s %v for %v[-::-]", "phase", tview.Escape(s.phase), s.phaseFor.Truncate(time.Second))
 }
 
 func setBars(c *tvxwidgets.BarChart, values map[string]int64) {
@@ -337,6 +415,7 @@ func (u *ui) startAnalyze(force bool) {
 		SlowScans: idudb.DefaultSlowScanThreshold,
 	}
 	p := newTUIProgress(u, kind)
+	u.bg.Add(1)
 	go u.runAnalysis(ctx, cancel, done, old, p, flags)
 }
 
@@ -344,6 +423,7 @@ func (u *ui) startAnalyze(force bool) {
 func (u *ui) runAnalysis(ctx context.Context, cancel context.CancelFunc, done chan struct{}, old *sourceHandle, p *tuiProgress, flags *analyze.Flags) {
 	defer close(done)
 	old.close(u.ctx)
+	u.bg.Done()
 	a := u.analyze
 	start := time.Now()
 	err := u.cfg.analyze(ctx, p, a.output, flags)
@@ -355,7 +435,7 @@ func (u *ui) runAnalysis(ctx context.Context, cancel context.CancelFunc, done ch
 	u.mu.Lock()
 	u.analyzing = false
 	u.mu.Unlock()
-	if u.isQuitting() {
+	if u.isQuitting() || u.ctx.Err() != nil {
 		// The database is not reopened since the tui is exiting.
 		return
 	}
@@ -367,7 +447,12 @@ func (u *ui) runAnalysis(ctx context.Context, cancel context.CancelFunc, done ch
 	} else {
 		u.setStatus("analyze completed in %v", time.Since(start).Truncate(time.Second))
 	}
-	if openErr := u.openSourceWithWarning(analyzeErrMsg == ""); openErr != nil {
+	if !u.acquireBG() {
+		return
+	}
+	openErr := u.openSourceWithWarning(analyzeErrMsg == "")
+	u.bg.Done()
+	if openErr != nil {
 		u.queueUpdateDraw(func() {
 			if analyzeErrMsg != "" {
 				u.showDialog(errorDialog, analyzeErrMsg)
@@ -420,6 +505,8 @@ type tuiProgress struct {
 	mu           sync.Mutex
 	s            analyze.Summary
 	statsStarted int64
+	phase        string
+	phaseStart   time.Time
 
 	// smu guards the following, which are used to compute the rates and
 	// prevent stale ticker samples from rendering after Stop.
@@ -485,7 +572,10 @@ func (p *tuiProgress) sample(done bool) sample {
 
 func (p *tuiProgress) sampleLocked(done bool) sample {
 	p.mu.Lock()
-	s := sample{Summary: p.s, statsStarted: p.statsStarted, elapsed: time.Since(p.start), done: done}
+	s := sample{Summary: p.s, statsStarted: p.statsStarted, elapsed: time.Since(p.start), done: done, phase: p.phase}
+	if !p.phaseStart.IsZero() {
+		s.phaseFor = time.Since(p.phaseStart)
+	}
 	p.mu.Unlock()
 	if s.FSStats > 0 {
 		s.FSStatMeanLatency = s.FSStatsTotal / s.FSStats
@@ -573,6 +663,13 @@ func (p *tuiProgress) Restated(files, changed int) {
 		s.FilesRestated += int64(files)
 		s.FilesRestatedChanged += int64(changed)
 	})
+}
+
+// Phase implements analyze.Progress.
+func (p *tuiProgress) Phase(name string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.phase, p.phaseStart = name, time.Now()
 }
 
 // Stop implements analyze.Progress.

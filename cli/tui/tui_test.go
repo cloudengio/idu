@@ -22,6 +22,7 @@ import (
 	"cloudeng.io/cmd/idu/cli/analyze"
 	"cloudeng.io/cmd/idu/cli/progress"
 	"cloudeng.io/cmd/idu/iduconfig"
+	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/internal/cli"
 	"cloudeng.io/cmd/idu/internal/cli/clitest"
 	"github.com/gdamore/tcell/v2"
@@ -337,8 +338,8 @@ func bytesConfig(t *testing.T, tmpDir, root string) iduconfig.T {
 func TestIncompatibleSummaries(t *testing.T) {
 	h := startWith(t, func(tmpDir, root string) iduconfig.T { return bytesConfig(t, tmpDir, root) })
 	// The error is displayed in a dialog that offers to analyze; the path
-	// precedes "cannot be used:" and may wrap before "be used" on Windows.
-	h.waitFor("Error", "cannot", "be used", "calculator", "Analyze", "Quit")
+	// precedes "cannot be used:" and may wrap before "be" or "used" on Windows.
+	h.waitFor("Error", "cannot", "used", "calculator", "Analyze", "Quit")
 	h.eventually("the dialog", func() bool { return h.u.dialogOpen() })
 	// Keys other than those for the dialog are ignored.
 	h.rune('m')
@@ -397,11 +398,16 @@ func TestQuitMenu(t *testing.T) {
 // finishDelay to finish.
 type slowAnalysis struct {
 	finishDelay time.Duration
-	mu          sync.Mutex
-	finished    bool
+	// phase, if set, is reported to the analysis's progress.
+	phase    string
+	mu       sync.Mutex
+	finished bool
 }
 
-func (s *slowAnalysis) analyze(ctx context.Context, _ analyze.Progress, _ io.Writer, _ *analyze.Flags) error {
+func (s *slowAnalysis) analyze(ctx context.Context, p analyze.Progress, _ io.Writer, _ *analyze.Flags) error {
+	if s.phase != "" {
+		p.Phase(s.phase)
+	}
 	<-ctx.Done()
 	time.Sleep(s.finishDelay)
 	s.mu.Lock()
@@ -516,7 +522,7 @@ func TestBottomPaneMenu(t *testing.T) {
 }
 
 func TestAnalyzeScreen(t *testing.T) {
-	slow := &slowAnalysis{finishDelay: 0}
+	slow := &slowAnalysis{finishDelay: 0, phase: idudb.PhaseSubtrees}
 	h := startHarness(t, func(tmpDir, root string) iduconfig.T {
 		return clitest.WriteHardlinkConfig(t, tmpDir, root, iduconfig.HardlinkDedupSummaries)
 	}, slow.analyze)
@@ -527,8 +533,8 @@ func TestAnalyzeScreen(t *testing.T) {
 	h.key(tcell.KeyEnter)
 	h.eventually("the analysis to start", h.u.isAnalyzing)
 	h.waitFor("running", "analyze for", "previous analysis", "Prefixes completed per second", "Heap in use", "peak RSS", "GC cycles",
-		"Files completed per second", "Stats completed per second", "Outstanding operations", "Events",
-		"Prefixes scanned, relative to the previous analysis")
+		"Files completed per second", "Stats completed per second", "Outstanding: ■ prefixes ■ stats", "Totals: ■ unchanged ■ deleted ■ restated ■ sync scans ■ slow ■ errors", "?: help",
+		"Prefixes scanned, relative to the previous analysis", "phase      "+idudb.PhaseSubtrees+" for ")
 	// The previous analysis found 6 prefixes and 4 files, see
 	// clitest.CreateHardlinkTree.
 	var prev previousTotals
@@ -536,6 +542,12 @@ func TestAnalyzeScreen(t *testing.T) {
 	if !prev.known || prev.prefixes != 6 || prev.files != 4 || prev.when.IsZero() {
 		t.Errorf("unexpected previous totals: %+v", prev)
 	}
+	// ? displays the help, which explains each of the bars, and escape
+	// closes it.
+	h.rune('?')
+	h.waitFor("Analyze help", "whose scan has started but not yet finished", "sync scans", "errors, eg. permission denied")
+	h.key(tcell.KeyEscape)
+	h.eventually("the help to close", func() bool { return !h.u.pages.HasPage(helpPage) })
 	// Escape cancels the analysis, which then reloads the view.
 	h.key(tcell.KeyEscape)
 	h.eventually("the analysis to finish", func() bool { return !h.u.isAnalyzing() && h.u.source() != nil })
@@ -555,8 +567,18 @@ func TestFormatSample(t *testing.T) {
 	if !strings.Contains(regexp.MustCompile(`\s+`).ReplaceAllString(out, " "), "prefixes 3 6") {
 		t.Errorf("missing prefixes: %q", out)
 	}
+	// The phases that follow the scan are highlighted with their durations.
+	s.phase = idudb.PhaseScan
+	if out := formatSample(s, previousTotals{}, "analyze"); !strings.Contains(out, "phase      "+idudb.PhaseScan) {
+		t.Errorf("missing scan phase: %q", out)
+	}
+	s.phase, s.phaseFor = idudb.PhaseSubtrees, 75*time.Second
+	if out := formatSample(s, previousTotals{}, "analyze"); !strings.Contains(out, idudb.PhaseSubtrees+" for 1m15s") {
+		t.Errorf("missing phase: %q", out)
+	}
 	s.done = true
-	if out := formatSample(s, previousTotals{}, "analyze"); !strings.Contains(out, "completed") || !strings.Contains(out, "unknown") {
+	out = formatSample(s, previousTotals{}, "analyze")
+	if !strings.Contains(out, "completed") || !strings.Contains(out, "unknown") || strings.Contains(out, idudb.PhaseSubtrees) {
 		t.Errorf("unexpected: %q", out)
 	}
 }

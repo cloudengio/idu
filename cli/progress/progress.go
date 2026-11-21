@@ -9,12 +9,14 @@ package progress
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"runtime"
 	"sync"
 	"time"
 
 	"cloudeng.io/cmd/idu/cli/analyze"
+	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/logging/ctxlog"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
@@ -32,10 +34,14 @@ type progressStats struct {
 	numSlowScans                            int64
 	numRestated, numRestatedChanged         int64
 	statsTotalTime                          int64
-	start                                   time.Time
-	lastGC                                  time.Time
-	memstats                                runtime.MemStats
-	sysMemstats                             *sysMemstats
+	// phase is the current phase of the analysis, and phaseStart when it
+	// started, see Phase.
+	phase       string
+	phaseStart  time.Time
+	start       time.Time
+	lastGC      time.Time
+	memstats    runtime.MemStats
+	sysMemstats *sysMemstats
 }
 
 var _ analyze.Progress = (*progressTracker)(nil)
@@ -192,6 +198,19 @@ func (pt *progressTracker) Restated(files, changed int) {
 	pt.numRestatedChanged += int64(changed)
 }
 
+// Phase implements idudb.ScanProgress.
+func (pt *progressTracker) Phase(name string) {
+	pt.Lock()
+	defer pt.Unlock()
+	pt.phase, pt.phaseStart = name, time.Now()
+}
+
+// phaseLine returns the progress line displayed during phases other than
+// the scan, which do not update any of the counters.
+func phaseLine(phase string, phaseFor, runningFor time.Duration, now time.Time) string {
+	return fmt.Sprintf("%v for %v, total %v (%s)", phase, phaseFor.Truncate(time.Second), runningFor, now.Format("15:04:05"))
+}
+
 func (pt *progressTracker) refreshMemstatsLocked() {
 	if time.Since(pt.lastGC) > (5 * time.Minute) {
 		runtime.GC()
@@ -306,6 +325,16 @@ func (pt *progressTracker) display(ctx context.Context) {
 		started, finished := cpy.numPrefixesStarted, cpy.numPrefixesFinished
 
 		runningFor := time.Since(cpy.start).Truncate(time.Second)
+
+		if cpy.phase != "" && cpy.phase != idudb.PhaseScan {
+			// Clear the remainder of the, longer, scan progress line.
+			eol := cr
+			if cr == "\r" {
+				eol = "\x1b[K\r"
+			}
+			fmt.Printf("%s%s", phaseLine(cpy.phase, time.Since(cpy.phaseStart), runningFor, time.Now()), eol)
+			continue
+		}
 
 		cpy.log(ctx)
 

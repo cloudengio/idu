@@ -6,16 +6,9 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"net"
-	"net/http"
-	"os"
-	"strings"
-	"syscall"
 
 	// G108
 	_ "net/http/pprof" //nolint:gosec
-	"runtime"
 	debugpkg "runtime/debug"
 
 	"cloudeng.io/cmd/idu/cli/analyze"
@@ -38,11 +31,9 @@ import (
 var (
 	globalFlags GlobalFlags
 	// env is the environment shared by all of the commands, its Config
-	// and FS are set by mainWrapper.
+	// and FS are set by configHook.
 	env = cli.NewEnv()
 )
-
-var panicBuf = make([]byte, 1024*1024)
 
 var commands = `name: idu
 summary: analyze disk usage using a database for incremental updates. The filesystem to operate on is selected by name using the --fs flag, which every command that operates on a filesystem accepts, and which may also be given as a global flag that the command flag overrides; it may be omitted if only one filesystem is configured. Commands that accept a <prefix> interpret it relative to that filesystem's configured root, or as a key prefix for a filesystem configured as a key range, and it must be contained within that root or range; an omitted [<prefix>] refers to the entire filesystem. Many of the commands accept an expression that is used to restrict which prefixes/directories and files are processed.
@@ -152,15 +143,6 @@ func init() {
 	iduconfig.DefaultScanSize = filewalk.DefaultScanSize
 }
 
-func requireConfig(runner subcmd.Runner) subcmd.Runner {
-	return func(ctx context.Context, flagValues any, args []string) error {
-		if loadErr := cli.ConfigLoadError(ctx); loadErr != nil {
-			return loadErr
-		}
-		return runner(ctx, flagValues, args)
-	}
-}
-
 // squashErrors returns a runner that squashes the, potentially thousands
 // of, context.Canceled and context.DeadlineExceeded errors returned by
 // runner when it is interrupted, see cli.SquashCanceled.
@@ -170,96 +152,46 @@ func squashErrors(runner subcmd.Runner) subcmd.Runner {
 	}
 }
 
-func newCommandSet() *subcmd.CommandSetYAML {
+// newCLI returns the command set for idu, with the runners for all of its
+// commands but without any pre-hooks, see setDefaultPreHooks.
+func newCLI() *subcmd.CommandSetYAML {
 	cmdSet := subcmd.MustFromYAMLTemplate(commands, newConfigExtension())
 	cmdSet.MustAddExtensions()
-	cmdSet.Set("config", "show").MustRunner(squashErrors(configShow), &struct{}{})
-	cmdSet.Set("config", "describe").MustRunner(squashErrors(configDescribe), &struct{}{})
 
 	expr := &exprCmd{}
 	cmdSet.Set("expression-syntax").MustRunner(squashErrors(expr.explain), &struct{}{})
 
 	st := stats.New(env)
 	alz := analyze.New(env, analyze.WithProgress(progress.NewAnalyze), analyze.WithSnapshot(st.Snapshot))
-	cmdSet.Set("analyze").MustRunner(squashErrors(requireConfig(alz.Analyze)), &analyze.Flags{})
-	cmdSet.Set("errors").MustRunner(squashErrors(requireConfig(alz.Errors)), &analyze.ErrorFlags{})
-	cmdSet.Set("logs").MustRunner(squashErrors(requireConfig(alz.Logs)), &analyze.LogFlags{})
-	cmdSet.Set("database", "locate").MustRunner(squashErrors(requireConfig(alz.Locate)), &analyze.LocateFlags{})
+	cmdSet.Set("analyze").MustRunner(squashErrors(alz.Analyze), &analyze.Flags{})
+	cmdSet.Set("errors").MustRunner(squashErrors(alz.Errors), &analyze.ErrorFlags{})
+	cmdSet.Set("logs").MustRunner(squashErrors(alz.Logs), &analyze.LogFlags{})
+	cmdSet.Set("database", "locate").MustRunner(squashErrors(alz.Locate), &analyze.LocateFlags{})
 
-	cmdSet.Set("stats", "compute").MustRunner(squashErrors(requireConfig(st.Compute)), &stats.ComputeFlags{})
+	cmdSet.Set("stats", "compute").MustRunner(squashErrors(st.Compute), &stats.ComputeFlags{})
 	cmdSet.Set("stats", "view").MustRunner(squashErrors(st.View), &stats.ViewFlags{})
-	cmdSet.Set("stats", "suggest").MustRunner(squashErrors(requireConfig(st.Suggest)), &stats.SuggestFlags{})
+	cmdSet.Set("stats", "suggest").MustRunner(squashErrors(st.Suggest), &stats.SuggestFlags{})
 
 	rpts := reports.New(env)
 	cmdSet.Set("reports", "generate").MustRunner(squashErrors(rpts.Generate), &reports.GenerateFlags{})
 	cmdSet.Set("reports", "locate").MustRunner(squashErrors(rpts.Locate), &reports.LocateFlags{})
 
 	ui := tui.New(env)
-	cmdSet.Set("tui").MustRunner(squashErrors(requireConfig(ui.TUI)), &tui.Flags{})
+	cmdSet.Set("tui").MustRunner(squashErrors(ui.TUI), &tui.Flags{})
 
 	fnd := find.New(env)
-	cmdSet.Set("find").MustRunner(squashErrors(requireConfig(fnd.Find)), &find.Flags{})
-
-	cmdSet.AppendPreHooks(loggingHook)
+	cmdSet.Set("find").MustRunner(squashErrors(fnd.Find), &find.Flags{})
 
 	globals := subcmd.GlobalFlagSet()
 	globals.MustRegisterFlagStruct(&globalFlags, nil, nil)
 	cmdSet.WithGlobalFlags(globals)
-	cmdSet.WithMain(mainWrapper)
 	return cmdSet
 }
 
-func mainWrapper(ctx context.Context, cmdRunner func(ctx context.Context) error) error {
-
-	debugpkg.SetGCPercent(globalFlags.GCPercent)
-
-	switch globalFlags.Units.Value {
-	case unitsDecimal:
-		env.BytesPrinter = cli.DecimalBytes
-	case unitsBinary:
-		env.BytesPrinter = cli.BinaryBytes
-	}
-	for _, profile := range globalFlags.ExitProfile.Profiles {
-		if !profiling.IsPredefined(profile.Name) {
-			fmt.Printf("warning profile %v defaults to CPU profiling since it is not one of the predefined profile types: %v", profile.Name, strings.Join(profiling.PredefinedProfiles(), ", "))
-		}
-		save, err := profiling.Start(profile.Name, profile.Filename)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("profiling: %v %v\n", profile.Name, profile.Filename)
-		defer save() //nolint: errcheck
-	}
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Printf("panic: %v\n", r)
-			runtime.Stack(panicBuf, true)
-			fmt.Println(string(panicBuf))
-		}
-	}()
-
-	cfg, loc, err := iduconfig.Load(ctx, &globalFlags.Config)
-	env.Config = cfg
-	env.FS = globalFlags.FS
-	ctx = cmdutil.ContextWithValue(ctx, cfg)
-	ctx = cmdutil.ContextWithValue(ctx, loc)
-	ctx = cli.WithConfigLoadError(ctx, err)
-
-	var ln net.Listener
-	if port := globalFlags.HTTP; len(port) > 0 {
-		if ln, err = net.Listen("tcp", port); err != nil {
-			return err
-		}
-		// gosec G114
-		go http.Serve(ln, nil) //nolint:gosec,errcheck
-	}
-
-	ctx, cancel := context.WithCancel(ctx)
-	cmdutil.HandleSignals(cancel, os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-	return cmdRunner(ctx)
-}
-
 func main() {
-	newCommandSet().MustDispatch(context.Background())
+	// Print the stacks of all goroutines on a panic.
+	debugpkg.SetTraceback("all")
+	cmdSet := newCLI()
+	setDefaultPreHooks(cmdSet)
+	cmdSet.MustDispatch(context.Background())
 }

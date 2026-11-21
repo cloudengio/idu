@@ -27,8 +27,9 @@ func openPrefixReadOnly(ctx context.Context, cfg iduconfig.T, prefix string) (co
 // countingProgress is a Progress that counts the events needed for the
 // Summary recorded in the database log.
 type countingProgress struct {
-	mu sync.Mutex
-	s  Summary
+	mu     sync.Mutex
+	s      Summary
+	phases []string
 }
 
 func newCountingProgress(context.Context, bool) Progress {
@@ -63,6 +64,11 @@ func (c *countingProgress) SyncScans(n int64) {
 }
 func (c *countingProgress) Restated(files, changed int) {
 	c.update(func(s *Summary) { s.FilesRestated += int64(files); s.FilesRestatedChanged += int64(changed) })
+}
+func (c *countingProgress) Phase(name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.phases = append(c.phases, name)
 }
 func (c *countingProgress) Stop()                  {}
 func (c *countingProgress) Report(context.Context) {}

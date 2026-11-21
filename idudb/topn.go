@@ -436,6 +436,9 @@ func (t *topnObserver) ScanDone(ctx context.Context, scanErr error) error {
 		return err
 	}
 	// The link index is now up to date.
+	if t.sdb.links != nil {
+		defer t.sdb.startPhase(ctx, PhaseMissingLinks)()
+	}
 	if err := t.sdb.updateMissingLinks(ctx, time.Now()); err != nil {
 		ctxlog.Warn(ctx, "failed to update the prefixes with missing links", "error", err)
 	}
@@ -448,6 +451,7 @@ func (t *topnObserver) finish(ctx context.Context) error {
 	if t.refresh {
 		return refreshTopN(ctx, t.sdb, t.state, t.rebuild)
 	}
+	defer t.sdb.startPhase(ctx, PhaseWriteTopN)()
 	if err := t.write(ctx); err != nil {
 		return err
 	}
@@ -482,6 +486,7 @@ func (t *topnObserver) applyLinks(ctx context.Context) error {
 	if t.linkErr != nil {
 		return t.linkErr
 	}
+	defer t.sdb.startPhase(ctx, PhaseLinks)()
 	changes, err := t.links.apply(ctx, t.sdb.db, t.sdb.sep, t.changes.isDeleted)
 	if err != nil {
 		return err
@@ -495,6 +500,7 @@ func (t *topnObserver) applyLinks(ctx context.Context) error {
 // applySubtrees applies the accumulated changes to the stored recursive
 // totals and the subtree rankings.
 func (t *topnObserver) applySubtrees(ctx context.Context) error {
+	defer t.sdb.startPhase(ctx, PhaseSubtrees)()
 	db := t.sdb.db
 	err := t.changes.apply(ctx, db, t.sdb.sep, func(path string, tot stats.Totals) {
 		if !t.refresh {
@@ -598,6 +604,11 @@ func (sdb *DB) invalidateTopN(ctx context.Context) (topn.State, error) {
 // also rebuilds the recursive totals. It must only be called when the
 // recursive totals are either being rebuilt or are known to be up to date.
 func refreshTopN(ctx context.Context, sdb *DB, prev topn.State, rebuild bool) error {
+	phase := PhaseRefreshTopN
+	if rebuild {
+		phase = PhaseRebuildTopN
+	}
+	defer sdb.startPhase(ctx, phase)()
 	db := sdb.db
 	if rebuild {
 		if err := db.Flush(ctx); err != nil {

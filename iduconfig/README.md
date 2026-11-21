@@ -71,6 +71,21 @@ supplied and more than one filesystem is configured.
 
 
 ## Functions
+### Func ConfigCommands
+```go
+func ConfigCommands() cmdconfig.ConfigCommands[T]
+```
+ConfigCommands returns the implementation of the config show and config
+describe commands for the configuration, see cmdconfig.ConfigExtension.
+
+### Func DescribeFilesystems
+```go
+func DescribeFilesystems(w io.Writer) error
+```
+DescribeFilesystems writes the documentation for the entries in the
+filesystems list to w. It is needed since the entries are represented by the
+Filesystem interface, which cannot be described via reflection.
+
 ### Func DescribeHardlinkDedup
 ```go
 func DescribeHardlinkDedup(w io.Writer) error
@@ -84,13 +99,6 @@ func DescribeLayouts(w io.Writer) error
 ```
 DescribeLayouts writes documentation for all supported disk usage layouts to
 w.
-
-### Func Documentation
-```go
-func Documentation() string
-```
-Documentation will return a description of the format of the yaml
-configuration file.
 
 ### Func Label
 ```go
@@ -444,7 +452,7 @@ none is configured.
 ```go
 type T struct {
 	ConfigFiles Files                 `yaml:"filesystem_config_files,omitempty" doc:"other configuration files to search for and merge"`
-	Filesystems Filesystems           `yaml:"filesystems" doc:"the filesystem configurations to be analyzed"`
+	Filesystems Filesystems           `yaml:"filesystems" doc:"the filesystem configurations to be analyzed, see Filesystem entries below"`
 	Logging     cmdutil.LoggingConfig `yaml:"logging,omitempty" doc:"logging configuration, it may be overridden by the --log-* command line flags"`
 }
 ```

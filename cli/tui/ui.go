@@ -72,6 +72,7 @@ type ui struct {
 
 	mu  sync.Mutex
 	src *sourceHandle
+	bg  sync.WaitGroup
 	// analyzing is true while an analysis is running, analysisDone is
 	// closed when the most recent analysis has finished.
 	analyzing    bool
@@ -142,12 +143,26 @@ func (u *ui) setupMenu() {
 		SetRight(fmt.Sprintf("idu: %v   [::d]/ m: menu  ←/→ tab: panes  [ ]: tabs  +/-/z: resize  q: quit", tview.Escape(iduconfig.Label(u.cfg.fs))))
 }
 
+func (u *ui) acquireBG() bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.ctx.Err() != nil {
+		return false
+	}
+	u.bg.Add(1)
+	return true
+}
+
 // run starts the tui and returns when it is quit.
 func (u *ui) run() error {
 	defer u.cancel()
 	go u.displayStatuses()
-	go u.start()
+	u.bg.Go(u.start)
 	err := u.app.Run()
+	u.mu.Lock()
+	u.cancel()
+	u.mu.Unlock()
+	u.bg.Wait()
 	u.closeSource()
 	return err
 }
@@ -185,7 +200,7 @@ func (u *ui) openFailed(err error) {
 		return
 	}
 	u.showDialog(errorDialog, fmt.Sprintf("Failed to open the database for %v:\n\n%v", iduconfig.Label(u.cfg.fs), err),
-		dialogButton{"Retry", func() { go u.start() }},
+		dialogButton{"Retry", func() { u.bg.Go(u.start) }},
 		dialogButton{"Quit", u.quit})
 }
 
@@ -232,6 +247,31 @@ func (u *ui) showDialog(kind, message string, buttons ...dialogButton) {
 	u.pages.RemovePage(dialogPage)
 	u.pages.AddPage(dialogPage, modal, true, true)
 	u.app.SetFocus(modal)
+}
+
+// helpPage is the name of the page used to display help, see showHelp.
+const helpPage = "help"
+
+// showHelp displays text, which may contain color tags, in a scrollable
+// window in the centre of the screen until escape, enter, q or ? is
+// pressed. It must be called on the tui's goroutine.
+func (u *ui) showHelp(title, text string) {
+	focus := u.app.GetFocus()
+	tv := tview.NewTextView().SetDynamicColors(true).SetWrap(true).SetWordWrap(true).SetText(text)
+	tv.SetBorder(true).SetTitle(" " + title + " help [::d](escape to close)[::-] ")
+	tv.SetInputCapture(func(ev *tcell.EventKey) *tcell.EventKey {
+		if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyEnter || ev.Rune() == 'q' || ev.Rune() == '?' {
+			u.pages.RemovePage(helpPage)
+			u.app.SetFocus(focus)
+			return nil
+		}
+		return ev
+	})
+	// The window is centred and uses most of the screen.
+	grid := tview.NewGrid().SetColumns(0, -8, 0).SetRows(0, -8, 0).AddItem(tv, 1, 1, 1, 1, 0, 0, true)
+	u.pages.RemovePage(helpPage)
+	u.pages.AddPage(helpPage, grid, true, true)
+	u.app.SetFocus(tv)
 }
 
 // showError displays err in a dialog, it may be called from any
@@ -327,14 +367,14 @@ func (u *ui) refresh() {
 	u.showView()
 	u.view.reset()
 	old := u.detachSource()
-	go func() {
+	u.bg.Go(func() {
 		old.close(u.ctx)
 		if err := u.openSource(); err != nil {
 			u.queueUpdateDraw(func() { u.openFailed(err) })
 			return
 		}
 		u.queueUpdateDraw(func() { u.view.load(u.view.currentPath()) })
-	}()
+	})
 }
 
 // quit exits the tui. If an analysis is running it first asks whether to
@@ -524,7 +564,7 @@ func trimNewline(s string) string {
 }
 
 func (u *ui) input(ev *tcell.EventKey) *tcell.EventKey {
-	if u.waiting() || u.dialogOpen() || u.menu.IsOpen() || u.app.GetFocus() == u.menu {
+	if u.waiting() || u.dialogOpen() || u.pages.HasPage(helpPage) || u.menu.IsOpen() || u.app.GetFocus() == u.menu {
 		if ev.Key() == tcell.KeyCtrlC {
 			u.quit()
 			return nil

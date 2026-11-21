@@ -199,7 +199,6 @@ func (alz *Commands) analyzeFS(ctx context.Context, fwfs filewalk.FS, af *Flags,
 	if af.RefreshTopN && errs.Err() == nil {
 		errs.Append(db.RefreshTopN(ctx))
 	}
-	pt.Stop()
 
 	if alz.beforeClose != nil {
 		alz.beforeClose()
@@ -283,8 +282,14 @@ func cl() string {
 	return strings.TrimSpace(out.String())
 }
 
+// summarizeAndLog logs the analysis and closes the database, which may
+// require maintenance, eg. compaction, whose progress is displayed by pt,
+// before stopping pt and reporting the final summary.
 func summarizeAndLog(ctx context.Context, db *idudb.DB, pt Progress, start time.Time) error {
-	defer pt.Report(ctx)
+	defer func() {
+		pt.Stop()
+		pt.Report(ctx)
+	}()
 	s := pt.Summary()
 	s.Operation = "analyze"
 	s.Command = cl()
