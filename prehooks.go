@@ -101,13 +101,14 @@ func profilingHook(ctx context.Context) (context.Context, string, subcmd.PostHoo
 	}
 	for _, profile := range globalFlags.ExitProfile.Profiles {
 		if !profiling.IsPredefined(profile.Name) {
-			fmt.Printf("warning profile %v defaults to CPU profiling since it is not one of the predefined profile types: %v\n", profile.Name, strings.Join(profiling.PredefinedProfiles(), ", "))
+			fmt.Fprintf(os.Stderr, "warning profile %v defaults to CPU profiling since it is not one of the predefined profile types: %v\n", profile.Name, strings.Join(profiling.PredefinedProfiles(), ", "))
 		}
 		save, err := profiling.Start(profile.Name, profile.Filename)
 		if err != nil {
 			return ctx, id, post, err
 		}
-		fmt.Printf("profiling: %v %v\n", profile.Name, profile.Filename)
+		// stderr rather than stdout, which is used by the mcp command.
+		fmt.Fprintf(os.Stderr, "profiling: %v %v\n", profile.Name, profile.Filename)
 		saves = append(saves, save)
 	}
 	return ctx, id, post, nil

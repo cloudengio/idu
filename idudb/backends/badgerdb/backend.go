@@ -13,10 +13,15 @@ import (
 	badgeroptions "github.com/dgraph-io/badger/v4/options"
 )
 
+// openTimeoutGrace is the time, after ctx's deadline, that NewBackend
+// continues to try to open a database.
+const openTimeoutGrace = time.Second
+
 // NewBackend opens the badger database at path configured for use by idu,
 // opening it for reading only if readonly is true. Log messages are written
 // to the logger in ctx, see cloudeng.io/logging/ctxlog, and any deadline on
-// ctx is used as the timeout for acquiring the database's lock.
+// ctx is used, plus a short grace period, as the timeout for acquiring the
+// database's lock.
 func NewBackend(ctx context.Context, path string, readonly bool) (*Database, error) {
 	opts := make([]Option, 0, 3)
 	if readonly {
@@ -24,7 +29,11 @@ func NewBackend(ctx context.Context, path string, readonly bool) (*Database, err
 	}
 	if deadline, ok := ctx.Deadline(); ok {
 		if timeout := time.Until(deadline); timeout > 0 {
-			opts = append(opts, WithTimeout(timeout))
+			// The attempt to open the database is abandoned shortly after
+			// the deadline so that idudb.OpenBackend, which waits for ctx,
+			// reports ctx's error, ie. context.DeadlineExceeded, rather
+			// than racing with this timeout.
+			opts = append(opts, WithTimeout(timeout+openTimeoutGrace))
 		}
 	}
 	bopts := badger.DefaultOptions(path).
