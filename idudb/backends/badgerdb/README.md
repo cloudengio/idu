@@ -1,4 +1,5 @@
 # Package [cloudeng.io/cmd/idu/idudb/backends/badgerdb](https://pkg.go.dev/cloudeng.io/cmd/idu/idudb/backends/badgerdb?tab=doc)
+[![CircleCI](https://circleci.com/gh/cloudengio/go.gotools.svg?style=svg)](https://circleci.com/gh/cloudengio/go.gotools) [![Go Report Card](https://goreportcard.com/badge/cloudeng.io/cmd/idu/idudb/backends/badgerdb)](https://goreportcard.com/report/cloudeng.io/cmd/idu/idudb/backends/badgerdb)
 
 ```go
 import cloudeng.io/cmd/idu/idudb/backends/badgerdb
@@ -20,9 +21,10 @@ Database represents a badger database.
 func NewBackend(ctx context.Context, path string, readonly bool) (*Database, error)
 ```
 NewBackend opens the badger database at path configured for use by idu,
-opening it for reading only if readonly is true. Log messages are written to
-the logger in ctx, see cloudeng.io/logging/ctxlog, and any deadline on ctx
-is used as the timeout for acquiring the database's lock.
+opening it for reading only if readonly is true. Log messages are written
+to the logger in ctx, see cloudeng.io/logging/ctxlog, and any deadline on
+ctx is used, plus a short grace period, as the timeout for acquiring the
+database's lock.
 
 
 ```go

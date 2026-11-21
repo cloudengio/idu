@@ -13,6 +13,7 @@ import (
 
 	"cloudeng.io/cmd/idu/cli/analyze"
 	"cloudeng.io/cmd/idu/cli/find"
+	"cloudeng.io/cmd/idu/cli/mcp"
 	"cloudeng.io/cmd/idu/cli/progress"
 	"cloudeng.io/cmd/idu/cli/reports"
 	"cloudeng.io/cmd/idu/cli/stats"
@@ -60,6 +61,9 @@ commands:
     summary: an interactive, terminal based, view of the filesystem specified by --fs that displays its prefixes as a tree together with the summary of, and the top-N rankings beneath, the highlighted prefix, and can run analyze, see tui-design.md. The optional prefix is highlighted initially.
     arguments:
       - '[<prefix>]'
+
+  - name: mcp
+    summary: run a Model Context Protocol (MCP) server, on stdin/stdout, that provides read-only tools for AI agents to query the databases of the configured filesystems, eg. claude mcp add idu -- idu mcp. The tools report the configured filesystems, the usage of a prefix and its children, the top-N subtrees, prefixes, users and groups by any metric, and the errors recorded by analyze. A tool call may select a filesystem by name or root; otherwise an absolute prefix selects the filesystem with the longest root that contains it, and failing that the default is used, which is the filesystem named by --fs, the only one configured, or the local filesystem, ie. the one whose root is /.
 
   - name: find
     summary: find prefixes/files in the database that match the supplied expression.
@@ -175,6 +179,9 @@ func newCLI() *subcmd.CommandSetYAML {
 	rpts := reports.New(env)
 	cmdSet.Set("reports", "generate").MustRunner(squashErrors(rpts.Generate), &reports.GenerateFlags{})
 	cmdSet.Set("reports", "locate").MustRunner(squashErrors(rpts.Locate), &reports.LocateFlags{})
+
+	mcpCmds := mcp.New(env)
+	cmdSet.Set("mcp").MustRunner(squashErrors(mcpCmds.MCP), &mcp.Flags{})
 
 	ui := tui.New(env)
 	cmdSet.Set("tui").MustRunner(squashErrors(ui.TUI), &tui.Flags{})
