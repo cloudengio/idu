@@ -579,6 +579,9 @@ func (db *Database) DeleteErrors(ctx context.Context, prefix string) error {
 	if db.ReadOnly {
 		return badger.ErrReadOnlyTxn
 	}
+	if prefix == "" {
+		return db.bdb.DropPrefix([]byte{errorBucket})
+	}
 	kb := keyForBucket(errorBucket, []byte(prefix))
 	defer bufPool.Put(kb)
 	return db.deletePrefix(ctx, kb.Bytes())
@@ -725,6 +728,11 @@ func (db *Database) scanSummaryKeys(ctx context.Context, bucket byte, exactKey, 
 // creating a transaction per value is expensive.
 func (db *Database) GetBatch(ctx context.Context, keys []string, fn func(i int, val []byte) error) error {
 	return db.getBatch(ctx, prefixBucket, keys, fn)
+}
+
+// GetSummaries is like GetBatch but for the summary bucket.
+func (db *Database) GetSummaries(ctx context.Context, keys []string, fn func(i int, val []byte) error) error {
+	return db.getBatch(ctx, summaryBucket, keys, fn)
 }
 
 // GetSubtrees is like GetBatch but for the subtree bucket.

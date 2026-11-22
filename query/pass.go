@@ -6,9 +6,11 @@ package query
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
+	"cloudeng.io/cmd/idu/idudb"
 	"cloudeng.io/cmd/idu/report"
 	"cloudeng.io/cmd/idu/snapshot"
 	"cloudeng.io/cmd/idu/summary"
@@ -129,19 +131,35 @@ func (e *Engine) level(ctx context.Context, p plan, res *Result) error {
 	}
 	res.Source = SourcePassOf + "the summaries beneath " + p.within
 	rel := p.Level - e.depth(p.within)
+	var entries []summary.Entry
 	var paths []string
 	for entry, err := range e.sr.Walk(ctx, p.within, summary.WithMaxDepth(rel)) {
 		if err != nil {
 			return err
 		}
 		if entry.Depth == rel {
+			entries = append(entries, entry)
 			paths = append(paths, entry.Path)
 		}
 	}
-	if err := e.fill(ctx, p, paths, res); err != nil {
-		return err
+	totals, found, err := e.sr.Subtrees(ctx, paths)
+	if err != nil {
+		if p.orderBy.Recursive || !errors.Is(err, idudb.ErrStaleSubtrees) {
+			return err
+		}
+		found = make([]bool, len(paths))
 	}
-	sortRows(res.Rows)
-	res.Rows = res.Rows[:min(len(res.Rows), p.limit)]
+	rows := make([]Row, len(entries))
+	for i, entry := range entries {
+		rows[i] = e.newRow(entry.Path)
+		direct := entry.Summary.Direct
+		rows[i].Direct = &direct
+		if found[i] {
+			rows[i].Total = &totals[i]
+		}
+		rows[i].Value = value(p.orderBy, rows[i])
+	}
+	sortRows(rows)
+	res.Rows = rows[:min(len(rows), p.limit)]
 	return nil
 }
