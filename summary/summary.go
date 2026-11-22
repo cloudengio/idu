@@ -165,6 +165,31 @@ func (r *Reader) Get(ctx context.Context, path string) (stats.PrefixSummary, boo
 	return ps, true, nil
 }
 
+// Summaries is like Get but returns the summaries for each of paths, and
+// whether each was found, reading all of them at once.
+func (r *Reader) Summaries(ctx context.Context, paths []string) ([]stats.PrefixSummary, []bool, error) {
+	if r.err != nil {
+		return nil, nil, r.err
+	}
+	keys := make([]string, len(paths))
+	for i, p := range paths {
+		keys[i], _ = stats.SummaryKeys(r.sep, stats.NormalizePath(r.sep, p))
+	}
+	summaries := make([]stats.PrefixSummary, len(paths))
+	found := make([]bool, len(paths))
+	err := r.db.GetSummaries(ctx, keys, func(i int, val []byte) error {
+		if val == nil {
+			return nil
+		}
+		if err := r.decode(paths[i], val, &summaries[i]); err != nil {
+			return err
+		}
+		found[i] = true
+		return nil
+	})
+	return summaries, found, err
+}
+
 // WalkOption configures Walk.
 type WalkOption func(*walkOptions)
 
@@ -264,20 +289,23 @@ func (r *Reader) Children(ctx context.Context, path string) ([]Entry, int, error
 	}
 	norm := p.Path()
 	prefixes := p.pi.PrefixesOnly()
+	childPaths := make([]string, len(prefixes))
+	for i, fi := range prefixes {
+		childPaths[i] = join(r.sep, norm, fi.Name())
+	}
+	summaries, found, err := r.Summaries(ctx, childPaths)
+	if err != nil {
+		return nil, 0, err
+	}
 	children := make([]Entry, 0, len(prefixes))
 	missing := 0
-	for _, fi := range prefixes {
-		child := join(r.sep, norm, fi.Name())
-		ps, ok, err := r.Get(ctx, child)
-		if err != nil {
-			return nil, 0, err
-		}
-		if !ok {
+	for i, child := range childPaths {
+		if !found[i] {
 			missing++
 			continue
 		}
 		key, _ := stats.SummaryKeys(r.sep, child)
-		children = append(children, Entry{Path: child, Key: key, Depth: 1, Summary: ps})
+		children = append(children, Entry{Path: child, Key: key, Depth: 1, Summary: summaries[i]})
 	}
 	return children, missing, nil
 }

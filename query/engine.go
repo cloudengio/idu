@@ -534,15 +534,15 @@ func (e *Engine) fill(ctx context.Context, p plan, paths []string, res *Result) 
 		}
 		found = make([]bool, len(paths))
 	}
+	summaries, sumFound, err := e.sr.Summaries(ctx, paths)
+	if err != nil {
+		return err
+	}
 	res.Rows = make([]Row, 0, len(paths))
 	for i, path := range paths {
 		row := e.newRow(path)
-		ps, ok, err := e.sr.Get(ctx, path)
-		if err != nil {
-			return err
-		}
-		if ok {
-			row.Direct = &ps.Direct
+		if sumFound[i] {
+			row.Direct = &summaries[i].Direct
 		}
 		if found[i] {
 			row.Total = &totals[i]

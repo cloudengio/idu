@@ -45,6 +45,11 @@ type Reader interface {
 	// errors.
 	VisitErrors(ctx context.Context, key string, visitor func(ctx context.Context, key string, when time.Time, val []byte) bool) error
 
+	// GetSummaries calls fn with the summary stored in the summary bucket
+	// for each of keys, which are summary keys, or nil if there are none,
+	// in order. val is only valid for the duration of the call to fn.
+	GetSummaries(ctx context.Context, keys []string, fn func(i int, val []byte) error) error
+
 	// ScanSummaries iterates over summary entries in lexicographical key order,
 	// starting at exactKey and stopping once keys no longer match exactKey or
 	// childPrefix (when either is non-empty).
