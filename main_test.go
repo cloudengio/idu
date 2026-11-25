@@ -721,3 +721,22 @@ func latestReportDir(t *testing.T, dir string) string {
 	}
 	return filepath.Join(dir, newest)
 }
+
+func TestCompletions(t *testing.T) {
+	env := append(os.Environ(), "HOME="+t.TempDir())
+	for _, sh := range []string{"bash", "zsh"} {
+		out, err := runIDUEnv(env, "completions", "--program=idu", sh)
+		if err != nil {
+			t.Fatalf("completions %s: %v", sh, err)
+		}
+		for _, want := range []string{"idu", "analyze", "stats", "mcp", "tui", "completions", "--fs"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s completion output missing %q", sh, want)
+			}
+		}
+	}
+
+	if _, err := runIDUEnv(env, "completions", "fish"); err == nil {
+		t.Error("expected error for unsupported shell")
+	}
+}

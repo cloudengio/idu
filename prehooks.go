@@ -37,11 +37,12 @@ func setDefaultPreHooks(cmdSet *subcmd.CommandSetYAML) {
 	cmdSet.Set("stats", "view").MustSetPreHooks(preHooks(configHook(false))...)
 	cmdSet.Set("reports").MustSetPreHooks(preHooks(configHook(false))...)
 	// config show displays the configuration, and the files that it was
-	// read from, even if it could not be loaded; config describe and
-	// expression-syntax need nothing.
+	// read from, even if it could not be loaded; config describe,
+	// expression-syntax and completions need nothing.
 	cmdSet.Set("config").MustSetPreHooks()
 	cmdSet.Set("config", "show").MustSetPreHooks(configHook(false))
 	cmdSet.Set("expression-syntax").MustSetPreHooks()
+	cmdSet.Set("completions").MustSetPreHooks()
 }
 
 // preHooks returns config followed by the pre-hooks used by every command

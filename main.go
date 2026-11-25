@@ -25,6 +25,7 @@ import (
 	"cloudeng.io/cmdutil/flags"
 	"cloudeng.io/cmdutil/profiling"
 	"cloudeng.io/cmdutil/subcmd"
+	"cloudeng.io/cmdutil/subcmd/shells"
 	"cloudeng.io/file/filewalk"
 	"cloudeng.io/file/filewalk/asyncstat"
 )
@@ -41,6 +42,11 @@ summary: analyze disk usage using a database for incremental updates. The filesy
 commands:
   - name: expression-syntax
     summary: display the syntax for the expression language supported by commands such as analyze, find etc.
+
+  - name: completions
+    summary: generate shell completion scripts (bash or zsh)
+    arguments:
+      - <shell>
 
   - name: analyze
     summary: analyze the file system to build a database of directory and file metadata.
@@ -188,6 +194,11 @@ func newCLI() *subcmd.CommandSetYAML {
 
 	fnd := find.New(env)
 	cmdSet.Set("find").MustRunner(squashErrors(fnd.Find), &find.Flags{})
+
+	cmdSet.Set("completions").MustRunner(
+		shells.Runner(cmdSet.CommandSet, nil),
+		&shells.Flags{},
+	)
 
 	globals := subcmd.GlobalFlagSet()
 	globals.MustRegisterFlagStruct(&globalFlags, nil, nil)
