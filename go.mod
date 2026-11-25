@@ -3,11 +3,11 @@ module cloudeng.io/cmd/idu
 go 1.27.0
 
 require (
-	cloudeng.io/algo v0.0.0-20261112230521-bb2e0354f2e1
-	cloudeng.io/cmdutil v0.0.0-20261117180932-5d898ef2016d
+	cloudeng.io/algo v0.0.0-20261123235553-076c9b54dc11
+	cloudeng.io/cmdutil v0.0.0-20261125191536-81ce58458369
 	cloudeng.io/errors v0.0.14-0.20260312171538-61fcde6ce278
 	cloudeng.io/file v0.0.0-20261121043920-1504cdcec3c7
-	cloudeng.io/logging v0.0.0-20261112230521-bb2e0354f2e1
+	cloudeng.io/logging v0.0.0-20261123235553-076c9b54dc11
 	cloudeng.io/os v0.0.0-20261115225738-cfd1499040d9
 	cloudeng.io/sync v0.0.12-0.20261114222247-b205f2b1f0fa
 	cloudeng.io/text v0.0.16-0.20260624171915-da98fe9dec2b
@@ -26,8 +26,8 @@ require (
 )
 
 require (
-	cloudeng.io/sys v0.0.0-20261112230521-bb2e0354f2e1 // indirect
-	cloudeng.io/types v0.0.0-20261112230521-bb2e0354f2e1 // indirect
+	cloudeng.io/sys v0.0.0-20261123235553-076c9b54dc11 // indirect
+	cloudeng.io/types v0.0.0-20261123235553-076c9b54dc11 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
