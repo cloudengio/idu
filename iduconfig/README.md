@@ -28,6 +28,19 @@ const (
 )
 ```
 
+### DefaultLLMAPIKeyEnv, DefaultLLMTimeout
+```go
+const (
+	// DefaultLLMAPIKeyEnv is the environment variable that holds the API
+	// key for the LLM service when api_key_env is not set.
+	DefaultLLMAPIKeyEnv = "IDU_LLM_API_KEY" //nolint:gosec // G101: the name of a variable, not a credential
+
+	// DefaultLLMTimeout is the time allowed for a request to the LLM
+	// service, including a streamed response, when timeout is not set.
+	DefaultLLMTimeout = 5 * time.Minute
+)
+```
+
 ### DefaultTopN
 ```go
 const DefaultTopN = 2000
@@ -118,13 +131,6 @@ which is to be interpreted as being unbounded, if there is no such key,
 which is the case for the empty prefix and for prefixes that consist solely
 of 0xff bytes.
 
-### Func PrintLocated
-```go
-func PrintLocated(w io.Writer, loc *cmdconfig.Located)
-```
-PrintLocated writes comments naming the YAML and environment variable files
-in loc to w in the same format used by cmdconfig.ConfigCommands.Show.
-
 
 
 ## Types
@@ -134,6 +140,49 @@ type Block struct {
 	BlockSize cmdtypes.ByteSize `yaml:"size" doc:"block size used by this filesystem (e.g. 4KiB or 4096), it is only used if the space allocated to files cannot be determined automatically"`
 }
 ```
+
+
+### Type Environment
+```go
+type Environment struct {
+	// contains filtered or unexported fields
+}
+```
+Environment provides the values of environment variables defined in the
+process environment or in the .env files that a configuration was loaded
+with. It is intended for secrets, such as API keys, that should not
+appear in the YAML configuration: the YAML refers to them by name, eg.
+LLM.APIKeyEnv, and the program looks them up when it needs them, so that
+they are not part of the configuration that config show displays.
+
+The process environment takes precedence over the .env files and, among the
+.env files, a later file over an earlier one. References to other variables
+in a value from a .env file are expanded.
+
+### Functions
+
+```go
+func NewEnvironment(loc *cmdconfig.Located) (*Environment, error)
+```
+NewEnvironment returns the Environment for the .env files in loc, which may
+be nil, in which case it is the process environment alone.
+
+
+
+### Methods
+
+```go
+func (e *Environment) Files() []string
+```
+Files returns the .env files, if any, that the Environment was created from.
+
+
+```go
+func (e *Environment) Get(name string) string
+```
+Get returns the value of the named variable, or "" if it is not set.
+
+
 
 
 ### Type Files
@@ -254,6 +303,55 @@ within the range.
 func (kr *KeyRange) Location() string
 ```
 Location implements Filesystem.
+
+
+
+
+### Type LLM
+```go
+type LLM struct {
+	URL           string        `yaml:"url,omitempty" doc:"the base URL of the OpenAI compatible API, including its version prefix, eg. http://127.0.0.1:8000/v1"`
+	Model         string        `yaml:"model,omitempty" doc:"the model used by requests that do not specify one"`
+	APIKeyEnv     string        `yaml:"api_key_env,omitempty" doc:"the name of the environment variable that holds the API key, it is looked up in the process environment and then in the .env configuration files, defaults to IDU_LLM_API_KEY; no key is sent if it is not set. The key itself cannot be specified in the YAML configuration."`
+	AuthHeader    string        `yaml:"auth_header,omitempty" doc:"the HTTP header that carries the API key, defaults to Authorization, whose value is 'Bearer <key>'; any other header, eg. api-key or x-api-key, carries the key as is"`
+	Timeout       time.Duration `yaml:"timeout,omitempty" doc:"the time allowed for each request, including a streamed response, defaults to 5m"`
+	AllowInsecure bool          `yaml:"allow_insecure,omitempty" doc:"allow the API key to be sent over plain http to a host other than localhost, which is otherwise an error"`
+}
+```
+LLM configures access to an OpenAI compatible API, eg. one served by oMLX,
+llama-server or a hosted service. It deliberately has no field for the API
+key: the key is read from the environment variable named by APIKeyEnv,
+which may be set in the process environment or in one of the .env files
+that the configuration is loaded with, see Environment, so that it is never
+stored in, or displayed as part of, the YAML configuration.
+
+### Methods
+
+```go
+func (l LLM) APIKeyEnvOrDefault() string
+```
+APIKeyEnvOrDefault returns APIKeyEnv, or DefaultLLMAPIKeyEnv if it is not
+set.
+
+
+```go
+func (l LLM) Configured() bool
+```
+Configured returns true if the LLM service has been configured, ie. its URL
+is set.
+
+
+```go
+func (l LLM) TimeoutOrDefault() time.Duration
+```
+TimeoutOrDefault returns Timeout, or DefaultLLMTimeout if it is not set.
+
+
+```go
+func (l *LLM) UnmarshalYAML(value *yaml.Node) error
+```
+UnmarshalYAML implements yaml.Unmarshaler, rejecting unknown fields,
+in particular an attempt to specify the API key itself.
 
 
 
@@ -454,6 +552,7 @@ type T struct {
 	ConfigFiles Files                 `yaml:"filesystem_config_files,omitempty" doc:"other configuration files to search for and merge"`
 	Filesystems Filesystems           `yaml:"filesystems" doc:"the filesystem configurations to be analyzed, see Filesystem entries below"`
 	Logging     cmdutil.LoggingConfig `yaml:"logging,omitempty" doc:"logging configuration, it may be overridden by the --log-* command line flags"`
+	LLM         LLM                   `yaml:"llm,omitempty" doc:"the OpenAI compatible API used by idu's AI features; its API key is read from an environment variable, which may be set in a .env configuration file, rather than from the YAML configuration"`
 }
 ```
 

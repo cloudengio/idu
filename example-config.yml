@@ -16,6 +16,18 @@ logging:
   # file: /tmp/idu.log  # defaults to stderr, - for stdout
   format: json      # json or text
 
+# The OpenAI compatible API used by idu's AI features, eg. one served
+# locally by oMLX or llama-server. The API key is not stored here: it is
+# read from the environment variable named by api_key_env, which may be set
+# in the shell or in a .env file alongside this one, eg.
+# $HOME/.config/idu/secrets.env containing IDU_LLM_API_KEY=... (and readable
+# only by its owner).
+llm:
+  url: http://127.0.0.1:8000/v1
+  model: Qwen3-8B-4bit
+  api_key_env: IDU_LLM_API_KEY  # the default
+  timeout: 5m
+
 vars:
   db_root: ./local-database
 

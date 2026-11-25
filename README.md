@@ -58,6 +58,32 @@ You can also pass explicit files via `--config=a.yaml,b.yaml` (or repeat
 validation, `vars:` YAML variables, `.env`/environment `${VAR}` expansion,
 YAML anchors (`&anchor`) and sequence merges (`- <<: *anchor`).
 
+### Secrets and the LLM service
+
+Secrets, such as API keys, belong in a `.env` file rather than in the YAML
+configuration, so that they are never displayed by `idu config show`. The
+optional top-level `llm:` section configures the OpenAI compatible API used by
+idu's AI features and names the variable that holds its key, which is looked
+up in the process environment and then in the `.env` files:
+
+```yaml
+llm:
+  url: http://127.0.0.1:8000/v1   # eg. oMLX or llama-server
+  model: Qwen3-8B-4bit
+  api_key_env: IDU_LLM_API_KEY     # the default
+```
+
+```sh
+# $HOME/.config/idu/secrets.env, readable only by its owner
+IDU_LLM_API_KEY=...
+```
+
+The key cannot be specified in the `llm:` section itself, it is only sent to
+the configured URL (redirects are not followed), and it is not sent over plain
+`http` to a host other than localhost unless `allow_insecure: true` is set.
+`idu llm models` and `idu llm chat <prompt>` check that the service is
+reachable.
+
 Each configuration has top-level keys `filesystems:` and optional `filesystem_config_files:`.
 A minimal `$HOME/.config/idu/config.yaml` looks like:
 

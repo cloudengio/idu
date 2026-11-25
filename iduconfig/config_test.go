@@ -583,6 +583,9 @@ func TestExampleConfig(t *testing.T) {
 	if p, ok := settingsForName(cfg, "home"); !ok || p.SnapshotDir != "./snapshots/home" || p.CompactionInterval() != 7*24*time.Hour+12*time.Hour {
 		t.Errorf("expected name home with snapshot_dir ./snapshots/home and 7d12h compact interval in example-config.yml, got %+v, %v", p, ok)
 	}
+	if !cfg.LLM.Configured() || cfg.LLM.APIKeyEnvOrDefault() != iduconfig.DefaultLLMAPIKeyEnv {
+		t.Errorf("expected an llm section in example-config.yml, got %+v", cfg.LLM)
+	}
 	if _, ok := cfg.ForPrefix("/labs/asbhatt/data"); !ok {
 		t.Errorf("expected /labs/asbhatt in example-config.yml")
 	}
@@ -621,6 +624,8 @@ func TestDocumentation(t *testing.T) {
 		"Hardlink deduplication strategies",
 		"summaries:",
 		"rescan:",
+		"llm:",
+		"api_key_env:",
 	} {
 		if !strings.Contains(got, expected) {
 			t.Errorf("documentation does not contain: %q\n%s", expected, got)

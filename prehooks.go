@@ -55,17 +55,25 @@ func noopPostHook(id string) subcmd.PostHook {
 }
 
 // configHook returns a pre-hook that loads the configuration, adds it, the
-// files it was read from and the error, if any, encountered loading it to
-// the context, see cli.ConfigLoadError, and sets env's Config and FS. The
-// error is returned if required is true.
+// files it was read from, the environment variables they define and the
+// error, if any, encountered loading it to the context, see
+// cli.ConfigLoadError, and sets env's Config, Environment and FS. The error
+// is returned if required is true.
 func configHook(required bool) subcmd.PreHook {
 	return func(ctx context.Context) (context.Context, string, subcmd.PostHook, error) {
 		const id = "config"
 		cfg, loc, err := iduconfig.Load(ctx, &globalFlags.Config)
+		vars, verr := iduconfig.NewEnvironment(loc)
+		if err == nil {
+			// An error reading the .env files is already reported by Load.
+			err = verr
+		}
 		env.Config = cfg
+		env.Environment = vars
 		env.FS = globalFlags.FS
 		ctx = cmdutil.ContextWithValue(ctx, cfg)
 		ctx = cmdutil.ContextWithValue(ctx, loc)
+		ctx = cmdutil.ContextWithValue(ctx, vars)
 		ctx = cli.WithConfigLoadError(ctx, err)
 		if !required {
 			err = nil

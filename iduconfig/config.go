@@ -370,6 +370,7 @@ type T struct {
 	ConfigFiles Files                 `yaml:"filesystem_config_files,omitempty" doc:"other configuration files to search for and merge"`
 	Filesystems Filesystems           `yaml:"filesystems" doc:"the filesystem configurations to be analyzed, see Filesystem entries below"`
 	Logging     cmdutil.LoggingConfig `yaml:"logging,omitempty" doc:"logging configuration, it may be overridden by the --log-* command line flags"`
+	LLM         LLM                   `yaml:"llm,omitempty" doc:"the OpenAI compatible API used by idu's AI features; its API key is read from an environment variable, which may be set in a .env configuration file, rather than from the YAML configuration"`
 }
 
 // UnmarshalYAML implements yaml.Unmarshaler so that YAML documents can be
@@ -496,6 +497,9 @@ func (t *T) SetDefaults() {
 // Validate validates the configuration and initializes derived state such as
 // the disk usage calculator for each prefix.
 func (t *T) Validate() error {
+	if err := t.LLM.validate(); err != nil {
+		return err
+	}
 	seenNames := map[string]int{}
 	for i, f := range t.Filesystems {
 		p := f.Config()

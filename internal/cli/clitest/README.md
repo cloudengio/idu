@@ -21,6 +21,13 @@ func CreateHardlinkTree(t *testing.T, root string)
 CreateHardlinkTree creates a tree with hard links to files in sibling
 directories whose names share a string prefix (a, a-b, ab).
 
+### Func EnsureDirModTimeChanged
+```go
+func EnsureDirModTimeChanged(t *testing.T, dir string, fn func())
+```
+EnsureDirModTimeChanged runs fn and advances dir's modification time if the
+filesystem timestamp did not advance (e.g. due to coarse clock ticks).
+
 ### Func LinkUnchanged
 ```go
 func LinkUnchanged(t *testing.T, root string)

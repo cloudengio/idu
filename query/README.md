@@ -224,11 +224,12 @@ type Query struct {
 	// Limit is the maximum number of rows to return, DefaultLimit if zero.
 	Limit int
 	// Filter is an expression, as accepted by idu find and stats, that
-	// rows must match. Filters are not supported.
+	// files must match; it is only supported for rankings, ie. Scope
+	// Subtree without Level.
 	Filter string
 	// Level groups the rows by the prefixes at the specified depth below
-	// the root. Only the depth of Within's children is supported, which is
-	// equivalent to Scope Children.
+	// the root. Only depths below Within are supported; the depth of
+	// Within's children is equivalent to Scope Children.
 	Level int
 }
 ```

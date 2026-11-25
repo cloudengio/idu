@@ -150,6 +150,10 @@ create the loggers for filesystems with their own logging configuration.
 type Env struct {
 	// Config is the loaded configuration.
 	Config iduconfig.T
+	// Environment provides the variables defined by the process
+	// environment and the .env files that the configuration was loaded
+	// with, eg. API keys, which are not part of the configuration itself.
+	Environment *iduconfig.Environment
 	// FS is the name of the filesystem to operate on, ie. the value of
 	// the global --fs flag.
 	FS string

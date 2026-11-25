@@ -13,6 +13,7 @@ import (
 
 	"cloudeng.io/cmd/idu/cli/analyze"
 	"cloudeng.io/cmd/idu/cli/find"
+	"cloudeng.io/cmd/idu/cli/llm"
 	"cloudeng.io/cmd/idu/cli/mcp"
 	"cloudeng.io/cmd/idu/cli/progress"
 	"cloudeng.io/cmd/idu/cli/reports"
@@ -64,6 +65,16 @@ commands:
 
   - name: mcp
     summary: run a Model Context Protocol (MCP) server, on stdin/stdout, that provides read-only tools for AI agents to query the databases of the configured filesystems, eg. claude mcp add idu -- idu mcp. The tools report the configured filesystems, the usage of a prefix and its children, the top-N subtrees, prefixes, users, groups and hotspots by any metric, and the errors recorded by analyze, and query the row model, see the query package. A tool call may select a filesystem by name or root; otherwise an absolute prefix selects the filesystem with the longest root that contains it, and failing that the default is used, which is the filesystem named by --fs, the only one configured, or the local filesystem, ie. the one whose root is /.
+
+  - name: llm
+    summary: access the OpenAI compatible API configured by the llm section of the configuration, whose API key is read from the environment variable named by llm.api_key_env, IDU_LLM_API_KEY by default, which may be set in a .env configuration file rather than in the YAML configuration.
+    commands:
+      - name: models
+        summary: list the models provided by the API, marking the configured default.
+      - name: chat
+        summary: send a prompt to the API and display the response, the prompt is read from stdin if it is -.
+        arguments:
+          - <prompt>...
 
   - name: find
     summary: find prefixes/files in the database that match the supplied expression.
@@ -179,6 +190,10 @@ func newCLI() *subcmd.CommandSetYAML {
 	rpts := reports.New(env)
 	cmdSet.Set("reports", "generate").MustRunner(squashErrors(rpts.Generate), &reports.GenerateFlags{})
 	cmdSet.Set("reports", "locate").MustRunner(squashErrors(rpts.Locate), &reports.LocateFlags{})
+
+	llmCmds := llm.New(env)
+	cmdSet.Set("llm", "models").MustRunner(squashErrors(llmCmds.Models), &llm.ModelsFlags{})
+	cmdSet.Set("llm", "chat").MustRunner(squashErrors(llmCmds.Chat), &llm.ChatFlags{})
 
 	mcpCmds := mcp.New(env)
 	cmdSet.Set("mcp").MustRunner(squashErrors(mcpCmds.MCP), &mcp.Flags{})
