@@ -16,6 +16,7 @@
 //	processed.
 //
 //	expression-syntax - display the syntax for the expression language supported by commands such as analyze, find etc.
+//	      completions - generate shell completion scripts (bash or zsh)
 //	          analyze - analyze the file system to build a database of directory and file metadata.
 //	             logs - list the log of past operations stored in the database.
 //	           errors - list the errors stored in the database
